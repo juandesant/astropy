@@ -1,15 +1,11 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
-from .core import *
-from .kernels import *
-from .utils import discretize_model
+from .core import *  # noqa
+from .kernels import *  # noqa
+from .utils import discretize_model  # noqa
 
-try:
-    # Not guaranteed available at setup time
-    from .convolve import convolve, convolve_fft
-except ImportError:
-    if not _ASTROPY_SETUP_:
-        raise
+from .convolve import convolve, convolve_fft, interpolate_replace_nans, convolve_models  # noqa
+
+# Deprecated kernels that are not defined in __all__
+from .kernels import MexicanHat1DKernel, MexicanHat2DKernel

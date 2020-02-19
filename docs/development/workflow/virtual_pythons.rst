@@ -3,9 +3,9 @@
 .. include:: links.inc
 .. _virtual_envs:
 
-===========================
+***************************
 Python virtual environments
-===========================
+***************************
 
 If you plan to do regular work on astropy you should do your development in
 a python virtual environment. Conceptually a virtual environment is a
@@ -47,7 +47,7 @@ accomplish each step are given for both `conda`_ and `virtualenvwrapper`_:
 
 
 Set up for virtual environments
--------------------------------
+===============================
 
 * `virtualenvwrapper`_:
 
@@ -65,7 +65,7 @@ Set up for virtual environments
 .. _list_env:
 
 List virtual environments
--------------------------
+=========================
 
 You do not need to list the virtual environments you have created before using
 them...but sooner or later you will forget what environments you have defined
@@ -84,7 +84,7 @@ and this is the easy way to find out.
 .. _create_env:
 
 Create a new virtual environment
---------------------------------
+================================
 
 This needs to be done once for each virtual environment you want. There is one
 important choice you need to make when you create a virtual environment:
@@ -109,12 +109,12 @@ environment.
     + Make an environment called ``ENV`` with all of the packages in your normal
       python environment::
 
-         ``mkvirtualenv --system-site-packages ENV``
+         mkvirtualenv --system-site-packages ENV
 
     + Omit the option ``--system-site-packages`` to create an environment
       without the python packages installed in your normal python environment.
     + Environments created with `virtualenvwrapper`_ always include `pip`_
-      and `setuptools <https://pythonhosted.org/setuptools/>`_ so that you
+      and `setuptools <https://setuptools.readthedocs.io>`_ so that you
       can install packages within the virtual environment.
     + More details and examples are in the
       `virtualenvwrapper command documentation`_.
@@ -122,17 +122,23 @@ environment.
     + Make an environment called ``ENV`` with all of the packages in your main
       anaconda environment::
 
-        ``conda create -n ENV anaconda``
+        conda create -n ENV anaconda
 
     + More details, and examples that start with none of the packages from
       your normal python environment, are in the
       `documentation for the conda command`_ and the
       `blog post announcing anaconda environments`_.
 
+    + If astropy is installed in your environment, you may need to uninstall it
+      in order for the development version to install properly. You can do this
+      with the following command::
+
+        conda uninstall astropy
+
 .. _activate_env:
 
 Activate a virtual environment
-------------------------------
+==============================
 
 To use a new virtual environment you may need to activate it;
 `virtualenvwrapper`_ will try to automatically activate your new environment
@@ -154,13 +160,13 @@ addition to activating new ones.
 
 * ` conda`: Activate the environment ``ENV`` with::
 
-      source activate ENV
+      conda activate ENV
 
 
 .. _deactivate_env:
 
 Deactivate a virtual environment
---------------------------------
+================================
 
 At some point you may want to go back to your normal python environment. Do
 that with:
@@ -169,12 +175,12 @@ that with:
     + Note that in ``virtualenvwrapper 4.1.1`` the output of
       ``mkvirtualenv`` says you should use ``source deactivate``; that does
       not seem to actually work.
-* `conda`_: ``source deactivate``
+* `conda`_: ``conda deactivate``
 
 .. _delete_env:
 
 Delete a virtual environment
-----------------------------
+============================
 
 In both `virtualenvwrapper`_ and `conda`_ you can simply delete the directory in
 which the ``ENV`` is located; both also provide commands to make that a bit easier.
@@ -182,8 +188,8 @@ which the ``ENV`` is located; both also provide commands to make that a bit easi
 * `virtualenvwrapper`_: ``rmvirtualenv ENV``
 * `conda`_: ``conda remove --all -n ENV``
 
-.. _documentation for virtualenvwrapper: http://virtualenvwrapper.readthedocs.io/en/latest/install.html
-.. _virtualenvwrapper command documentation: http://virtualenvwrapper.readthedocs.io/en/latest/command_ref.html
-.. _documentation for the conda command: http://docs.continuum.io/conda/examples/create.html
-.. _blog post announcing anaconda environments: http://www.continuum.io/blog/conda
+.. _documentation for virtualenvwrapper: https://virtualenvwrapper.readthedocs.io/en/latest/install.html
+.. _virtualenvwrapper command documentation: https://virtualenvwrapper.readthedocs.io/en/latest/command_ref.html
+.. _documentation for the conda command: https://docs.conda.io/projects/conda/en/latest/commands.html
+.. _blog post announcing anaconda environments: https://www.anaconda.com/category/developer-blog/
 

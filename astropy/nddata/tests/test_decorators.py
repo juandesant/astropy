@@ -1,18 +1,22 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-
 import inspect
 
+import pytest
 import numpy as np
 
-from ...extern import six
-from ...tests.helper import catch_warnings, pytest
-from ... import units as u
+from astropy.tests.helper import catch_warnings
+from astropy.utils.exceptions import AstropyUserWarning
+from astropy import units as u
+from astropy.wcs import WCS
 
-from ..nddata import NDData
-from ..decorators import support_nddata
+from astropy.nddata.nddata import NDData
+from astropy.nddata.decorators import support_nddata
+from astropy.nddata import _testing as nd_testing
+
+
+class CCDData(NDData):
+    pass
 
 
 @support_nddata
@@ -33,7 +37,7 @@ def test_pass_numpy():
 def test_pass_all_separate():
 
     data_in = np.array([1, 2, 3])
-    wcs_in = "the wcs"
+    wcs_in = WCS(naxis=1)
     unit_in = u.Jy
 
     data_out, wcs_out, unit_out = wrapped_function_1(data=data_in, wcs=wcs_in, unit=unit_in)
@@ -46,7 +50,7 @@ def test_pass_all_separate():
 def test_pass_nddata():
 
     data_in = np.array([1, 2, 3])
-    wcs_in = "the wcs"
+    wcs_in = WCS(naxis=1)
     unit_in = u.Jy
 
     nddata_in = NDData(data_in, wcs=wcs_in, unit=unit_in)
@@ -61,7 +65,7 @@ def test_pass_nddata():
 def test_pass_nddata_and_explicit():
 
     data_in = np.array([1, 2, 3])
-    wcs_in = "the wcs"
+    wcs_in = WCS(naxis=1)
     unit_in = u.Jy
     unit_in_alt = u.mJy
 
@@ -82,7 +86,7 @@ def test_pass_nddata_and_explicit():
 def test_pass_nddata_ignored():
 
     data_in = np.array([1, 2, 3])
-    wcs_in = "the wcs"
+    wcs_in = WCS(naxis=1)
     unit_in = u.Jy
 
     nddata_in = NDData(data_in, wcs=wcs_in, unit=unit_in, mask=[0, 1, 0])
@@ -179,11 +183,178 @@ def test_wrap_preserve_signature_docstring():
     if wrapped_function_6.__doc__ is not None:
         assert wrapped_function_6.__doc__.strip() == "An awesome function"
 
-    if six.PY3:
-        signature = inspect.formatargspec(
-            *inspect.getfullargspec(wrapped_function_6))
-    else:
-        signature = inspect.formatargspec(
-            *inspect.getargspec(wrapped_function_6))
+    signature = inspect.signature(wrapped_function_6)
 
-    assert signature == "(data, wcs=None, unit=None)"
+    assert str(signature) == "(data, wcs=None, unit=None)"
+
+
+def test_setup_failures1():
+    # repack but no returns
+    with pytest.raises(ValueError):
+        support_nddata(repack=True)
+
+
+def test_setup_failures2():
+    # returns but no repack
+    with pytest.raises(ValueError):
+        support_nddata(returns=['data'])
+
+
+def test_setup_failures9():
+    # keeps but no repack
+    with pytest.raises(ValueError):
+        support_nddata(keeps=['unit'])
+
+
+def test_setup_failures3():
+    # same attribute in keeps and returns
+    with pytest.raises(ValueError):
+        support_nddata(repack=True, keeps=['mask'], returns=['data', 'mask'])
+
+
+def test_setup_failures4():
+    # function accepts *args
+    with pytest.raises(ValueError):
+        @support_nddata
+        def test(data, *args):
+            pass
+
+
+def test_setup_failures10():
+    # function accepts **kwargs
+    with pytest.raises(ValueError):
+        @support_nddata
+        def test(data, **kwargs):
+            pass
+
+
+def test_setup_failures5():
+    # function accepts *args (or **kwargs)
+    with pytest.raises(ValueError):
+        @support_nddata
+        def test(data, *args):
+            pass
+
+
+def test_setup_failures6():
+    # First argument is not data
+    with pytest.raises(ValueError):
+        @support_nddata
+        def test(img):
+            pass
+
+
+def test_setup_failures7():
+    # accepts CCDData but was given just an NDData
+    with pytest.raises(TypeError):
+        @support_nddata(accepts=CCDData)
+        def test(data):
+            pass
+        test(NDData(np.ones((3, 3))))
+
+
+def test_setup_failures8():
+    # function returns a different amount of arguments than specified. Using
+    # NDData here so we don't get into troubles when creating a CCDData without
+    # unit!
+    with pytest.raises(ValueError):
+        @support_nddata(repack=True, returns=['data', 'mask'])
+        def test(data):
+            return 10
+        test(NDData(np.ones((3, 3))))  # do NOT use CCDData here.
+
+
+def test_setup_failures11():
+    # function accepts no arguments
+    with pytest.raises(ValueError):
+        @support_nddata
+        def test():
+            pass
+
+
+def test_setup_numpyarray_default():
+    # It should be possible (even if it's not advisable to use mutable
+    # defaults) to have a numpy array as default value.
+    @support_nddata
+    def func(data, wcs=np.array([1, 2, 3])):
+        return wcs
+
+
+def test_still_accepts_other_input():
+    @support_nddata(repack=True, returns=['data'])
+    def test(data):
+        return data
+    assert isinstance(test(NDData(np.ones((3, 3)))), NDData)
+    assert isinstance(test(10), int)
+    assert isinstance(test([1, 2, 3]), list)
+
+
+def test_accepting_property_normal():
+    # Accepts a mask attribute and takes it from the input
+    @support_nddata
+    def test(data, mask=None):
+        return mask
+
+    ndd = NDData(np.ones((3, 3)))
+    assert test(ndd) is None
+    ndd._mask = np.zeros((3, 3))
+    assert np.all(test(ndd) == 0)
+    # Use the explicitly given one (raises a Warning)
+    with catch_warnings(AstropyUserWarning) as w:
+        assert test(ndd, mask=10) == 10
+        assert len(w) == 1
+
+
+def test_parameter_default_identical_to_explicit_passed_argument():
+    # If the default is identical to the explicitly passed argument this
+    # should still raise a Warning and use the explicit one.
+    @support_nddata
+    def func(data, meta={'a': 1}):
+        return meta
+
+    with catch_warnings(AstropyUserWarning) as w:
+        assert func(NDData(1, meta={'b': 2}), {'a': 1}) == {'a': 1}
+        assert len(w) == 1
+
+    with catch_warnings(AstropyUserWarning) as w:
+        assert func(NDData(1, meta={'b': 2})) == {'b': 2}
+        assert len(w) == 0
+
+
+def test_accepting_property_notexist():
+    # Accepts flags attribute but NDData doesn't have one
+    @support_nddata
+    def test(data, flags=10):
+        return flags
+
+    ndd = NDData(np.ones((3, 3)))
+    test(ndd)
+
+
+def test_accepting_property_translated():
+    # Accepts a error attribute and we want to pass in uncertainty!
+    @support_nddata(mask='masked')
+    def test(data, masked=None):
+        return masked
+
+    ndd = NDData(np.ones((3, 3)))
+    assert test(ndd) is None
+    ndd._mask = np.zeros((3, 3))
+    assert np.all(test(ndd) == 0)
+    # Use the explicitly given one (raises a Warning)
+    with catch_warnings(AstropyUserWarning) as w:
+        assert test(ndd, masked=10) == 10
+        assert len(w) == 1
+
+
+def test_accepting_property_meta_empty():
+    # Meta is always set (OrderedDict) so it has a special case that it's
+    # ignored if it's empty but not None
+    @support_nddata
+    def test(data, meta=None):
+        return meta
+
+    ndd = NDData(np.ones((3, 3)))
+    assert test(ndd) is None
+    ndd._meta = {'a': 10}
+    assert test(ndd) == {'a': 10}

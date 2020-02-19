@@ -4,8 +4,6 @@
 This module contains simple functions for model selection.
 """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 import numpy as np
 
 __all__ = ['bayesian_info_criterion', 'bayesian_info_criterion_lsq',
@@ -16,7 +14,7 @@ __doctest_requires__ = {'bayesian_info_criterion_lsq': ['scipy'],
 
 
 def bayesian_info_criterion(log_likelihood, n_params, n_samples):
-    """ Computes the Bayesian Information Criterion (BIC) given the log of the
+    r""" Computes the Bayesian Information Criterion (BIC) given the log of the
     likelihood function evaluated at the estimated (or analytically derived)
     parameters, the number of parameters, and the number of samples.
 
@@ -29,7 +27,7 @@ def bayesian_info_criterion(log_likelihood, n_params, n_samples):
 
     .. math::
 
-        \mathrm{BIC} = k \\ln(n) - 2L,
+        \mathrm{BIC} = k \ln(n) - 2L,
 
     in which :math:`n` is the sample size, :math:`k` is the number of free
     parameters, and :math:`L` is the log likelihood function of the model
@@ -104,18 +102,18 @@ def bayesian_info_criterion(log_likelihood, n_params, n_samples):
     .. [2] Wikipedia. Bayesian Information Criterion.
        <https://en.wikipedia.org/wiki/Bayesian_information_criterion>
     .. [3] Origin Lab. Comparing Two Fitting Functions.
-       <http://www.originlab.com/doc/Origin-Help/PostFit-CompareFitFunc>
+       <https://www.originlab.com/doc/Origin-Help/PostFit-CompareFitFunc>
     .. [4] Liddle, A. R. Information Criteria for Astrophysical Model
-       Selection. 2008. <http://arxiv.org/pdf/astro-ph/0701113v2.pdf>
+       Selection. 2008. <https://arxiv.org/pdf/astro-ph/0701113v2.pdf>
     .. [5] Liddle, A. R. How many cosmological parameters? 2008.
-       <http://arxiv.org/pdf/astro-ph/0401198v3.pdf>
+       <https://arxiv.org/pdf/astro-ph/0401198v3.pdf>
     """
 
     return n_params*np.log(n_samples) - 2.0*log_likelihood
 
 
 def bayesian_info_criterion_lsq(ssr, n_params, n_samples):
-    """
+    r"""
     Computes the Bayesian Information Criterion (BIC) assuming that the
     observations come from a Gaussian distribution.
 
@@ -123,7 +121,7 @@ def bayesian_info_criterion_lsq(ssr, n_params, n_samples):
 
     .. math::
 
-        \mathrm{BIC} = n\\ln\\left(\\dfrac{\mathrm{SSR}}{n}\\right) + k\\ln(n)
+        \mathrm{BIC} = n\ln\left(\dfrac{\mathrm{SSR}}{n}\right) + k\ln(n)
 
     in which :math:`n` is the sample size, :math:`k` is the number of free
     parameters and :math:`\mathrm{SSR}` stands for the sum of squared residuals
@@ -163,8 +161,10 @@ def bayesian_info_criterion_lsq(ssr, n_params, n_samples):
     >>> x = np.linspace(-5., 5., 200)
     >>> y = 3 * np.exp(-0.5 * (x - 1.3)**2 / 0.8**2)
     >>> y += np.random.normal(0., 0.2, x.shape)
-    >>> # Fit the data using a Box model
-    >>> t_init = models.Trapezoid1D(amplitude=1., x_0=0., width=1., slope=0.5)
+    >>> # Fit the data using a Box model.
+    >>> # Bounds are not really needed but included here to demonstrate usage.
+    >>> t_init = models.Trapezoid1D(amplitude=1., x_0=0., width=1., slope=0.5,
+    ...                             bounds={"x_0": (-5., 5.)})
     >>> fit_t = fitting.LevMarLSQFitter()
     >>> t = fit_t(t_init, x, y)
     >>> # Fit the data using a Gaussian
@@ -189,7 +189,7 @@ def bayesian_info_criterion_lsq(ssr, n_params, n_samples):
     .. [1] Wikipedia. Bayesian Information Criterion.
        <https://en.wikipedia.org/wiki/Bayesian_information_criterion>
     .. [2] Origin Lab. Comparing Two Fitting Functions.
-       <http://www.originlab.com/doc/Origin-Help/PostFit-CompareFitFunc>
+       <https://www.originlab.com/doc/Origin-Help/PostFit-CompareFitFunc>
     .. [3] Astropy Models and Fitting
         <http://docs.astropy.org/en/stable/modeling>
     """
@@ -199,7 +199,7 @@ def bayesian_info_criterion_lsq(ssr, n_params, n_samples):
 
 
 def akaike_info_criterion(log_likelihood, n_params, n_samples):
-    """
+    r"""
     Computes the Akaike Information Criterion (AIC).
 
     Like the Bayesian Information Criterion, the AIC is a measure of
@@ -222,7 +222,7 @@ def akaike_info_criterion(log_likelihood, n_params, n_samples):
 
     .. math::
 
-        \mathrm{AIC} = 2(k - L) + \\dfrac{2k(k+1)}{n - k - 1}
+        \mathrm{AIC} = 2(k - L) + \dfrac{2k(k+1)}{n - k - 1}
 
     Rule of thumb [1]_:
 
@@ -280,19 +280,19 @@ def akaike_info_criterion(log_likelihood, n_params, n_samples):
     ----------
     .. [1] Cavanaugh, J. E.  Model Selection Lecture II: The Akaike
        Information Criterion.
-       <http://myweb.uiowa.edu/cavaaugh/ms_lec_2_ho.pdf>
+       <http://machinelearning102.pbworks.com/w/file/fetch/47699383/ms_lec_2_ho.pdf>
     .. [2] Mazerolle, M. J. Making sense out of Akaike's Information
        Criterion (AIC): its use and interpretation in model selection and
        inference from ecological data.
-       <http://theses.ulaval.ca/archimede/fichiers/21842/apa.html>
+       <https://corpus.ulaval.ca/jspui/handle/20.500.11794/17461>
     .. [3] Wikipedia. Akaike Information Criterion.
        <https://en.wikipedia.org/wiki/Akaike_information_criterion>
     .. [4] Origin Lab. Comparing Two Fitting Functions.
-       <http://www.originlab.com/doc/Origin-Help/PostFit-CompareFitFunc>
+       <https://www.originlab.com/doc/Origin-Help/PostFit-CompareFitFunc>
     .. [5] Liddle, A. R. Information Criteria for Astrophysical Model
-       Selection. 2008. <http://arxiv.org/pdf/astro-ph/0701113v2.pdf>
+       Selection. 2008. <https://arxiv.org/pdf/astro-ph/0701113v2.pdf>
     .. [6] Liddle, A. R. How many cosmological parameters? 2008.
-       <http://arxiv.org/pdf/astro-ph/0401198v3.pdf>
+       <https://arxiv.org/pdf/astro-ph/0401198v3.pdf>
     """
     # Correction in case of small number of observations
     if n_samples/float(n_params) >= 40.0:
@@ -305,7 +305,7 @@ def akaike_info_criterion(log_likelihood, n_params, n_samples):
 
 
 def akaike_info_criterion_lsq(ssr, n_params, n_samples):
-    """
+    r"""
     Computes the Akaike Information Criterion assuming that the observations
     are Gaussian distributed.
 
@@ -313,15 +313,15 @@ def akaike_info_criterion_lsq(ssr, n_params, n_samples):
 
     .. math::
 
-        \mathrm{AIC} = n\\ln\\left(\\dfrac{\mathrm{SSR}}{n}\\right) + 2k
+        \mathrm{AIC} = n\ln\left(\dfrac{\mathrm{SSR}}{n}\right) + 2k
 
     In case that the sample size is not "large enough", a correction is
     applied, i.e.
 
     .. math::
 
-        \mathrm{AIC} = n\\ln\\left(\\dfrac{\mathrm{SSR}}{n}\\right) + 2k +
-                       \\dfrac{2k(k+1)}{n-k-1}
+        \mathrm{AIC} = n\ln\left(\dfrac{\mathrm{SSR}}{n}\right) + 2k +
+                       \dfrac{2k(k+1)}{n-k-1}
 
 
     in which :math:`n` is the sample size, :math:`k` is the number of free
@@ -364,7 +364,7 @@ def akaike_info_criterion_lsq(ssr, n_params, n_samples):
     >>> # Fit with three Gaussians
     >>> g3_init = (models.Gaussian1D(.1, 0, 0.1)
     ...            + models.Gaussian1D(.1, 0.2, 0.15)
-    ...            + models.Gaussian1D(2., .4, 0.1))
+    ...            + models.Gaussian1D(2.4, .4, 0.1))
     >>> fitter = fitting.LevMarLSQFitter()
     >>> g3_fit = fitter(g3_init, x, y)
     >>> # Fit with two Gaussians
@@ -379,7 +379,7 @@ def akaike_info_criterion_lsq(ssr, n_params, n_samples):
     >>> ssr_g2 = np.sum((g2_fit(x) - y)**2.0)
     >>> ssr_g1 = np.sum((g1_fit(x) - y)**2.0)
     >>> akaike_info_criterion_lsq(ssr_g3, 9, x.shape[0]) # doctest: +FLOAT_CMP
-    -656.32589850659224
+    -634.5257517810961
     >>> akaike_info_criterion_lsq(ssr_g2, 6, x.shape[0]) # doctest: +FLOAT_CMP
     -662.83834510232043
     >>> akaike_info_criterion_lsq(ssr_g1, 3, x.shape[0]) # doctest: +FLOAT_CMP
@@ -387,16 +387,14 @@ def akaike_info_criterion_lsq(ssr, n_params, n_samples):
 
     Hence, from the AIC values, we would prefer to choose the model g2_fit.
     However, we can considerably support the model g3_fit, since the
-    difference in AIC is about 6.5. We should reject the model g1_fit.
+    difference in AIC is about 2.4. We should reject the model g1_fit.
 
     References
     ----------
-    .. [1] Akaike Information Criteria
-       <http://avesbiodiv.mncn.csic.es/estadistica/ejemploaic.pdf>
-    .. [2] Hu, S. Akaike Information Criterion.
-       <http://www4.ncsu.edu/~shu3/Presentation/AIC.pdf>
-    .. [3] Origin Lab. Comparing Two Fitting Functions.
-       <http://www.originlab.com/doc/Origin-Help/PostFit-CompareFitFunc>
+    .. [1] Akaike Information Criterion.
+       <https://en.wikipedia.org/wiki/Akaike_information_criterion>
+    .. [2] Origin Lab. Comparing Two Fitting Functions.
+       <https://www.originlab.com/doc/Origin-Help/PostFit-CompareFitFunc>
     """
 
     return akaike_info_criterion(-0.5 * n_samples * np.log(ssr / n_samples),

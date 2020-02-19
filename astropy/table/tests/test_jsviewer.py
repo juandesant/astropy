@@ -1,9 +1,16 @@
 from os.path import abspath, dirname, join
 import textwrap
 
-from ..table import Table
-from ... import extern
-from ...tests.helper import pytest
+import pytest
+
+from astropy.table.table import Table
+from astropy import extern
+
+try:
+    import bleach  # noqa
+    HAS_BLEACH = True
+except ImportError:
+    HAS_BLEACH = False
 
 try:
     import IPython  # pylint: disable=W0611
@@ -12,7 +19,7 @@ except ImportError:
 else:
     HAS_IPYTHON = True
 
-EXTERN_DIR = abspath(dirname(extern.__file__))
+EXTERN_DIR = abspath(join(dirname(extern.__file__), 'jquery', 'data'))
 
 REFERENCE = """
 <html>
@@ -32,12 +39,30 @@ table.dataTable {width: auto !important; margin: 0 !important;}
  </head>
  <body>
   <script>
+var astropy_sort_num = function(a, b) {
+    var a_num = parseFloat(a);
+    var b_num = parseFloat(b);
+
+    if (isNaN(a_num) && isNaN(b_num))
+        return ((a < b) ? -1 : ((a > b) ? 1 : 0));
+    else if (!isNaN(a_num) && !isNaN(b_num))
+        return ((a_num < b_num) ? -1 : ((a_num > b_num) ? 1 : 0));
+    else
+        return isNaN(a_num) ? -1 : 1;
+}
+
+jQuery.extend( jQuery.fn.dataTableExt.oSort, {
+    "optionalnum-asc": astropy_sort_num,
+    "optionalnum-desc": function (a,b) { return -astropy_sort_num(a, b); }
+});
+
 $(document).ready(function() {
     $('#%(table_id)s').dataTable({
-        "order": [],
-        "iDisplayLength": %(length)s,
-        "aLengthMenu": [[%(display_length)s, -1], [%(display_length)s, 'All']],
-        "pagingType": "full_numbers"
+        order: [],
+        pageLength: %(length)s,
+        lengthMenu: [[%(display_length)s, -1], [%(display_length)s, 'All']],
+        pagingType: "full_numbers",
+        columnDefs: [{targets: [0], type: "optionalnum"}]
     });
 } );  </script>
   <table class="%(table_class)s" id="%(table_id)s">
@@ -78,33 +103,35 @@ def test_write_jsviewer_default(tmpdir):
         table_id='table%s' % id(t),
         length='50',
         display_length='10, 25, 50, 100, 500, 1000',
-        datatables_css_url='https://cdn.datatables.net/1.10.9/css/jquery.dataTables.css',
-        datatables_js_url='https://cdn.datatables.net/1.10.9/js/jquery.dataTables.min.js',
-        jquery_url='https://code.jquery.com/jquery-1.11.3.min.js'
+        datatables_css_url='https://cdn.datatables.net/1.10.12/css/jquery.dataTables.css',
+        datatables_js_url='https://cdn.datatables.net/1.10.12/js/jquery.dataTables.min.js',
+        jquery_url='https://code.jquery.com/jquery-3.1.1.min.js'
     )
     with open(tmpfile) as f:
         assert f.read().strip() == ref.strip()
 
 
+@pytest.mark.skipif('not HAS_BLEACH')
 def test_write_jsviewer_options(tmpdir):
     t = Table()
     t['a'] = [1, 2, 3, 4, 5]
-    t['b'] = ['a', 'b', 'c', 'd', 'e']
+    t['b'] = ['<b>a</b>', 'b', 'c', 'd', 'e']
     t['a'].unit = 'm'
 
     tmpfile = tmpdir.join('test.html').strpath
-
     t.write(tmpfile, format='jsviewer', table_id='test', max_lines=3,
-            jskwargs={'display_length': 5}, table_class='display hover')
+            jskwargs={'display_length': 5}, table_class='display hover',
+            htmldict=dict(raw_html_cols='b'))
+
     ref = REFERENCE % dict(
         lines=format_lines(t['a'][:3], t['b'][:3]),
         table_class='display hover',
         table_id='test',
         length='5',
         display_length='5, 10, 25, 50, 100, 500, 1000',
-        datatables_css_url='https://cdn.datatables.net/1.10.9/css/jquery.dataTables.css',
-        datatables_js_url='https://cdn.datatables.net/1.10.9/js/jquery.dataTables.min.js',
-        jquery_url='https://code.jquery.com/jquery-1.11.3.min.js'
+        datatables_css_url='https://cdn.datatables.net/1.10.12/css/jquery.dataTables.css',
+        datatables_js_url='https://cdn.datatables.net/1.10.12/js/jquery.dataTables.min.js',
+        jquery_url='https://code.jquery.com/jquery-3.1.1.min.js'
     )
     with open(tmpfile) as f:
         assert f.read().strip() == ref.strip()
@@ -128,7 +155,7 @@ def test_write_jsviewer_local(tmpdir):
         display_length='10, 25, 50, 100, 500, 1000',
         datatables_css_url='file://' + join(EXTERN_DIR, 'css', 'jquery.dataTables.css'),
         datatables_js_url='file://' + join(EXTERN_DIR, 'js', 'jquery.dataTables.min.js'),
-        jquery_url='file://' + join(EXTERN_DIR, 'js', 'jquery-1.11.3.min.js')
+        jquery_url='file://' + join(EXTERN_DIR, 'js', 'jquery-3.1.1.min.js')
     )
     with open(tmpfile) as f:
         assert f.read().strip() == ref.strip()
@@ -152,7 +179,6 @@ def test_show_in_notebook():
     <tr><td>3</td><td>4</td><td>d</td></tr>
     <tr><td>4</td><td>5</td><td>e</td></tr>
     """).strip() in htmlstr_windx)
-
 
     assert '<thead><tr><th>realidx</th><th>a</th><th>b</th></tr></thead>' in htmlstr_windx_named
 

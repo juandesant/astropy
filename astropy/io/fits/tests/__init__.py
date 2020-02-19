@@ -1,18 +1,15 @@
 # Licensed under a 3-clause BSD style license - see PYFITS.rst
-from __future__ import division  # confidence high
 
 import os
 import shutil
 import stat
 import tempfile
 import time
-import warnings
 
-from ... import fits
-from .... import log
+from astropy.io import fits
 
 
-class FitsTestCase(object):
+class FitsTestCase:
     def setup(self):
         self.data_dir = os.path.join(os.path.dirname(__file__), 'data')
         self.temp_dir = tempfile.mkdtemp(prefix='fits-test-')

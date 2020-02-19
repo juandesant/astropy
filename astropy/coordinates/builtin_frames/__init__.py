@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
-This package contains the coordinate frames actually implemented by astropy.
+This package contains the coordinate frames implemented by astropy.
 
 Users shouldn't use this module directly, but rather import from the
 `astropy.coordinates` module.  While it is likely to exist for the long-term,
@@ -20,22 +20,24 @@ from one frame to another frame of the same class) should be included in that
 module.  Transformation functions connecting the new frame to other frames
 should be in a separate module, which should be imported in this package's
 ``__init__.py`` to ensure the transformations are hooked up when this package is
-imported.  Placing the trasnformation functions in separate modules avoids
+imported.  Placing the transformation functions in separate modules avoids
 circular dependencies, because they need references to the frame classes.
 """
 
+from .baseradec import BaseRADecFrame
 from .icrs import ICRS
 from .fk5 import FK5
 from .fk4 import FK4, FK4NoETerms
 from .galactic import Galactic
-from .galactocentric import Galactocentric
+from .galactocentric import Galactocentric, galactocentric_frame_defaults
+from .lsr import LSR, GalacticLSR
 from .supergalactic import Supergalactic
 from .altaz import AltAz
 from .gcrs import GCRS, PrecessedGeocentric
 from .cirs import CIRS
 from .itrs import ITRS
 from .hcrs import HCRS
-from .ecliptic import GeocentricTrueEcliptic, BarycentricTrueEcliptic, HeliocentricTrueEcliptic
+from .ecliptic import *  # there are a lot of these so we don't list them all explicitly
 from .skyoffset import SkyOffsetFrame
 # need to import transformations so that they get registered in the graph
 from . import icrs_fk5_transforms
@@ -47,48 +49,96 @@ from . import cirs_observed_transforms
 from . import intermediate_rotation_transforms
 from . import ecliptic_transforms
 
-# we define an __all__ because otherwise the transformation modules get included
+from astropy.coordinates.baseframe import frame_transform_graph
+
+# we define an __all__ because otherwise the transformation modules
+# get included
 __all__ = ['ICRS', 'FK5', 'FK4', 'FK4NoETerms', 'Galactic', 'Galactocentric',
+           'galactocentric_frame_defaults',
            'Supergalactic', 'AltAz', 'GCRS', 'CIRS', 'ITRS', 'HCRS',
-           'PrecessedGeocentric', 'GeocentricTrueEcliptic',
-           'BarycentricTrueEcliptic', 'HeliocentricTrueEcliptic',
-           'SkyOffsetFrame']
+           'PrecessedGeocentric', 'GeocentricMeanEcliptic',
+           'BarycentricMeanEcliptic', 'HeliocentricMeanEcliptic',
+           'GeocentricTrueEcliptic', 'BarycentricTrueEcliptic',
+           'HeliocentricTrueEcliptic',
+           'SkyOffsetFrame', 'GalacticLSR', 'LSR',
+           'BaseEclipticFrame', 'BaseRADecFrame', 'make_transform_graph_docs',
+           'HeliocentricEclipticIAU76', 'CustomBarycentricEcliptic']
 
 
-def _make_transform_graph_docs():
+def make_transform_graph_docs(transform_graph):
     """
-    Generates a string for use with the coordinate package's docstring
-    to show the available transforms and coordinate systems
+    Generates a string that can be used in other docstrings to include a
+    transformation graph, showing the available transforms and
+    coordinate systems.
+
+    Parameters
+    ----------
+    transform_graph : `~.coordinates.TransformGraph`
+
+    Returns
+    -------
+    docstring : str
+        A string that can be added to the end of a docstring to show the
+        transform graph.
     """
-    import inspect
     from textwrap import dedent
-    from ...extern import six
-    from ..baseframe import BaseCoordinateFrame, frame_transform_graph
+    coosys = [transform_graph.lookup_name(item) for
+              item in transform_graph.get_names()]
 
-    isclass = inspect.isclass
-    coosys = [item for item in list(six.itervalues(globals()))
-              if isclass(item) and issubclass(item, BaseCoordinateFrame)]
-    graphstr = frame_transform_graph.to_dot_graph(addnodes=coosys)
+    # currently, all of the priorities are set to 1, so we don't need to show
+    #   then in the transform graph.
+    graphstr = transform_graph.to_dot_graph(addnodes=coosys,
+                                            priorities=False)
 
     docstr = """
-    The diagram below shows all of the coordinate systems built into the
-    `~astropy.coordinates` package, their aliases (useful for converting
-    other coordinates to them using attribute-style access) and the
-    pre-defined transformations between them.  The user is free to
-    override any of these transformations by defining new transformations
-    between these systems, but the pre-defined transformations should be
-    sufficient for typical usage.
+    The diagram below shows all of the built in coordinate systems,
+    their aliases (useful for converting other coordinates to them using
+    attribute-style access) and the pre-defined transformations between
+    them.  The user is free to override any of these transformations by
+    defining new transformations between these systems, but the
+    pre-defined transformations should be sufficient for typical usage.
 
-    The graph also indicates the priority for each transformation as a
-    number next to the arrow.  These priorities are used to decide the
-    preferred order when two transformation paths have the same number
-    of steps.  These priorities are defined such that the path with a
-    *smaller* total priority is favored.
+    The color of an edge in the graph (i.e. the transformations between two
+    frames) is set by the type of transformation; the legend box defines the
+    mapping from transform class name to color.
 
+    .. Wrap the graph in a div with a custom class to allow themeing.
+    .. container:: frametransformgraph
 
-    .. graphviz::
+        .. graphviz::
 
     """
 
-    return dedent(docstr) + '    ' + graphstr.replace('\n', '\n    ')
-_transform_graph_docs = _make_transform_graph_docs()
+    docstr = dedent(docstr) + '        ' + graphstr.replace('\n', '\n        ')
+
+    # colors are in dictionary at the bottom of transformations.py
+    from astropy.coordinates.transformations import trans_to_color
+    html_list_items = []
+    for cls, color in trans_to_color.items():
+        block = """
+            <li style='list-style: none;'>
+                <p style="font-size: 12px;line-height: 24px;font-weight: normal;color: #848484;padding: 0;margin: 0;">
+                    <b>{}:</b>
+                    <span style="font-size: 24px; color: {};"><b>➝</b></span>
+                </p>
+            </li>
+        """.format(cls.__name__, color)
+        html_list_items.append(block)
+
+    graph_legend = """
+    .. raw:: html
+
+        <ul>
+            {}
+        </ul>
+    """.format("\n".join(html_list_items))
+    docstr = docstr + dedent(graph_legend)
+
+    return docstr
+
+
+_transform_graph_docs = make_transform_graph_docs(frame_transform_graph)
+
+# Here, we override the module docstring so that sphinx renders the transform
+# graph without the developer documentation in the main docstring above.
+__doc__ = _transform_graph_docs

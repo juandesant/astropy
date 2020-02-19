@@ -2,25 +2,34 @@
 """Accuracy tests for GCRS coordinate transformations, primarily to/from AltAz.
 
 """
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
+import pytest
 import numpy as np
 
-from ... import units as u
-from ...tests.helper import (pytest,
-                             quantity_allclose as allclose,
-                             assert_quantity_allclose as assert_allclose)
-from ...time import Time
-from .. import (EarthLocation, get_sun, ICRS, GCRS, CIRS, ITRS, AltAz,
+from astropy import units as u
+from astropy.tests.helper import (assert_quantity_allclose as assert_allclose,
+                                  catch_warnings)
+from astropy.time import Time
+from astropy.coordinates import (EarthLocation, get_sun, ICRS, GCRS, CIRS, ITRS, AltAz,
                 PrecessedGeocentric, CartesianRepresentation, SkyCoord,
-                SphericalRepresentation)
+                SphericalRepresentation, UnitSphericalRepresentation,
+                HCRS, HeliocentricMeanEcliptic)
+from astropy.utils import iers
 
 
-from ..._erfa import epv00
+from astropy._erfa import epv00
 
 from .utils import randomly_sample_sphere
-from ..builtin_frames.utils import get_jd12
+from astropy.coordinates.builtin_frames.utils import get_jd12
+from astropy.coordinates import solar_system_ephemeris
+from astropy.units import allclose
+
+try:
+    import jplephem  # pylint: disable=W0611
+except ImportError:
+    HAS_JPLEPHEM = False
+else:
+    HAS_JPLEPHEM = True
 
 
 def test_icrs_cirs():
@@ -42,7 +51,7 @@ def test_icrs_cirs():
     assert_allclose(inod.dec, inod2.dec)
 
     # now check that a different time yields different answers
-    cframe2 = CIRS(obstime=Time('J2005', scale='utc'))
+    cframe2 = CIRS(obstime=Time('J2005'))
     cirsnod2 = inod.transform_to(cframe2)
     assert not allclose(cirsnod.ra, cirsnod2.ra, rtol=1e-8)
     assert not allclose(cirsnod.dec, cirsnod2.dec, rtol=1e-8)
@@ -70,7 +79,7 @@ def test_icrs_cirs():
 
 ra, dec, dist = randomly_sample_sphere(200)
 icrs_coords = [ICRS(ra=ra, dec=dec), ICRS(ra=ra, dec=dec, distance=dist*u.pc)]
-gcrs_frames = [GCRS(), GCRS(obstime=Time('J2005', scale='utc'))]
+gcrs_frames = [GCRS(), GCRS(obstime=Time('J2005'))]
 
 
 @pytest.mark.parametrize('icoo', icrs_coords)
@@ -131,17 +140,18 @@ def test_icrs_gcrs_dist_diff(gframe):
                         atol=1e-10*u.pc)
 
 
+@pytest.mark.remote_data
 def test_cirs_to_altaz():
     """
     Check the basic CIRS<->AltAz transforms.  More thorough checks implicitly
     happen in `test_iau_fullstack`
     """
-    from .. import EarthLocation
+    from astropy.coordinates import EarthLocation
 
     ra, dec, dist = randomly_sample_sphere(200)
     cirs = CIRS(ra=ra, dec=dec, obstime='J2000')
     crepr = SphericalRepresentation(lon=ra, lat=dec, distance=dist)
-    cirscart = CIRS(crepr, obstime=cirs.obstime, representation=CartesianRepresentation)
+    cirscart = CIRS(crepr, obstime=cirs.obstime, representation_type=CartesianRepresentation)
 
     loc = EarthLocation(lat=0*u.deg, lon=0*u.deg, height=0*u.m)
     altazframe = AltAz(location=loc, obstime=Time('J2005'))
@@ -156,6 +166,7 @@ def test_cirs_to_altaz():
     assert_allclose(cirs.dec, cirs3.dec)
 
 
+@pytest.mark.remote_data
 def test_gcrs_itrs():
     """
     Check basic GCRS<->ITRS transforms for round-tripping.
@@ -174,12 +185,13 @@ def test_gcrs_itrs():
 
     # also try with the cartesian representation
     gcrsc = gcrs.realize_frame(gcrs.data)
-    gcrsc.representation = CartesianRepresentation
+    gcrsc.representation_type = CartesianRepresentation
     gcrsc2 = gcrsc.transform_to(ITRS).transform_to(gcrsc)
     assert_allclose(gcrsc.spherical.lon.deg, gcrsc2.ra.deg)
     assert_allclose(gcrsc.spherical.lat, gcrsc2.dec)
 
 
+@pytest.mark.remote_data
 def test_cirs_itrs():
     """
     Check basic CIRS<->ITRS transforms for round-tripping.
@@ -198,6 +210,7 @@ def test_cirs_itrs():
     assert not allclose(cirs.dec, cirs6_2.dec)
 
 
+@pytest.mark.remote_data
 def test_gcrs_cirs():
     """
     Check GCRS<->CIRS transforms for round-tripping.  More complicated than the
@@ -225,18 +238,19 @@ def test_gcrs_cirs():
     assert_allclose(gcrs.dec, gcrs4.dec)
 
 
+@pytest.mark.remote_data
 def test_gcrs_altaz():
     """
     Check GCRS<->AltAz transforms for round-tripping.  Has multiple paths
     """
-    from .. import EarthLocation
+    from astropy.coordinates import EarthLocation
 
     ra, dec, _ = randomly_sample_sphere(1)
     gcrs = GCRS(ra=ra[0], dec=dec[0], obstime='J2000')
 
     # check array times sure N-d arrays work
     times = Time(np.linspace(2456293.25, 2456657.25, 51) * u.day,
-                 format='jd', scale='utc')
+                 format='jd')
 
     loc = EarthLocation(lon=10 * u.deg, lat=80. * u.deg)
     aaframe = AltAz(obstime=times, location=loc)
@@ -252,8 +266,9 @@ def test_gcrs_altaz():
     assert_allclose(aa1.az, aa3.az)
 
 
+@pytest.mark.remote_data
 def test_precessed_geocentric():
-    assert PrecessedGeocentric().equinox.jd == Time('J2000', scale='utc').jd
+    assert PrecessedGeocentric().equinox.jd == Time('J2000').jd
 
     gcrs_coo = GCRS(180*u.deg, 2*u.deg, distance=10000*u.km)
     pgeo_coo = gcrs_coo.transform_to(PrecessedGeocentric)
@@ -294,6 +309,7 @@ MOONDIST_CART = CartesianRepresentation(3**-0.5*MOONDIST, 3**-0.5*MOONDIST, 3**-
 EARTHECC = 0.017 + 0.005  # roughly earth orbital eccentricity, but with an added tolerance
 
 
+@pytest.mark.remote_data
 @pytest.mark.parametrize('testframe', totest_frames)
 def test_gcrs_altaz_sunish(testframe):
     """
@@ -310,6 +326,7 @@ def test_gcrs_altaz_sunish(testframe):
     assert (EARTHECC - 1)*u.au < sunaa.distance.to(u.au) < (EARTHECC + 1)*u.au
 
 
+@pytest.mark.remote_data
 @pytest.mark.parametrize('testframe', totest_frames)
 def test_gcrs_altaz_moonish(testframe):
     """
@@ -323,9 +340,14 @@ def test_gcrs_altaz_moonish(testframe):
     # now check that the distance change is similar to earth radius
     assert 1000*u.km < np.abs(moonaa.distance - moon.distance).to(u.au) < 7000*u.km
 
+    # now check that it round-trips
+    moon2 = moonaa.transform_to(moon)
+    assert_allclose(moon.cartesian.xyz, moon2.cartesian.xyz)
+
     # also should add checks that the alt/az are different for different earth locations
 
 
+@pytest.mark.remote_data
 @pytest.mark.parametrize('testframe', totest_frames)
 def test_gcrs_altaz_bothroutes(testframe):
     """
@@ -344,11 +366,12 @@ def test_gcrs_altaz_bothroutes(testframe):
     assert_allclose(moonaa_viaicrs.cartesian.xyz, moonaa_viaitrs.cartesian.xyz)
 
 
+@pytest.mark.remote_data
 @pytest.mark.parametrize('testframe', totest_frames)
 def test_cirs_altaz_moonish(testframe):
     """
     Sanity-check that an object resembling the moon goes to the right place with
-    a CIRS->AltAz transformation
+    a CIRS<->AltAz transformation
     """
     moon = CIRS(MOONDIST_CART, obstime=testframe.obstime)
 
@@ -358,6 +381,20 @@ def test_cirs_altaz_moonish(testframe):
     # now check that it round-trips
     moon2 = moonaa.transform_to(moon)
     assert_allclose(moon.cartesian.xyz, moon2.cartesian.xyz)
+
+
+@pytest.mark.remote_data
+@pytest.mark.parametrize('testframe', totest_frames)
+def test_cirs_altaz_nodist(testframe):
+    """
+    Check that a UnitSphericalRepresentation coordinate round-trips for the
+    CIRS<->AltAz transformation.
+    """
+    coo0 = CIRS(UnitSphericalRepresentation(10*u.deg, 20*u.deg), obstime=testframe.obstime)
+
+    # check that it round-trips
+    coo1 = coo0.transform_to(testframe).transform_to(coo0)
+    assert_allclose(coo0.cartesian.xyz, coo1.cartesian.xyz)
 
 
 @pytest.mark.parametrize('testframe', totest_frames)
@@ -384,6 +421,7 @@ def test_gcrs_icrs_moonish(testframe):
     assert 0.97*u.au < moonicrs.distance < 1.03*u.au
 
 
+@pytest.mark.remote_data
 @pytest.mark.parametrize('testframe', totest_frames)
 def test_icrs_gcrscirs_sunish(testframe):
     """
@@ -403,6 +441,7 @@ def test_icrs_gcrscirs_sunish(testframe):
     assert (EARTHECC - 1)*u.au < itrs.spherical.distance.to(u.au) < (EARTHECC + 1)*u.au
 
 
+@pytest.mark.remote_data
 @pytest.mark.parametrize('testframe', totest_frames)
 def test_icrs_altaz_moonish(testframe):
     """
@@ -451,3 +490,76 @@ def test_gcrs_self_transform_closeby():
     transformed = moon_geocentric.transform_to(moon_lapalma.frame)
     delta = transformed.separation_3d(moon_lapalma)
     assert_allclose(delta, 0.0*u.m, atol=1*u.m)
+
+
+@pytest.mark.remote_data
+def test_earth_orientation_table():
+    """Check that we can set the IERS table used as Earth Reference.
+
+    Use the here and now to be sure we get a difference.
+    """
+    t = Time.now()
+    location = EarthLocation(lat=0*u.deg, lon=0*u.deg)
+    altaz = AltAz(location=location, obstime=t)
+    sc = SkyCoord(1*u.deg, 2*u.deg)
+    # Default: uses IERS_Auto, which will give a prediction.
+    with catch_warnings() as w:
+        altaz_auto = sc.transform_to(altaz)
+
+    assert len(w) == 0
+
+    with iers.earth_orientation_table.set(iers.IERS_B.open()):
+        with catch_warnings() as w:
+            altaz_b = sc.transform_to(altaz)
+        assert len(w) == 1
+        assert 'after IERS data' in str(w[0].message)
+
+    sep_b_auto = altaz_b.separation(altaz_auto)
+    assert_allclose(sep_b_auto, 0.0*u.deg, atol=1*u.arcsec)
+    assert sep_b_auto > 10*u.microarcsecond
+
+    # Check we returned to regular IERS system.
+    altaz_auto2 = sc.transform_to(altaz)
+    assert altaz_auto2.separation(altaz_auto) == 0.
+
+
+@pytest.mark.remote_data
+@pytest.mark.skipif('not HAS_JPLEPHEM')
+def test_ephemerides():
+    """
+    We test that using different ephemerides gives very similar results
+    for transformations
+    """
+    t = Time("2014-12-25T07:00")
+    moon = SkyCoord(GCRS(318.10579159*u.deg,
+                         -11.65281165*u.deg,
+                         365042.64880308*u.km, obstime=t))
+
+    icrs_frame = ICRS()
+    hcrs_frame = HCRS(obstime=t)
+    ecl_frame = HeliocentricMeanEcliptic(equinox=t)
+    cirs_frame = CIRS(obstime=t)
+
+    moon_icrs_builtin = moon.transform_to(icrs_frame)
+    moon_hcrs_builtin = moon.transform_to(hcrs_frame)
+    moon_helioecl_builtin = moon.transform_to(ecl_frame)
+    moon_cirs_builtin = moon.transform_to(cirs_frame)
+
+    with solar_system_ephemeris.set('jpl'):
+        moon_icrs_jpl = moon.transform_to(icrs_frame)
+        moon_hcrs_jpl = moon.transform_to(hcrs_frame)
+        moon_helioecl_jpl = moon.transform_to(ecl_frame)
+        moon_cirs_jpl = moon.transform_to(cirs_frame)
+
+    # most transformations should differ by an amount which is
+    # non-zero but of order milliarcsecs
+    sep_icrs = moon_icrs_builtin.separation(moon_icrs_jpl)
+    sep_hcrs = moon_hcrs_builtin.separation(moon_hcrs_jpl)
+    sep_helioecl = moon_helioecl_builtin.separation(moon_helioecl_jpl)
+    sep_cirs = moon_cirs_builtin.separation(moon_cirs_jpl)
+
+    assert_allclose([sep_icrs, sep_hcrs, sep_helioecl], 0.0*u.deg, atol=10*u.mas)
+    assert all(sep > 10*u.microarcsecond for sep in (sep_icrs, sep_hcrs, sep_helioecl))
+
+    # CIRS should be the same
+    assert_allclose(sep_cirs, 0.0*u.deg, atol=1*u.microarcsecond)

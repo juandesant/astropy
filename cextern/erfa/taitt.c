@@ -33,7 +33,7 @@ int eraTaitt(double tai1, double tai2, double *tt1, double *tt2)
 **     Explanatory Supplement to the Astronomical Almanac,
 **     P. Kenneth Seidelmann (ed), University Science Books (1992)
 **
-**  Copyright (C) 2013-2015, NumFOCUS Foundation.
+**  Copyright (C) 2013-2019, NumFOCUS Foundation.
 **  Derived, with permission, from the SOFA library.  See notes at end of file.
 */
 {
@@ -41,8 +41,9 @@ int eraTaitt(double tai1, double tai2, double *tt1, double *tt2)
 /* TT minus TAI (days). */
    static const double dtat = ERFA_TTMTAI/ERFA_DAYSEC;
 
+
 /* Result, safeguarding precision. */
-   if ( tai1 > tai2 ) {
+   if ( fabs(tai1) > fabs(tai2) ) {
       *tt1 = tai1;
       *tt2 = tai2 + dtat;
    } else {
@@ -57,7 +58,7 @@ int eraTaitt(double tai1, double tai2, double *tt1, double *tt2)
 /*----------------------------------------------------------------------
 **  
 **  
-**  Copyright (C) 2013-2015, NumFOCUS Foundation.
+**  Copyright (C) 2013-2019, NumFOCUS Foundation.
 **  All rights reserved.
 **  
 **  This library is derived, with permission, from the International

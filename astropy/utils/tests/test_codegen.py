@@ -1,12 +1,11 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
 import sys
 import traceback
 
-from ..codegen import make_function_with_signature
-from ...tests.helper import pytest
+import pytest
+
+from astropy.utils.codegen import make_function_with_signature
 
 
 def test_make_function_with_signature_lineno():
@@ -29,7 +28,7 @@ def test_make_function_with_signature_lineno():
 
     try:
         wrapped(1, 2)
-    except:
+    except Exception:
         exc_cls, exc, tb = sys.exc_info()
         assert exc_cls is ZeroDivisionError
         # The *last* line in the traceback should be the 1 / 0 line in
@@ -37,6 +36,5 @@ def test_make_function_with_signature_lineno():
         # make_function_with_signature call was one
         tb_lines = traceback.format_tb(tb)
         assert '1 / 0' in tb_lines[-1]
-        assert line in tb_lines[-2] and 'line =' not in tb_lines[-2]
     else:
         pytest.fail('This should have caused an exception')

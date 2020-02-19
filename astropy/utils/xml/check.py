@@ -3,12 +3,10 @@
 A collection of functions for checking various XML-related strings for
 standards compliance.
 """
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
-from ...extern.six.moves import xrange, urllib
 
 import re
+import urllib.parse
 
 
 def check_id(ID):
@@ -35,6 +33,7 @@ def fix_id(ID):
         return corrected
     return ''
 
+
 _token_regex = r"(?![\r\l\t ])[^\r\l\t]*(?![\r\l\t ])"
 
 
@@ -45,7 +44,7 @@ def check_token(token):
     """
     return (token == '' or
             re.match(
-                "[^\r\n\t ]?([^\r\n\t ]| [^\r\n\t ])*[^\r\n\t ]?$", token)
+                r"[^\r\n\t ]?([^\r\n\t ]| [^\r\n\t ])*[^\r\n\t ]?$", token)
             is not None)
 
 
@@ -54,10 +53,10 @@ def check_mime_content_type(content_type):
     Returns `True` if *content_type* is a valid MIME content type
     (syntactically at least), as defined by RFC 2045.
     """
-    ctrls = ''.join(chr(x) for x in xrange(0, 0x20))
-    token_regex = '[^()<>@,;:\\\"/[\]?= %s\x7f]+' % ctrls
+    ctrls = ''.join(chr(x) for x in range(0, 0x20))
+    token_regex = f'[^()<>@,;:\\\"/[\\]?= {ctrls}\x7f]+'
     return re.match(
-        r'(?P<type>%s)/(?P<subtype>%s)$' % (token_regex, token_regex),
+        fr'(?P<type>{token_regex})/(?P<subtype>{token_regex})$',
         content_type) is not None
 
 
@@ -72,6 +71,6 @@ def check_anyuri(uri):
         return False
     try:
         urllib.parse.urlparse(uri)
-    except:
+    except Exception:
         return False
     return True

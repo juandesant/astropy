@@ -2,15 +2,22 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
 """
-This package defines colloquially used Imperial units.  By default, they
-are not enabled.  To enable them, do::
+This package defines colloquially used Imperial units.  They are
+available in the `astropy.units.imperial` namespace, but not in the
+top-level `astropy.units` namespace, e.g.::
 
-    >>> from astropy.units import imperial
-    >>> imperial.enable()  # doctest: +SKIP
+    >>> import astropy.units as u
+    >>> mph = u.imperial.mile / u.hour
+    >>> mph
+    Unit("mi / h")
+
+To include them in `~astropy.units.UnitBase.compose` and the results of
+`~astropy.units.UnitBase.find_equivalent_units`, do::
+
+    >>> import astropy.units as u
+    >>> u.imperial.enable()  # doctest: +SKIP
 """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
 from .core import UnitBase, def_unit
 from . import si
@@ -125,6 +132,7 @@ def_unit(['hp', 'horsepower'], si.W / 0.00134102209, namespace=_ns,
 
 def_unit(['deg_F', 'Fahrenheit'], namespace=_ns, doc='Degrees Fahrenheit',
          format={'latex': r'{}^{\circ}F', 'unicode': '°F'})
+def_unit(['deg_R', 'Rankine'], namespace=_ns, doc='Rankine scale: absolute scale of thermodynamic temperature')
 
 
 ###########################################################################

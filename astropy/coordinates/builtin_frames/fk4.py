@@ -1,63 +1,54 @@
 # -*- coding: utf-8 -*-
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import (absolute_import, unicode_literals, division,
-                        print_function)
 
 import numpy as np
 
-from ... import units as u
-from ..representation import (SphericalRepresentation, CartesianRepresentation,
-                              UnitSphericalRepresentation)
-from ..baseframe import (BaseCoordinateFrame, frame_transform_graph,
-                         TimeFrameAttribute, RepresentationMapping)
-from ..transformations import FunctionTransform, DynamicMatrixTransform
-from .. import earth_orientation as earth
+from astropy import units as u
+from astropy.utils.decorators import format_doc
+from astropy.coordinates.baseframe import frame_transform_graph, base_doc
+from astropy.coordinates.attributes import TimeAttribute
+from astropy.coordinates.transformations import (
+    FunctionTransformWithFiniteDifference, DynamicMatrixTransform)
+from astropy.coordinates.representation import (CartesianRepresentation,
+                                                UnitSphericalRepresentation)
+from astropy.coordinates import earth_orientation as earth
 
 from .utils import EQUINOX_B1950
+from .baseradec import doc_components, BaseRADecFrame
+
+__all__ = ['FK4', 'FK4NoETerms']
 
 
-class FK4(BaseCoordinateFrame):
+doc_footer_fk4 = """
+    Other parameters
+    ----------------
+    equinox : `~astropy.time.Time`
+        The equinox of this frame.
+    obstime : `~astropy.time.Time`
+        The time this frame was observed.  If ``None``, will be the same as
+        ``equinox``.
+"""
+
+
+@format_doc(base_doc, components=doc_components, footer=doc_footer_fk4)
+class FK4(BaseRADecFrame):
     """
     A coordinate or frame in the FK4 system.
 
     Note that this is a barycentric version of FK4 - that is, the origin for
     this frame is the Solar System Barycenter, *not* the Earth geocenter.
 
-    Parameters
-    ----------
-    representation : `BaseRepresentation` or None
-        A representation object or None to have no data (or use the other keywords)
-    ra : `Angle`, optional, must be keyword
-        The RA for this object (``dec`` must also be given and ``representation``
-        must be None).
-    dec : `Angle`, optional, must be keyword
-        The Declination for this object (``ra`` must also be given and
-        ``representation`` must be None).
-    distance : :class:`~astropy.units.Quantity`, optional, must be keyword
-        The Distance for this object along the line-of-sight.
-        (``representation`` must be None).
-    equinox : astropy.time.Time, optional, must be keyword
-        The equinox of this frame.
-    obstime : astropy.time.Time, optional, must be keyword
-        The time this frame was observed.  If None, will be the same as
-        ``equinox``.
-    copy : bool, optional
-        If `True` (default), make copies of the input coordinate arrays.
-        Can only be passed in as a keyword argument.
+    The frame attributes are listed under **Other Parameters**.
     """
-    frame_specific_representation_info = {
-        'spherical': [RepresentationMapping('lon', 'ra'),
-                      RepresentationMapping('lat', 'dec')]
-    }
-    frame_specific_representation_info['unitspherical'] = \
-        frame_specific_representation_info['spherical']
 
-    default_representation = SphericalRepresentation
-    equinox = TimeFrameAttribute(default=EQUINOX_B1950)
-    obstime = TimeFrameAttribute(default=None, secondary_attribute='equinox')
+    equinox = TimeAttribute(default=EQUINOX_B1950)
+    obstime = TimeAttribute(default=None, secondary_attribute='equinox')
+
 
 # the "self" transform
-@frame_transform_graph.transform(FunctionTransform, FK4, FK4)
+
+
+@frame_transform_graph.transform(FunctionTransformWithFiniteDifference, FK4, FK4)
 def fk4_to_fk4(fk4coord1, fk4frame2):
     # deceptively complicated: need to transform to No E-terms FK4, precess, and
     # then come back, because precession is non-trivial with E-terms
@@ -66,41 +57,17 @@ def fk4_to_fk4(fk4coord1, fk4frame2):
     return fnoe_w_eqx2.transform_to(fk4frame2)
 
 
-class FK4NoETerms(BaseCoordinateFrame):
+@format_doc(base_doc, components=doc_components, footer=doc_footer_fk4)
+class FK4NoETerms(BaseRADecFrame):
     """
     A coordinate or frame in the FK4 system, but with the E-terms of aberration
     removed.
 
-    Parameters
-    ----------
-    representation : `BaseRepresentation` or None
-        A representation object or None to have no data (or use the other keywords)
-    ra : `Angle`, optional, must be keyword
-        The RA for this object (``dec`` must also be given and ``representation``
-        must be None).
-    dec : `Angle`, optional, must be keyword
-        The Declination for this object (``ra`` must also be given and
-        ``representation`` must be None).
-    distance : :class:`~astropy.units.Quantity`, optional, must be keyword
-        The Distance for this object along the line-of-sight.
-        (``representation`` must be None).
-    obstime : astropy.time.Time, optional, must be keyword
-        The time this frame was observed.  If None, will be the same as
-        ``equinox``.
-    copy : bool, optional
-        If `True` (default), make copies of the input coordinate arrays.
-        Can only be passed in as a keyword argument.
+    The frame attributes are listed under **Other Parameters**.
     """
-    frame_specific_representation_info = {
-        'spherical': [RepresentationMapping('lon', 'ra'),
-                      RepresentationMapping('lat', 'dec')]
-    }
-    frame_specific_representation_info['unitspherical'] = \
-        frame_specific_representation_info['spherical']
 
-    default_representation = SphericalRepresentation
-    equinox = TimeFrameAttribute(default=EQUINOX_B1950)
-    obstime = TimeFrameAttribute(default=None, secondary_attribute='equinox')
+    equinox = TimeAttribute(default=EQUINOX_B1950)
+    obstime = TimeAttribute(default=None, secondary_attribute='equinox')
 
     @staticmethod
     def _precession_matrix(oldequinox, newequinox):
@@ -124,6 +91,8 @@ class FK4NoETerms(BaseCoordinateFrame):
 
 
 # the "self" transform
+
+
 @frame_transform_graph.transform(DynamicMatrixTransform, FK4NoETerms, FK4NoETerms)
 def fk4noe_to_fk4noe(fk4necoord1, fk4neframe2):
     return fk4necoord1._precession_matrix(fk4necoord1.equinox, fk4neframe2.equinox)
@@ -143,12 +112,13 @@ def fk4_e_terms(equinox):
     equinox : Time object
         The equinox for which to compute the e-terms
     """
-    # Constant of aberration at J2000
-    k = 0.0056932
+    # Constant of aberration at J2000; from Explanatory Supplement to the
+    # Astronomical Almanac (Seidelmann, 2005).
+    k = 0.0056932  # in degrees (v_earth/c ~ 1e-4 rad ~ 0.0057 deg)
+    k = np.radians(k)
 
     # Eccentricity of the Earth's orbit
     e = earth.eccentricity(equinox.jd)
-    e = np.radians(e)
 
     # Mean longitude of perigee of the solar orbit
     g = earth.mean_lon_of_perigee(equinox.jd)
@@ -158,94 +128,82 @@ def fk4_e_terms(equinox):
     o = earth.obliquity(equinox.jd, algorithm=1980)
     o = np.radians(o)
 
-    return e * k * np.sin(g), \
-           -e * k * np.cos(g) * np.cos(o), \
-           -e * k * np.cos(g) * np.sin(o)
+    return (e * k * np.sin(g),
+            -e * k * np.cos(g) * np.cos(o),
+            -e * k * np.cos(g) * np.sin(o))
 
 
-@frame_transform_graph.transform(FunctionTransform, FK4, FK4NoETerms)
+@frame_transform_graph.transform(FunctionTransformWithFiniteDifference, FK4, FK4NoETerms)
 def fk4_to_fk4_no_e(fk4coord, fk4noeframe):
     # Extract cartesian vector
-    c = fk4coord.cartesian.xyz
-    r = np.asarray(c.reshape((3, c.size // 3)))
+    rep = fk4coord.cartesian
 
     # Find distance (for re-normalization)
-    d_orig = np.sqrt(np.sum(r ** 2))
+    d_orig = rep.norm()
+    rep /= d_orig
 
     # Apply E-terms of aberration. Note that this depends on the equinox (not
     # the observing time/epoch) of the coordinates. See issue #1496 for a
     # discussion of this.
-    eterms_a = np.asarray(fk4_e_terms(fk4coord.equinox))
-    r = r - eterms_a.reshape(3, 1) + np.dot(eterms_a, r) * r
+    eterms_a = CartesianRepresentation(
+        u.Quantity(fk4_e_terms(fk4coord.equinox), u.dimensionless_unscaled,
+                   copy=False), copy=False)
+    rep = rep - eterms_a + eterms_a.dot(rep) * rep
 
     # Find new distance (for re-normalization)
-    d_new = np.sqrt(np.sum(r ** 2))
+    d_new = rep.norm()
 
     # Renormalize
-    r = r * d_orig / d_new
+    rep *= d_orig / d_new
 
-    subshape = c.shape[1:]
-    x = r[0].reshape(subshape)
-    y = r[1].reshape(subshape)
-    z = r[2].reshape(subshape)
-
-    #now re-cast into an appropriate Representation, and precess if need be
+    # now re-cast into an appropriate Representation, and precess if need be
     if isinstance(fk4coord.data, UnitSphericalRepresentation):
-        representation = CartesianRepresentation(x=x*u.one, y=y*u.one, z=z*u.one)
-        representation = representation.represent_as(UnitSphericalRepresentation)
-    else:
-        representation = CartesianRepresentation(x=x*c.unit, y=y*c.unit, z=z*c.unit)
+        rep = rep.represent_as(UnitSphericalRepresentation)
 
     # if no obstime was given in the new frame, use the old one for consistency
     newobstime = fk4coord._obstime if fk4noeframe._obstime is None else fk4noeframe._obstime
 
-    fk4noe = FK4NoETerms(representation, equinox=fk4coord.equinox,
-                         obstime=newobstime)
+    fk4noe = FK4NoETerms(rep, equinox=fk4coord.equinox, obstime=newobstime)
     if fk4coord.equinox != fk4noeframe.equinox:
-        #precession
+        # precession
         fk4noe = fk4noe.transform_to(fk4noeframe)
     return fk4noe
 
 
-@frame_transform_graph.transform(FunctionTransform, FK4NoETerms, FK4)
+@frame_transform_graph.transform(FunctionTransformWithFiniteDifference, FK4NoETerms, FK4)
 def fk4_no_e_to_fk4(fk4noecoord, fk4frame):
-    #first precess, if necessary
+    # first precess, if necessary
     if fk4noecoord.equinox != fk4frame.equinox:
         fk4noe_w_fk4equinox = FK4NoETerms(equinox=fk4frame.equinox,
                                           obstime=fk4noecoord.obstime)
         fk4noecoord = fk4noecoord.transform_to(fk4noe_w_fk4equinox)
 
     # Extract cartesian vector
-    c = fk4noecoord.cartesian.xyz
-    r = np.asarray(c.reshape((3, c.size // 3)))
+    rep = fk4noecoord.cartesian
 
     # Find distance (for re-normalization)
-    d_orig = np.sqrt(np.sum(r ** 2))
+    d_orig = rep.norm()
+    rep /= d_orig
 
     # Apply E-terms of aberration. Note that this depends on the equinox (not
     # the observing time/epoch) of the coordinates. See issue #1496 for a
     # discussion of this.
-    eterms_a = np.asarray(fk4_e_terms(fk4noecoord.equinox))
-    r0 = r.copy()
+    eterms_a = CartesianRepresentation(
+        u.Quantity(fk4_e_terms(fk4noecoord.equinox), u.dimensionless_unscaled,
+                   copy=False), copy=False)
+
+    rep0 = rep.copy()
     for _ in range(10):
-        r = (eterms_a.reshape(3, 1) + r0) / (1. + np.dot(eterms_a, r))
+        rep = (eterms_a + rep0) / (1. + eterms_a.dot(rep))
 
     # Find new distance (for re-normalization)
-    d_new = np.sqrt(np.sum(r ** 2))
+    d_new = rep.norm()
 
     # Renormalize
-    r = r * d_orig / d_new
+    rep *= d_orig / d_new
 
-    subshape = c.shape[1:]
-    x = r[0].reshape(subshape)
-    y = r[1].reshape(subshape)
-    z = r[2].reshape(subshape)
-
-    #now re-cast into an appropriate Representation, and precess if need be
+    # now re-cast into an appropriate Representation, and precess if need be
     if isinstance(fk4noecoord.data, UnitSphericalRepresentation):
-        representation = CartesianRepresentation(x=x*u.one, y=y*u.one, z=z*u.one)
-        representation = representation.represent_as(UnitSphericalRepresentation)
-    else:
-        representation = CartesianRepresentation(x=x*c.unit, y=y*c.unit, z=z*c.unit)
+        rep = rep.represent_as(UnitSphericalRepresentation)
 
-    return fk4frame.realize_frame(representation)
+    return fk4frame.realize_frame(rep)

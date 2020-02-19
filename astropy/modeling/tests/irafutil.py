@@ -3,10 +3,8 @@
 This module provides functions to help with testing against iraf tasks
 """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
-from ...logger import log
+from astropy.logger import log
 import numpy as np
 
 
@@ -56,7 +54,7 @@ def get_database_string(fname):
     return dtb
 
 
-class Record(object):
+class Record:
 
     """
     A base class for all records - represents an IRAF database record
@@ -116,8 +114,8 @@ class Record(object):
         xyz = [l[:3] for l in fieldline]
         try:
             farr = np.array(xyz)
-        except:
-            log.debug("Could not read array field %s" % fieldlist[0].split()[0])
+        except Exception:
+            log.debug("Could not read array field {}".format(fieldlist[0].split()[0]))
         return farr.astype(np.float64)
 
 
@@ -147,7 +145,7 @@ class IdentifyRecord(Record):
         function (modelname) coefficients
     """
     def __init__(self, recstr):
-        super(IdentifyRecord, self).__init__(recstr)
+        super().__init__(recstr)
         self._flatcoeff = self.fields['coefficients'].flatten()
         self.x = self.fields['features'][:, 0]
         self.y = self.get_ydata()
@@ -205,7 +203,7 @@ class FitcoordsRecord(Record):
 
     """
     def __init__(self, recstr):
-        super(FitcoordsRecord, self).__init__(recstr)
+        super().__init__(recstr)
         self._surface = self.fields['surface'].flatten()
         self.modelname = iraf_models_map[self._surface[0]]
         self.xorder = self._surface[1]
@@ -218,7 +216,7 @@ class FitcoordsRecord(Record):
         return self._surface[8:]
 
 
-class IDB(object):
+class IDB:
 
     """
     Base class for an IRAF identify database
@@ -240,7 +238,7 @@ class IDB(object):
         rl = dtb.split('begin')
         try:
             rl0 = rl[0].split('\n')
-        except:
+        except Exception:
             return rl
         if len(rl0) == 2 and rl0[0].startswith('#') and not rl0[1].strip():
             return rl[1:]
@@ -254,7 +252,7 @@ class ReidentifyRecord(IDB):
     Represents a database record for the onedspec.reidentify task
     """
     def __init__(self, databasestr):
-        super(ReidentifyRecord, self).__init__(databasestr)
+        super().__init__(databasestr)
         self.x = np.array([r.x for r in self.records])
         self.y = self.get_ydata()
         self.z = np.array([r.z for r in self.records])

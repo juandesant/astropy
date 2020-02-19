@@ -1,20 +1,20 @@
 import numpy as np
 
-from .. import np_utils
+from astropy.table import np_utils
 
 
 def test_common_dtype():
     """
     Test that allowed combinations are those expected.
     """
-    dtype = [(str('int'), np.int),
-             (str('uint8'), np.uint8),
-             (str('float32'), np.float32),
-             (str('float64'), np.float64),
-             (str('str'), 'S2'),
-             (str('uni'), 'U2'),
-             (str('bool'), np.bool),
-             (str('object'), np.object_)]
+    dtype = [('int', int),
+             ('uint8', np.uint8),
+             ('float32', np.float32),
+             ('float64', np.float64),
+             ('str', 'S2'),
+             ('uni', 'U2'),
+             ('bool', bool),
+             ('object', np.object_)]
     arr = np.empty(1, dtype=dtype)
     fail = set()
     succeed = set()
@@ -22,9 +22,9 @@ def test_common_dtype():
         for name2, type2 in dtype:
             try:
                 np_utils.common_dtype([arr[name1], arr[name2]])
-                succeed.add('{0} {1}'.format(name1, name2))
+                succeed.add(f'{name1} {name2}')
             except np_utils.TableMergeError:
-                fail.add('{0} {1}'.format(name1, name2))
+                fail.add(f'{name1} {name2}')
 
     # known bad combinations
     bad = set(['str int', 'str bool', 'uint8 bool', 'uint8 str', 'object float32',

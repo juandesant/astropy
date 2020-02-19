@@ -9,13 +9,11 @@ This example opens an image stored in a FITS file and displays it to the screen.
 This example uses `astropy.utils.data` to download the file, `astropy.io.fits` to open
 the file, and `matplotlib.pyplot` to display the image.
 
--------------------
 
 *By: Lia R. Corrales, Adrian Price-Whelan, Kelle Cruz*
 
 *License: BSD*
 
--------------------
 
 """
 
@@ -29,11 +27,10 @@ plt.style.use(astropy_mpl_style)
 ##############################################################################
 # Download the example FITS files used by this example:
 
-from astropy.utils.data import download_file
+from astropy.utils.data import get_pkg_data_filename
 from astropy.io import fits
 
-image_file = download_file('http://data.astropy.org/tutorials/FITS-images/HorseHead.fits',
-                           cache=True)
+image_file = get_pkg_data_filename('tutorials/FITS-images/HorseHead.fits')
 
 ##############################################################################
 # Use `astropy.io.fits.info()` to display the structure of the file:

@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------------------
 # ply: yacc.py
 #
-# Copyright (C) 2001-2015,
+# Copyright (C) 2001-2017
 # David M. Beazley (Dabeaz LLC)
 # All rights reserved.
 #
@@ -67,8 +67,8 @@ import inspect
 import base64
 import warnings
 
-__version__    = '3.6'
-__tabversion__ = '3.5'
+__version__    = '3.10'
+__tabversion__ = '3.10'
 
 #-----------------------------------------------------------------------------
 #                     === User configurable parameters ===
@@ -497,8 +497,9 @@ class LRParser:
                         try:
                             # Call the grammar rule with our special slice object
                             del symstack[-plen:]
-                            del statestack[-plen:]
+                            self.state = state
                             p.callable(pslice)
+                            del statestack[-plen:]
                             #--! DEBUG
                             debug.info('Result : %s', format_result(pslice[0]))
                             #--! DEBUG
@@ -507,14 +508,16 @@ class LRParser:
                             statestack.append(state)
                         except SyntaxError:
                             # If an error was set. Enter error recovery state
-                            lookaheadstack.append(lookahead)
-                            symstack.pop()
-                            statestack.pop()
+                            lookaheadstack.append(lookahead)    # Save the current lookahead token
+                            symstack.extend(targ[1:-1])         # Put the production slice back on the stack
+                            statestack.pop()                    # Pop back one state (before the reduce)
                             state = statestack[-1]
                             sym.type = 'error'
+                            sym.value = 'error'
                             lookahead = sym
                             errorcount = error_count
                             self.errorok = False
+
                         continue
                         # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -537,6 +540,7 @@ class LRParser:
 
                         try:
                             # Call the grammar rule with our special slice object
+                            self.state = state
                             p.callable(pslice)
                             #--! DEBUG
                             debug.info('Result : %s', format_result(pslice[0]))
@@ -546,14 +550,15 @@ class LRParser:
                             statestack.append(state)
                         except SyntaxError:
                             # If an error was set. Enter error recovery state
-                            lookaheadstack.append(lookahead)
-                            symstack.pop()
-                            statestack.pop()
+                            lookaheadstack.append(lookahead)    # Save the current lookahead token
+                            statestack.pop()                    # Pop back one state (before the reduce)
                             state = statestack[-1]
                             sym.type = 'error'
+                            sym.value = 'error'
                             lookahead = sym
                             errorcount = error_count
                             self.errorok = False
+
                         continue
                         # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -592,6 +597,7 @@ class LRParser:
                     if self.errorfunc:
                         if errtoken and not hasattr(errtoken, 'lexer'):
                             errtoken.lexer = lexer
+                        self.state = state
                         tok = call_errorfunc(self.errorfunc, errtoken, self)
                         if self.errorok:
                             # User must have done some kind of panic
@@ -811,21 +817,24 @@ class LRParser:
                         try:
                             # Call the grammar rule with our special slice object
                             del symstack[-plen:]
-                            del statestack[-plen:]
+                            self.state = state
                             p.callable(pslice)
+                            del statestack[-plen:]
                             symstack.append(sym)
                             state = goto[statestack[-1]][pname]
                             statestack.append(state)
                         except SyntaxError:
                             # If an error was set. Enter error recovery state
-                            lookaheadstack.append(lookahead)
-                            symstack.pop()
-                            statestack.pop()
+                            lookaheadstack.append(lookahead)    # Save the current lookahead token
+                            symstack.extend(targ[1:-1])         # Put the production slice back on the stack
+                            statestack.pop()                    # Pop back one state (before the reduce)
                             state = statestack[-1]
                             sym.type = 'error'
+                            sym.value = 'error'
                             lookahead = sym
                             errorcount = error_count
                             self.errorok = False
+
                         continue
                         # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -848,20 +857,22 @@ class LRParser:
 
                         try:
                             # Call the grammar rule with our special slice object
+                            self.state = state
                             p.callable(pslice)
                             symstack.append(sym)
                             state = goto[statestack[-1]][pname]
                             statestack.append(state)
                         except SyntaxError:
                             # If an error was set. Enter error recovery state
-                            lookaheadstack.append(lookahead)
-                            symstack.pop()
-                            statestack.pop()
+                            lookaheadstack.append(lookahead)    # Save the current lookahead token
+                            statestack.pop()                    # Pop back one state (before the reduce)
                             state = statestack[-1]
                             sym.type = 'error'
+                            sym.value = 'error'
                             lookahead = sym
                             errorcount = error_count
                             self.errorok = False
+
                         continue
                         # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -892,6 +903,7 @@ class LRParser:
                     if self.errorfunc:
                         if errtoken and not hasattr(errtoken, 'lexer'):
                             errtoken.lexer = lexer
+                        self.state = state
                         tok = call_errorfunc(self.errorfunc, errtoken, self)
                         if self.errorok:
                             # User must have done some kind of panic
@@ -1102,21 +1114,24 @@ class LRParser:
                         try:
                             # Call the grammar rule with our special slice object
                             del symstack[-plen:]
-                            del statestack[-plen:]
+                            self.state = state
                             p.callable(pslice)
+                            del statestack[-plen:]
                             symstack.append(sym)
                             state = goto[statestack[-1]][pname]
                             statestack.append(state)
                         except SyntaxError:
                             # If an error was set. Enter error recovery state
-                            lookaheadstack.append(lookahead)
-                            symstack.pop()
-                            statestack.pop()
+                            lookaheadstack.append(lookahead)    # Save the current lookahead token
+                            symstack.extend(targ[1:-1])         # Put the production slice back on the stack
+                            statestack.pop()                    # Pop back one state (before the reduce)
                             state = statestack[-1]
                             sym.type = 'error'
+                            sym.value = 'error'
                             lookahead = sym
                             errorcount = error_count
                             self.errorok = False
+
                         continue
                         # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -1134,20 +1149,22 @@ class LRParser:
 
                         try:
                             # Call the grammar rule with our special slice object
+                            self.state = state
                             p.callable(pslice)
                             symstack.append(sym)
                             state = goto[statestack[-1]][pname]
                             statestack.append(state)
                         except SyntaxError:
                             # If an error was set. Enter error recovery state
-                            lookaheadstack.append(lookahead)
-                            symstack.pop()
-                            statestack.pop()
+                            lookaheadstack.append(lookahead)    # Save the current lookahead token
+                            statestack.pop()                    # Pop back one state (before the reduce)
                             state = statestack[-1]
                             sym.type = 'error'
+                            sym.value = 'error'
                             lookahead = sym
                             errorcount = error_count
                             self.errorok = False
+
                         continue
                         # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
@@ -1178,6 +1195,7 @@ class LRParser:
                     if self.errorfunc:
                         if errtoken and not hasattr(errtoken, 'lexer'):
                             errtoken.lexer = lexer
+                        self.state = state
                         tok = call_errorfunc(self.errorfunc, errtoken, self)
                         if self.errorok:
                             # User must have done some kind of panic
@@ -1983,6 +2001,9 @@ class LRTable(object):
         except ImportError:
             import pickle
 
+        if not os.path.exists(filename):
+          raise ImportError
+
         in_f = open(filename, 'rb')
 
         tabversion = pickle.load(in_f)
@@ -2564,8 +2585,13 @@ class LRGeneratedTable(LRTable):
                                         # Need to decide on shift or reduce here
                                         # By default we favor shifting. Need to add
                                         # some precedence rules here.
-                                        sprec, slevel = Productions[st_actionp[a].number].prec
-                                        rprec, rlevel = Precedence.get(a, ('right', 0))
+
+                                        # Shift precedence comes from the token
+                                        sprec, slevel = Precedence.get(a, ('right', 0))
+
+                                        # Reduce precedence comes from rule being reduced (p)
+                                        rprec, rlevel = Productions[p.number].prec
+
                                         if (slevel < rlevel) or ((slevel == rlevel) and (rprec == 'left')):
                                             # We really need to reduce here.
                                             st_action[a] = -p.number
@@ -2623,8 +2649,13 @@ class LRGeneratedTable(LRTable):
                                         #   -  if precedence of reduce rule is higher, we reduce.
                                         #   -  if precedence of reduce is same and left assoc, we reduce.
                                         #   -  otherwise we shift
-                                        rprec, rlevel = Productions[st_actionp[a].number].prec
+
+                                        # Shift precedence comes from the token
                                         sprec, slevel = Precedence.get(a, ('right', 0))
+
+                                        # Reduce precedence comes from the rule that could have been reduced
+                                        rprec, rlevel = Productions[st_actionp[a].number].prec
+
                                         if (slevel > rlevel) or ((slevel == rlevel) and (rprec == 'right')):
                                             # We decide to shift here... highest precedence to shift
                                             Productions[st_actionp[a].number].reduced -= 1
@@ -2692,7 +2723,11 @@ class LRGeneratedTable(LRTable):
     # This function writes the LR parsing tables to a file
     # -----------------------------------------------------------------------------
 
-    def write_table(self, basemodulename, outputdir='', signature=''):
+    def write_table(self, tabmodule, outputdir='', signature=''):
+        if isinstance(tabmodule, types.ModuleType):
+            raise IOError("Won't overwrite existing tabmodule")
+
+        basemodulename = tabmodule.split('.')[-1]
         filename = os.path.join(outputdir, basemodulename) + '.py'
         try:
             f = open(filename, 'w')
@@ -2705,7 +2740,7 @@ _tabversion = %r
 _lr_method = %r
 
 _lr_signature = %r
-    ''' % (filename, __tabversion__, self.lr_method, signature))
+    ''' % (os.path.basename(filename), __tabversion__, self.lr_method, signature))
 
             # Change smaller to 0 to go back to original tables
             smaller = 1
@@ -2933,28 +2968,20 @@ class ParserReflect(object):
 
     # Compute a signature over the grammar
     def signature(self):
+        parts = []
         try:
-            from hashlib import md5
-        except ImportError:
-            from md5 import md5
-        try:
-            sig = md5()
             if self.start:
-                sig.update(self.start.encode('latin-1'))
+                parts.append(self.start)
             if self.prec:
-                sig.update(''.join([''.join(p) for p in self.prec]).encode('latin-1'))
+                parts.append(''.join([''.join(p) for p in self.prec]))
             if self.tokens:
-                sig.update(' '.join(self.tokens).encode('latin-1'))
+                parts.append(' '.join(self.tokens))
             for f in self.pfuncs:
                 if f[3]:
-                    sig.update(f[3].encode('latin-1'))
+                    parts.append(f[3])
         except (TypeError, ValueError):
             pass
-
-        digest = base64.b16encode(sig.digest())
-        if sys.version_info[0] >= 3:
-            digest = digest.decode('latin-1')
-        return digest
+        return ''.join(parts)
 
     # -----------------------------------------------------------------------------
     # validate_modules()
@@ -2972,7 +2999,10 @@ class ParserReflect(object):
         fre = re.compile(r'\s*def\s+(p_[a-zA-Z_0-9]*)\(')
 
         for module in self.modules:
-            lines, linen = inspect.getsourcelines(module)
+            try:
+                lines, linen = inspect.getsourcelines(module)
+            except IOError:
+                continue
 
             counthash = {}
             for linen, line in enumerate(lines):
@@ -3100,12 +3130,18 @@ class ParserReflect(object):
             if not name.startswith('p_') or name == 'p_error':
                 continue
             if isinstance(item, (types.FunctionType, types.MethodType)):
-                line = item.__code__.co_firstlineno
+                line = getattr(item, 'co_firstlineno', item.__code__.co_firstlineno)
                 module = inspect.getmodule(item)
                 p_functions.append((line, module, name, item.__doc__))
 
-        # Sort all of the actions by line number
-        p_functions.sort()
+        # Sort all of the actions by line number; make sure to stringify
+        # modules to make them sortable, since `line` may not uniquely sort all
+        # p functions
+        p_functions.sort(key=lambda p_function: (
+            p_function[0],
+            str(p_function[1]),
+            p_function[2],
+            p_function[3]))
         self.pfuncs = p_functions
 
     # Validate all of the p_functions
@@ -3157,7 +3193,7 @@ class ParserReflect(object):
             if n.startswith('p_') and n != 'p_error':
                 self.log.warning('%r not defined as a function', n)
             if ((isinstance(v, types.FunctionType) and v.__code__.co_argcount == 1) or
-                   (isinstance(v, types.MethodType) and v.__code__.co_argcount == 2)):
+                   (isinstance(v, types.MethodType) and v.__func__.__code__.co_argcount == 2)):
                 if v.__doc__:
                     try:
                         doc = v.__doc__.split(' ')
@@ -3178,6 +3214,9 @@ class ParserReflect(object):
 def yacc(method='LALR', debug=yaccdebug, module=None, tabmodule=tab_module, start=None,
          check_recursion=True, optimize=False, write_tables=True, debugfile=debug_file,
          outputdir=None, debuglog=None, errorlog=None, picklefile=None):
+
+    if tabmodule is None:
+        tabmodule = tab_module
 
     # Reference to the parsing method of the last built parser
     global parse
@@ -3204,22 +3243,26 @@ def yacc(method='LALR', debug=yaccdebug, module=None, tabmodule=tab_module, star
         # is determined according to the following rules:
         #     - If tabmodule specifies a package, files go into that package directory
         #     - Otherwise, files go in the same directory as the specifying module
-        if '.' not in tabmodule:
-            srcfile = pdict['__file__']
+        if isinstance(tabmodule, types.ModuleType):
+            srcfile = tabmodule.__file__
         else:
-            parts = tabmodule.split('.')
-            pkgname = '.'.join(parts[:-1])
-            exec('import %s' % pkgname)
-            srcfile = getattr(sys.modules[pkgname], '__file__', '')
+            if '.' not in tabmodule:
+                srcfile = pdict['__file__']
+            else:
+                parts = tabmodule.split('.')
+                pkgname = '.'.join(parts[:-1])
+                exec('import %s' % pkgname)
+                srcfile = getattr(sys.modules[pkgname], '__file__', '')
         outputdir = os.path.dirname(srcfile)
 
     # Determine if the module is package of a package or not.
     # If so, fix the tabmodule setting so that tables load correctly
     pkg = pdict.get('__package__')
-    if pkg and '.' not in tabmodule:
-        tabmodule = pkg + '.' + tabmodule
+    if pkg and isinstance(tabmodule, str):
+        if '.' not in tabmodule:
+            tabmodule = pkg + '.' + tabmodule
 
-    basetabmodule = tabmodule.split('.')[-1]
+
 
     # Set start symbol if it's specified directly using an argument
     if start is not None:
@@ -3432,7 +3475,7 @@ def yacc(method='LALR', debug=yaccdebug, module=None, tabmodule=tab_module, star
     # Write the table file if requested
     if write_tables:
         try:
-            lr.write_table(basetabmodule, outputdir, signature)
+            lr.write_table(tabmodule, outputdir, signature)
         except IOError as e:
             errorlog.warning("Couldn't create %r. %s" % (tabmodule, e))
 

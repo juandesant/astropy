@@ -4,9 +4,9 @@ from os.path import abspath, dirname, join
 
 from .table import Table
 
-from ..io import registry as io_registry
-from .. import config as _config
-from .. import extern
+from astropy.io import registry as io_registry
+from astropy import config as _config
+from astropy import extern
 
 
 class Conf(_config.ConfigNamespace):
@@ -15,48 +15,74 @@ class Conf(_config.ConfigNamespace):
     """
 
     jquery_url = _config.ConfigItem(
-        'https://code.jquery.com/jquery-1.11.3.min.js',
+        'https://code.jquery.com/jquery-3.1.1.min.js',
         'The URL to the jquery library.')
 
     datatables_url = _config.ConfigItem(
-        'https://cdn.datatables.net/1.10.9/js/jquery.dataTables.min.js',
+        'https://cdn.datatables.net/1.10.12/js/jquery.dataTables.min.js',
         'The URL to the jquery datatables library.')
 
     css_urls = _config.ConfigItem(
-        ['https://cdn.datatables.net/1.10.9/css/jquery.dataTables.css'],
+        ['https://cdn.datatables.net/1.10.12/css/jquery.dataTables.css'],
         'The URLs to the css file(s) to include.', cfgtype='list')
 
 
 conf = Conf()
 
 
-EXTERN_JS_DIR = abspath(join(dirname(extern.__file__), 'js'))
-EXTERN_CSS_DIR = abspath(join(dirname(extern.__file__), 'css'))
+EXTERN_JS_DIR = abspath(join(dirname(extern.__file__), 'jquery', 'data', 'js'))
+EXTERN_CSS_DIR = abspath(join(dirname(extern.__file__), 'jquery', 'data', 'css'))
+
+_SORTING_SCRIPT_PART_1 = """
+var astropy_sort_num = function(a, b) {{
+    var a_num = parseFloat(a);
+    var b_num = parseFloat(b);
+
+    if (isNaN(a_num) && isNaN(b_num))
+        return ((a < b) ? -1 : ((a > b) ? 1 : 0));
+    else if (!isNaN(a_num) && !isNaN(b_num))
+        return ((a_num < b_num) ? -1 : ((a_num > b_num) ? 1 : 0));
+    else
+        return isNaN(a_num) ? -1 : 1;
+}}
+"""
+
+_SORTING_SCRIPT_PART_2 = """
+jQuery.extend( jQuery.fn.dataTableExt.oSort, {{
+    "optionalnum-asc": astropy_sort_num,
+    "optionalnum-desc": function (a,b) {{ return -astropy_sort_num(a, b); }}
+}});
+"""
 
 IPYNB_JS_SCRIPT = """
 <script>
+%(sorting_script1)s
 require.config({{paths: {{
     datatables: '{datatables_url}'
 }}}});
 require(["datatables"], function(){{
     console.log("$('#{tid}').dataTable()");
+    %(sorting_script2)s
     $('#{tid}').dataTable({{
-        "order": [],
-        "iDisplayLength": {display_length},
-        "aLengthMenu": {display_length_menu},
-        "pagingType": "full_numbers"
+        order: [],
+        pageLength: {display_length},
+        lengthMenu: {display_length_menu},
+        pagingType: "full_numbers",
+        columnDefs: [{{targets: {sort_columns}, type: "optionalnum"}}]
     }});
 }});
 </script>
-"""
+""" % dict(sorting_script1=_SORTING_SCRIPT_PART_1,
+           sorting_script2=_SORTING_SCRIPT_PART_2)
 
-HTML_JS_SCRIPT = """
+HTML_JS_SCRIPT = _SORTING_SCRIPT_PART_1 + _SORTING_SCRIPT_PART_2 + """
 $(document).ready(function() {{
     $('#{tid}').dataTable({{
-        "order": [],
-        "iDisplayLength": {display_length},
-        "aLengthMenu": {display_length_menu},
-        "pagingType": "full_numbers"
+        order: [],
+        pageLength: {display_length},
+        lengthMenu: {display_length_menu},
+        pagingType: "full_numbers",
+        columnDefs: [{{targets: {sort_columns}, type: "optionalnum"}}]
     }});
 }} );
 """
@@ -79,11 +105,11 @@ display: inline-block; margin-right: 1em; }
 """
 
 
-class JSViewer(object):
+class JSViewer:
     """Provides an interactive HTML export of a Table.
 
     This class provides an interface to the `DataTables
-    <http://datatables.net/>`_ library, which allow to visualize interactively
+    <https://datatables.net/>`_ library, which allow to visualize interactively
     an HTML table. It is used by the `~astropy.table.Table.show_in_browser`
     method.
 
@@ -108,7 +134,7 @@ class JSViewer(object):
     @property
     def jquery_urls(self):
         if self._use_local_files:
-            return ['file://' + join(EXTERN_JS_DIR, 'jquery-1.11.3.min.js'),
+            return ['file://' + join(EXTERN_JS_DIR, 'jquery-3.1.1.min.js'),
                     'file://' + join(EXTERN_JS_DIR, 'jquery.dataTables.min.js')]
         else:
             return [conf.jquery_url, conf.datatables_url]
@@ -127,43 +153,48 @@ class JSViewer(object):
         else:
             return conf.datatables_url[:-3]
 
-    def ipynb(self, table_id, css=None):
-        html = '<style>{0}</style>'.format(css if css is not None
+    def ipynb(self, table_id, css=None, sort_columns='[]'):
+        html = '<style>{}</style>'.format(css if css is not None
                                            else DEFAULT_CSS_NB)
         html += IPYNB_JS_SCRIPT.format(
             display_length=self.display_length,
             display_length_menu=self.display_length_menu,
             datatables_url=self._jstable_file(),
-            tid=table_id)
+            tid=table_id, sort_columns=sort_columns)
         return html
 
-    def html_js(self, table_id='table0'):
+    def html_js(self, table_id='table0', sort_columns='[]'):
         return HTML_JS_SCRIPT.format(
             display_length=self.display_length,
             display_length_menu=self.display_length_menu,
-            tid=table_id).strip()
+            tid=table_id, sort_columns=sort_columns).strip()
 
 
 def write_table_jsviewer(table, filename, table_id=None, max_lines=5000,
                          table_class="display compact", jskwargs=None,
-                         css=DEFAULT_CSS):
+                         css=DEFAULT_CSS, htmldict=None):
     if table_id is None:
         table_id = 'table{id}'.format(id=id(table))
 
     jskwargs = jskwargs or {}
     jsv = JSViewer(**jskwargs)
 
-    htmldict = {
+    sortable_columns = [i for i, col in enumerate(table.columns.values())
+                        if col.dtype.kind in 'iufc']
+    html_options = {
         'table_id': table_id,
         'table_class': table_class,
         'css': css,
         'cssfiles': jsv.css_urls,
         'jsfiles': jsv.jquery_urls,
-        'js':  jsv.html_js(table_id=table_id)
+        'js': jsv.html_js(table_id=table_id, sort_columns=sortable_columns)
     }
+    if htmldict:
+        html_options.update(htmldict)
 
     if max_lines < len(table):
         table = table[:max_lines]
-    table.write(filename, format='html', htmldict=htmldict)
+    table.write(filename, format='html', htmldict=html_options)
+
 
 io_registry.register_writer('jsviewer', Table, write_table_jsviewer)

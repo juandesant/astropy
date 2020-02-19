@@ -4,17 +4,19 @@
 This module contains the classes and utility functions for distance and
 cartesian coordinates.
 """
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+
+import warnings
 
 import numpy as np
 
-from .. import units as u
+from astropy import units as u
+from astropy.utils.exceptions import AstropyWarning
+from .angles import Angle
 
 __all__ = ['Distance']
 
 
-__doctest_requires__ = {'*': ['scipy.integrate']}
+__doctest_requires__ = {'*': ['scipy']}
 
 
 class Distance(u.SpecificTypeQuantity):
@@ -47,6 +49,8 @@ class Distance(u.SpecificTypeQuantity):
     distmod : float or `~astropy.units.Quantity`
         The distance modulus for this distance. Note that if ``unit`` is not
         provided, a guess will be made at the unit between AU, pc, kpc, and Mpc.
+    parallax : `~astropy.units.Quantity` or `~astropy.coordinates.Angle`
+        The parallax in angular units.
     dtype : `~numpy.dtype`, optional
         See `~astropy.units.Quantity`.
     copy : bool, optional
@@ -75,9 +79,7 @@ class Distance(u.SpecificTypeQuantity):
     Examples
     --------
     >>> from astropy import units as u
-    >>> from astropy import cosmology
     >>> from astropy.cosmology import WMAP5, WMAP7
-    >>> cosmology.set_current(WMAP7)
     >>> d1 = Distance(10, u.Mpc)
     >>> d2 = Distance(40, unit=u.au)
     >>> d3 = Distance(value=5, unit=u.kpc)
@@ -85,13 +87,14 @@ class Distance(u.SpecificTypeQuantity):
     >>> d5 = Distance(z=0.23, cosmology=WMAP5)
     >>> d6 = Distance(distmod=24.47)
     >>> d7 = Distance(Distance(10 * u.Mpc))
+    >>> d8 = Distance(parallax=21.34*u.mas)
     """
 
     _equivalent_unit = u.m
     _include_easy_conversion_members = True
 
     def __new__(cls, value=None, unit=None, z=None, cosmology=None,
-                distmod=None, dtype=None, copy=True, order=None,
+                distmod=None, parallax=None, dtype=None, copy=True, order=None,
                 subok=False, ndmin=0, allow_negative=False):
 
         if z is not None:
@@ -100,7 +103,7 @@ class Distance(u.SpecificTypeQuantity):
                                  'or `distmod` in Distance constructor.')
 
             if cosmology is None:
-                from ..cosmology import default_cosmology
+                from astropy.cosmology import default_cosmology
                 cosmology = default_cosmology.get()
 
             value = cosmology.luminosity_distance(z)
@@ -113,11 +116,14 @@ class Distance(u.SpecificTypeQuantity):
                 raise ValueError('A `cosmology` was given but `z` was not '
                                  'provided in Distance constructor')
 
-            if distmod is not None:
-                if value is not None:
-                    raise ValueError('Should given only one of `value`, `z` '
-                                     'or `distmod` in Distance constructor.')
+            value_msg = ('Should given only one of `value`, `z`, `distmod`, or '
+                         '`parallax` in Distance constructor.')
+            n_not_none = np.sum([x is not None
+                                 for x in [value, z, distmod, parallax]])
+            if n_not_none > 1:
+                raise ValueError(value_msg)
 
+            if distmod is not None:
                 value = cls._distmod_to_pc(distmod)
                 if unit is None:
                     # if the unit is not specified, guess based on the mean of
@@ -127,7 +133,7 @@ class Distance(u.SpecificTypeQuantity):
                         unit = u.Mpc
                     elif meanlogval > 3:
                         unit = u.kpc
-                    elif meanlogval < -3: #~200 AU
+                    elif meanlogval < -3:  # ~200 AU
                         unit = u.AU
                     else:
                         unit = u.pc
@@ -136,16 +142,47 @@ class Distance(u.SpecificTypeQuantity):
                 # but a copy is already made, so no longer necessary
                 copy = False
 
+            elif parallax is not None:
+                value = parallax.to_value(u.pc, equivalencies=u.parallax())
+                unit = u.pc
+
+                # Continue on to take account of unit and other arguments
+                # but a copy is already made, so no longer necessary
+                copy = False
+
+                if np.any(parallax < 0):
+                    if allow_negative:
+                        warnings.warn(
+                            "Negative parallaxes are converted to NaN "
+                            "distances even when `allow_negative=True`, "
+                            "because negative parallaxes cannot be transformed "
+                            "into distances. See discussion in this paper: "
+                            "https://arxiv.org/abs/1507.02105", AstropyWarning)
+                    else:
+                        raise ValueError("Some parallaxes are negative, which "
+                                         "are notinterpretable as distances. "
+                                         "See the discussion in this paper: "
+                                         "https://arxiv.org/abs/1507.02105 . "
+                                         "If you want parallaxes to pass "
+                                         "through, with negative parallaxes "
+                                         "instead becoming NaN, use the "
+                                         "`allow_negative=True` argument.")
+
             elif value is None:
-                raise ValueError('None of `value`, `z`, or `distmod` were '
-                                 'given to Distance constructor')
+                raise ValueError('None of `value`, `z`, `distmod`, or '
+                                 '`parallax` were given to Distance '
+                                 'constructor')
 
         # now we have arguments like for a Quantity, so let it do the work
-        distance = super(Distance, cls).__new__(
+        distance = super().__new__(
             cls, value, unit, dtype=dtype, copy=copy, order=order,
             subok=subok, ndmin=ndmin)
 
-        if not allow_negative and np.any(distance.value < 0):
+        # Make sure NaNs don't emit a warning
+        with np.errstate(invalid='ignore'):
+            any_negative = np.any(distance.value < 0)
+
+        if not allow_negative and any_negative:
             raise ValueError("Distance must be >= 0.  Use the argument "
                              "'allow_negative=True' to allow negative values.")
 
@@ -174,33 +211,24 @@ class Distance(u.SpecificTypeQuantity):
         """
 
         if cosmology is None:
-            from ..cosmology import default_cosmology
+            from astropy.cosmology import default_cosmology
             cosmology = default_cosmology.get()
 
-        from ..cosmology import z_at_value
+        from astropy.cosmology import z_at_value
         return z_at_value(cosmology.luminosity_distance, self, ztol=1.e-10)
 
     @property
     def distmod(self):
         """The distance modulus as a `~astropy.units.Quantity`"""
-        val = 5. * np.log10(self.to(u.pc).value) - 5.
-        return u.Quantity(val, u.mag)
+        val = 5. * np.log10(self.to_value(u.pc)) - 5.
+        return u.Quantity(val, u.mag, copy=False)
 
     @classmethod
     def _distmod_to_pc(cls, dm):
         dm = u.Quantity(dm, u.mag)
         return cls(10 ** ((dm.value + 5) / 5.), u.pc, copy=False)
 
-
-def _convert_to_and_validate_length_unit(unit, allow_dimensionless=False):
-    """
-    raises UnitsError if not a length unit
-    """
-    try:
-        unit = u.Unit(unit)
-        assert (unit.is_equivalent(u.kpc) or
-                allow_dimensionless and unit == u.dimensionless_unscaled)
-    except (TypeError, AssertionError):
-        raise u.UnitsError('Unit "{0}" is not a length type'.format(unit))
-
-    return unit
+    @property
+    def parallax(self):
+        """The parallax angle as an `~astropy.coordinates.Angle` object"""
+        return Angle(self.to(u.milliarcsecond, u.parallax()))

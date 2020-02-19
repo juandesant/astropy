@@ -1,48 +1,35 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
+import pytest
 
 import numpy as np
-
-from numpy.random import randn, normal
-from numpy.testing import assert_equal
-from numpy.testing.utils import assert_allclose
+from numpy.testing import assert_equal, assert_allclose
 
 try:
-    import scipy  # pylint: disable=W0611
+    import scipy  # pylint: disable=W0611 # noqa
 except ImportError:
     HAS_SCIPY = False
 else:
     HAS_SCIPY = True
 
 try:
-    import mpmath  # pylint: disable=W0611
+    import mpmath  # pylint: disable=W0611 # noqa
 except ImportError:
     HAS_MPMATH = False
 else:
     HAS_MPMATH = True
 
-from ...tests.helper import pytest
-
-from .. import funcs
-
-# These are not part of __all__ because they are just the lower level versions
-# of poisson_upper_limit
-# from ..funcs import scipy_poisson_upper_limit, mpmath_poisson_upper_limit
-
-from ...utils.misc import NumpyRNGContext
-from ... import units as u
+from astropy.stats import funcs
+from astropy import units as u
+from astropy.tests.helper import catch_warnings
+from astropy.utils.exceptions import AstropyDeprecationWarning
+from astropy.utils.misc import NumpyRNGContext
 
 
 def test_median_absolute_deviation():
-    # need to seed the numpy RNG to make sure we don't get some amazingly
-    # flukey random number that breaks one of the tests
-
     with NumpyRNGContext(12345):
-
         # test that it runs
-        randvar = randn(10000)
+        randvar = np.random.randn(10000)
         mad = funcs.median_absolute_deviation(randvar)
 
         # test whether an array is returned if an axis is used
@@ -54,23 +41,23 @@ def test_median_absolute_deviation():
         assert len(mad) == 1000
         assert mad.size < randvar.size
         # Test some actual values in a 3 dimensional array
-        x = np.arange(3*4*5)
-        a = np.array([sum(x[:i+1]) for i in range(len(x))]).reshape(3, 4, 5)
+        x = np.arange(3 * 4 * 5)
+        a = np.array([sum(x[:i + 1]) for i in range(len(x))]).reshape(3, 4, 5)
         mad = funcs.median_absolute_deviation(a)
         assert mad == 389.5
         mad = funcs.median_absolute_deviation(a, axis=0)
-        assert_allclose(mad, [[210.,  230.,  250.,  270.,  290.],
-                              [310.,  330.,  350.,  370.,  390.],
-                              [410.,  430.,  450.,  470.,  490.],
-                              [510.,  530.,  550.,  570.,  590.]])
+        assert_allclose(mad, [[210., 230., 250., 270., 290.],
+                              [310., 330., 350., 370., 390.],
+                              [410., 430., 450., 470., 490.],
+                              [510., 530., 550., 570., 590.]])
         mad = funcs.median_absolute_deviation(a, axis=1)
-        assert_allclose(mad, [[27.5,   32.5,   37.5,   42.5,   47.5],
-                              [127.5,  132.5,  137.5,  142.5,  147.5],
-                              [227.5,  232.5,  237.5,  242.5,  247.5]])
+        assert_allclose(mad, [[27.5, 32.5, 37.5, 42.5, 47.5],
+                              [127.5, 132.5, 137.5, 142.5, 147.5],
+                              [227.5, 232.5, 237.5, 242.5, 247.5]])
         mad = funcs.median_absolute_deviation(a, axis=2)
-        assert_allclose(mad, [[3.,   8.,  13.,  18.],
-                              [23.,  28.,  33.,  38.],
-                              [43.,  48.,  53.,  58.]])
+        assert_allclose(mad, [[3., 8., 13., 18.],
+                              [23., 28., 33., 38.],
+                              [43., 48., 53., 58.]])
 
 
 def test_median_absolute_deviation_masked():
@@ -88,7 +75,7 @@ def test_median_absolute_deviation_masked():
     # Just cross check if that's identical to the function on the unmasked
     # values only
     assert funcs.median_absolute_deviation(array) == (
-            funcs.median_absolute_deviation(array[~array.mask]))
+        funcs.median_absolute_deviation(array[~array.mask]))
 
     # Multidimensional masked array
     array = np.ma.array([[1, 4], [2, 2]], mask=[[1, 0], [0, 0]])
@@ -104,6 +91,40 @@ def test_median_absolute_deviation_masked():
         funcs.median_absolute_deviation(array, axis=1).data, [0, 0])
 
 
+def test_median_absolute_deviation_nans():
+    array = np.array([[1, 4, 3, np.nan],
+                      [2, 5, np.nan, 4]])
+    assert_equal(funcs.median_absolute_deviation(array, func=np.nanmedian,
+                                                 axis=1), [1, 1])
+
+    array = np.ma.masked_invalid(array)
+    assert funcs.median_absolute_deviation(array) == 1
+
+
+def test_median_absolute_deviation_nans_masked():
+    """
+    Regression test to ensure ignore_nan=True gives same results for
+    ndarray and masked arrays that contain +/-inf.
+    """
+
+    data1 = np.array([1., np.nan, 2, np.inf])
+    data2 = np.ma.masked_array(data1, mask=False)
+    mad1 = funcs.median_absolute_deviation(data1, ignore_nan=True)
+    mad2 = funcs.median_absolute_deviation(data2, ignore_nan=True)
+    assert_equal(mad1, mad2)
+
+    # ensure that input masked array is not modified
+    assert np.isnan(data2[1])
+
+
+def test_median_absolute_deviation_multidim_axis():
+    array = np.ones((5, 4, 3)) * np.arange(5)[:, np.newaxis, np.newaxis]
+    mad1 = funcs.median_absolute_deviation(array, axis=(1, 2))
+    mad2 = funcs.median_absolute_deviation(array, axis=(2, 1))
+    assert_equal(mad1, np.zeros(5))
+    assert_equal(mad1, mad2)
+
+
 def test_median_absolute_deviation_quantity():
     # Based on the changes introduces in #4658
 
@@ -111,148 +132,23 @@ def test_median_absolute_deviation_quantity():
     # quantity
     a = np.array([1, 16, 5]) * u.m
     mad = funcs.median_absolute_deviation(a)
-    # Check for the correct unit and that the result is identical to the result
-    # without units.
+    # Check for the correct unit and that the result is identical to the
+    # result without units.
     assert mad.unit == a.unit
     assert mad.value == funcs.median_absolute_deviation(a.value)
-
-
-def test_biweight_location():
-    # need to seed the numpy RNG to make sure we don't get some
-    # amazingly flukey random number that breaks one of the tests
-
-    with NumpyRNGContext(12345):
-
-        # test that it runs
-        randvar = randn(10000)
-        cbl = funcs.biweight_location(randvar)
-
-        assert abs(cbl-0) < 1e-2
-
-
-def test_biweight_location_small():
-
-    cbl = funcs.biweight_location([1, 3, 5, 500, 2])
-    assert abs(cbl-2.745) < 1e-3
-
-
-def test_biweight_location_axis():
-    """Test a 2D array with the axis keyword."""
-    with NumpyRNGContext(12345):
-        ny = 100
-        nx = 200
-        data = normal(5, 2, (ny, nx))
-
-        bw = funcs.biweight_location(data, axis=0)
-        bwi = []
-        for i in range(nx):
-            bwi.append(funcs.biweight_location(data[:, i]))
-        bwi = np.array(bwi)
-        assert_allclose(bw, bwi)
-
-        bw = funcs.biweight_location(data, axis=1)
-        bwi = []
-        for i in range(ny):
-            bwi.append(funcs.biweight_location(data[i, :]))
-        bwi = np.array(bwi)
-        assert_allclose(bw, bwi)
-
-
-def test_biweight_location_axis_3d():
-    """Test a 3D array with the axis keyword."""
-    with NumpyRNGContext(12345):
-        nz = 3
-        ny = 4
-        nx = 5
-        data = normal(5, 2, (nz, ny, nx))
-        bw = funcs.biweight_location(data, axis=0)
-        assert bw.shape == (ny, nx)
-
-        y = 0
-        bwi = []
-        for i in range(nx):
-            bwi.append(funcs.biweight_location(data[:, y, i]))
-        bwi = np.array(bwi)
-        assert_allclose(bw[y], bwi)
-
-
-def test_biweight_midvariance():
-    # need to seed the numpy RNG to make sure we don't get some
-    # amazingly flukey random number that breaks one of the tests
-
-    with NumpyRNGContext(12345):
-
-        # test that it runs
-        randvar = randn(10000)
-        scl = funcs.biweight_midvariance(randvar)
-
-        assert abs(scl-1) < 1e-2
-
-
-def test_biweight_midvariance_small():
-    scl = funcs.biweight_midvariance([1, 3, 5, 500, 2])
-    assert abs(scl-1.529) < 1e-3
-
-
-def test_biweight_midvariance_5127():
-    # test a regression introduced in #5127
-    rand = np.random.RandomState(12345)
-    data = rand.normal(loc=0., scale=20., size=(100, 100))
-    scl = funcs.biweight_midvariance(data)
-    assert_allclose(scl, 20.171003621738148)    # test against previous code
-
-
-def test_biweight_midvariance_axis():
-    """Test a 2D array with the axis keyword."""
-    with NumpyRNGContext(12345):
-        ny = 100
-        nx = 200
-        data = normal(5, 2, (ny, nx))
-
-        bw = funcs.biweight_midvariance(data, axis=0)
-        bwi = []
-        for i in range(nx):
-            bwi.append(funcs.biweight_midvariance(data[:, i]))
-        bwi = np.array(bwi)
-        assert_allclose(bw, bwi)
-
-        bw = funcs.biweight_midvariance(data, axis=1)
-        bwi = []
-        for i in range(ny):
-            bwi.append(funcs.biweight_midvariance(data[i, :]))
-        bwi = np.array(bwi)
-        assert_allclose(bw, bwi)
-
-
-def test_biweight_midvariance_axis_3d():
-    """Test a 3D array with the axis keyword."""
-    with NumpyRNGContext(12345):
-        nz = 3
-        ny = 4
-        nx = 5
-        data = normal(5, 2, (nz, ny, nx))
-        bw = funcs.biweight_midvariance(data, axis=0)
-        assert bw.shape == (ny, nx)
-
-        y = 0
-        bwi = []
-        for i in range(nx):
-            bwi.append(funcs.biweight_midvariance(data[:, y, i]))
-        bwi = np.array(bwi)
-        assert_allclose(bw[y], bwi)
 
 
 @pytest.mark.skipif('not HAS_SCIPY')
 def test_binom_conf_interval():
 
     # Test Wilson and Jeffreys interval for corner cases:
-    # Corner cases: k = 0, k = n, conf = 0., conf = 1.
+    # Corner cases: k = 0, k = n, confidence_level = 0., confidence_level = 1.
     n = 5
     k = [0, 4, 5]
     for conf in [0., 0.5, 1.]:
-        res = funcs.binom_conf_interval(k, n, conf=conf, interval='wilson')
+        res = funcs.binom_conf_interval(k, n, confidence_level=conf, interval='wilson')
         assert ((res >= 0.) & (res <= 1.)).all()
-        res = funcs.binom_conf_interval(k, n, conf=conf, interval='jeffreys')
+        res = funcs.binom_conf_interval(k, n, confidence_level=conf, interval='jeffreys')
         assert ((res >= 0.) & (res <= 1.)).all()
 
     # Test Jeffreys interval accuracy against table in Brown et al. (2001).
@@ -260,27 +156,28 @@ def test_binom_conf_interval():
     k = [0, 1, 2, 3, 4]
     n = 7
     conf = 0.95
-    result = funcs.binom_conf_interval(k, n, conf=conf, interval='jeffreys')
+    result = funcs.binom_conf_interval(k, n, confidence_level=conf, interval='jeffreys')
     table = np.array([[0.000, 0.016, 0.065, 0.139, 0.234],
                       [0.292, 0.501, 0.648, 0.766, 0.861]])
     assert_allclose(result, table, atol=1.e-3, rtol=0.)
 
     # Test scalar version
-    result = np.array([funcs.binom_conf_interval(kval, n, conf=conf,
+    result = np.array([funcs.binom_conf_interval(kval, n, confidence_level=conf,
                                                  interval='jeffreys')
                        for kval in k]).transpose()
     assert_allclose(result, table, atol=1.e-3, rtol=0.)
 
     # Test flat
-    result = funcs.binom_conf_interval(k, n, conf=conf, interval='flat')
+    result = funcs.binom_conf_interval(k, n, confidence_level=conf, interval='flat')
     table = np.array([[0., 0.03185, 0.08523, 0.15701, 0.24486],
                       [0.36941, 0.52650, 0.65085, 0.75513, 0.84298]])
     assert_allclose(result, table, atol=1.e-3, rtol=0.)
 
     # Test scalar version
-    result = np.array([funcs.binom_conf_interval(kval, n, conf=conf,
-                                                 interval='flat')
-                       for kval in k]).transpose()
+    with pytest.warns(AstropyDeprecationWarning):
+        result = np.array([funcs.binom_conf_interval(kval, n, conf=conf,
+                                                     interval='flat')
+                           for kval in k]).transpose()
     assert_allclose(result, table, atol=1.e-3, rtol=0.)
 
     # Test Wald interval
@@ -288,7 +185,7 @@ def test_binom_conf_interval():
     assert_allclose(result, 0.)  # conf interval is [0, 0] when k = 0
     result = funcs.binom_conf_interval(5, 5, interval='wald')
     assert_allclose(result, 1.)  # conf interval is [1, 1] when k = n
-    result = funcs.binom_conf_interval(500, 1000, conf=0.68269,
+    result = funcs.binom_conf_interval(500, 1000, confidence_level=0.68269,
                                        interval='wald')
     assert_allclose(result[0], 0.5 - 0.5 / np.sqrt(1000.))
     assert_allclose(result[1], 0.5 + 0.5 / np.sqrt(1000.))
@@ -327,7 +224,7 @@ def test_binned_binom_proportion():
     # Check that it works.
     nbins = 20
     x = np.linspace(0., 10., 100)  # Guarantee an `x` in every bin.
-    success = np.ones(len(x), dtype=np.bool)
+    success = np.ones(len(x), dtype=bool)
     bin_ctr, bin_hw, p, perr = funcs.binned_binom_proportion(x, success,
                                                              bins=nbins)
 
@@ -345,6 +242,12 @@ def test_binned_binom_proportion():
     bin_ctr, bin_hw, p, perr = funcs.binned_binom_proportion(x, success,
                                                              bins=nbins)
     assert (p == 0.).all()
+
+
+def test_binned_binom_proportion_exception():
+    with pytest.raises(ValueError):
+        with pytest.warns(AstropyDeprecationWarning):
+            funcs.binned_binom_proportion([0], [1, 2], conf=0.75)
 
 
 def test_signal_to_noise_oir_ccd():
@@ -436,8 +339,49 @@ def test_bootstrap_multiple_outputs():
 
 def test_mad_std():
     with NumpyRNGContext(12345):
-        data = normal(5, 2, size=(100, 100))
+        data = np.random.normal(5, 2, size=(100, 100))
         assert_allclose(funcs.mad_std(data), 2.0, rtol=0.05)
+
+
+def test_mad_std_scalar_return():
+    with NumpyRNGContext(12345):
+        data = np.random.normal(5, 2, size=(10, 10))
+        # make a masked array with no masked points
+        data = np.ma.masked_where(np.isnan(data), data)
+        rslt = funcs.mad_std(data)
+        # want a scalar result, NOT a masked array
+        assert np.isscalar(rslt)
+
+        data[5, 5] = np.nan
+        rslt = funcs.mad_std(data, ignore_nan=True)
+        assert np.isscalar(rslt)
+        with catch_warnings():
+            rslt = funcs.mad_std(data)
+            assert np.isscalar(rslt)
+            assert np.isnan(rslt)
+
+
+def test_mad_std_warns():
+    with NumpyRNGContext(12345):
+        data = np.random.normal(5, 2, size=(10, 10))
+        data[5, 5] = np.nan
+
+        with catch_warnings():
+            rslt = funcs.mad_std(data, ignore_nan=False)
+            assert np.isnan(rslt)
+
+
+@pytest.mark.filterwarnings('ignore:Invalid value encountered in median')
+def test_mad_std_withnan():
+    with NumpyRNGContext(12345):
+        data = np.empty([102, 102])
+        data[:] = np.nan
+        data[1:-1, 1:-1] = np.random.normal(5, 2, size=(100, 100))
+        assert_allclose(funcs.mad_std(data, ignore_nan=True), 2.0, rtol=0.05)
+
+    assert np.isnan(funcs.mad_std([1, 2, 3, 4, 5, np.nan]))
+    assert_allclose(funcs.mad_std([1, 2, 3, 4, 5, np.nan], ignore_nan=True),
+                    1.482602218505602)
 
 
 def test_mad_std_with_axis():
@@ -449,6 +393,35 @@ def test_mad_std_with_axis():
     result_axis1 = np.array([1.48260222, 1.48260222])
     assert_allclose(funcs.mad_std(data, axis=0), result_axis0)
     assert_allclose(funcs.mad_std(data, axis=1), result_axis1)
+
+
+def test_mad_std_with_axis_and_nan():
+    data = np.array([[1, 2, 3, 4, np.nan],
+                     [4, 3, 2, 1, np.nan]])
+    # results follow data symmetry
+    result_axis0 = np.array([2.22390333, 0.74130111, 0.74130111,
+                             2.22390333, np.nan])
+    result_axis1 = np.array([1.48260222, 1.48260222])
+
+    with pytest.warns(RuntimeWarning,
+                      match=r'All-NaN slice encountered'):
+        assert_allclose(funcs.mad_std(data, axis=0, ignore_nan=True), result_axis0)
+        assert_allclose(funcs.mad_std(data, axis=1, ignore_nan=True), result_axis1)
+
+
+def test_mad_std_with_axis_and_nan_array_type():
+    # mad_std should return a masked array if given one, and not otherwise
+    data = np.array([[1, 2, 3, 4, np.nan],
+                     [4, 3, 2, 1, np.nan]])
+
+    with pytest.warns(RuntimeWarning,
+                      match=r'All-NaN slice encountered'):
+        result = funcs.mad_std(data, axis=0, ignore_nan=True)
+    assert not np.ma.isMaskedArray(result)
+
+    data = np.ma.masked_where(np.isnan(data), data)
+    result = funcs.mad_std(data, axis=0, ignore_nan=True)
+    assert np.ma.isMaskedArray(result)
 
 
 def test_gaussian_fwhm_to_sigma():
@@ -623,7 +596,7 @@ def test_scipy_poisson_limit():
                     (0, 10.67), rtol=1e-3)
     conf = funcs.poisson_conf_interval([5., 6.], 'kraft-burrows-nousek',
                                        background=[2.5, 2.],
-                                       conflevel=[.99, .9])
+                                       confidence_level=[.99, .9])
     assert_allclose(conf[:, 0], (0, 10.67), rtol=1e-3)
     assert_allclose(conf[:, 1], (0.81, 8.99), rtol=5e-3)
 
@@ -648,8 +621,8 @@ def test_poisson_conf_value_errors():
 
     with pytest.raises(ValueError) as e:
         funcs.poisson_conf_interval([5, 6], 'sherpagehrels',
-                                    conflevel=[2.5, 2.])
-    assert 'conflevel not supported' in str(e.value)
+                                    confidence_level=[2.5, 2.])
+    assert 'confidence_level not supported' in str(e.value)
 
     with pytest.raises(ValueError) as e:
         funcs.poisson_conf_interval(1, 'foo')
@@ -661,23 +634,145 @@ def test_poisson_conf_kbn_value_errors():
     with pytest.raises(ValueError) as e:
         funcs.poisson_conf_interval(5., 'kraft-burrows-nousek',
                                     background=2.5,
-                                    conflevel=99)
+                                    confidence_level=99)
     assert 'number between 0 and 1' in str(e.value)
 
     with pytest.raises(ValueError) as e:
         funcs.poisson_conf_interval(5., 'kraft-burrows-nousek',
                                     background=2.5)
-    assert 'Set conflevel for method' in str(e.value)
+    assert 'Set confidence_level for method' in str(e.value)
 
     with pytest.raises(ValueError) as e:
         funcs.poisson_conf_interval(5., 'kraft-burrows-nousek',
                                     background=-2.5,
-                                    conflevel=.99)
+                                    confidence_level=.99)
     assert 'Background must be' in str(e.value)
 
 
 @pytest.mark.skipif('HAS_SCIPY or HAS_MPMATH')
 def test_poisson_limit_nodependencies():
     with pytest.raises(ImportError):
-        funcs.poisson_conf_interval(20., interval='kraft-burrows-nousek',
-                                    background=10., conflevel=.95)
+        with pytest.warns(AstropyDeprecationWarning):
+            funcs.poisson_conf_interval(20., interval='kraft-burrows-nousek',
+                                        background=10., conflevel=.95)
+
+
+@pytest.mark.skipif('not HAS_SCIPY')
+@pytest.mark.parametrize('N', [10, 100, 1000, 10000])
+def test_uniform(N):
+    with NumpyRNGContext(12345):
+        assert funcs.kuiper(np.random.random(N))[1] > 0.01
+
+
+@pytest.mark.skipif('not HAS_SCIPY')
+@pytest.mark.parametrize('N,M', [(100, 100),
+                                 (20, 100),
+                                 (100, 20),
+                                 (10, 20),
+                                 (5, 5),
+                                 (1000, 100)])
+def test_kuiper_two_uniform(N, M):
+    with NumpyRNGContext(12345):
+        assert funcs.kuiper_two(np.random.random(N),
+                                np.random.random(M))[1] > 0.01
+
+
+@pytest.mark.skipif('not HAS_SCIPY')
+@pytest.mark.parametrize('N,M', [(100, 100),
+                                 (20, 100),
+                                 (100, 20),
+                                 (10, 20),
+                                 (5, 5),
+                                 (1000, 100)])
+def test_kuiper_two_nonuniform(N, M):
+    with NumpyRNGContext(12345):
+        assert funcs.kuiper_two(np.random.random(N)**2,
+                                np.random.random(M)**2)[1] > 0.01
+
+
+@pytest.mark.skipif('not HAS_SCIPY')
+def test_detect_kuiper_two_different():
+    with NumpyRNGContext(12345):
+        D, f = funcs.kuiper_two(np.random.random(500) * 0.5,
+                                np.random.random(500))
+        assert f < 0.01
+
+
+@pytest.mark.skipif('not HAS_SCIPY')
+@pytest.mark.parametrize('N,M', [(100, 100),
+                                 (20, 100),
+                                 (100, 20),
+                                 (10, 20),
+                                 (5, 5),
+                                 (1000, 100)])
+def test_fpp_kuiper_two(N, M):
+    with NumpyRNGContext(12345):
+        R = 100
+        fpp = 0.05
+        fps = 0
+        for i in range(R):
+            D, f = funcs.kuiper_two(np.random.random(N), np.random.random(M))
+            if f < fpp:
+                fps += 1
+        assert scipy.stats.binom(R, fpp).sf(fps - 1) > 0.005
+        assert scipy.stats.binom(R, fpp).cdf(fps - 1) > 0.005
+
+
+@pytest.mark.skipif('not HAS_SCIPY')
+def test_histogram():
+    with NumpyRNGContext(1234):
+        a, b = 0.3, 3.14
+        s = np.random.uniform(a, b, 10000) % 1
+
+        b, w = funcs.fold_intervals([(a, b, 1. / (b - a))])
+
+        h = funcs.histogram_intervals(16, b, w)
+        nn, bb = np.histogram(s, bins=len(h), range=(0, 1))
+
+        uu = np.sqrt(nn)
+        nn, uu = len(h) * nn / h / len(s), len(h) * uu / h / len(s)
+
+        c2 = np.sum(((nn - 1) / uu)**2)
+
+        assert scipy.stats.chi2(len(h)).cdf(c2) > 0.01
+        assert scipy.stats.chi2(len(h)).sf(c2) > 0.01
+
+
+@pytest.mark.skipif('not HAS_SCIPY')
+@pytest.mark.parametrize("ii,rr", [
+    ((4, (0, 1), (1,)), (1, 1, 1, 1)),
+    ((2, (0, 1), (1,)), (1, 1)),
+    ((4, (0, 0.5, 1), (1, 1)), (1, 1, 1, 1)),
+    ((4, (0, 0.5, 1), (1, 2)), (1, 1, 2, 2)),
+    ((3, (0, 0.5, 1), (1, 2)), (1, 1.5, 2)),
+])
+def test_histogram_intervals_known(ii, rr):
+    with NumpyRNGContext(1234):
+        assert_allclose(funcs.histogram_intervals(*ii), rr)
+
+
+@pytest.mark.skipif('not HAS_SCIPY')
+@pytest.mark.parametrize('N,m,p', [pytest.param(100, 10000, 0.01,
+                                                marks=pytest.mark.skip('Test too slow')),
+                                   pytest.param(300, 10000, 0.001,
+                                                marks=pytest.mark.skip('Test too slow')),
+                                   (10, 10000, 0.001),
+                                   (3, 10000, 0.001),
+                                   ])
+def test_uniform_binomial(N, m, p):
+    """Check that the false positive probability is right
+
+    In particular, run m trials with N uniformly-distributed photons
+    and check that the number of false positives is consistent with
+    a binomial distribution. The more trials, the tighter the bounds
+    but the longer the runtime.
+
+    """
+    with NumpyRNGContext(1234):
+        fpps = np.array([funcs.kuiper(np.random.random(N))[1]
+                         for i in range(m)])
+        assert (fpps >= 0).all()
+        assert (fpps <= 1).all()
+        low = scipy.stats.binom(n=m, p=p).ppf(0.01)
+        high = scipy.stats.binom(n=m, p=p).ppf(0.99)
+        assert (low < sum(fpps < p) < high)

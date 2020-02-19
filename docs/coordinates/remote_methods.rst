@@ -2,8 +2,8 @@
 
 .. _astropy-coordinates-remote:
 
-Usage tips/suggestions for methods that access remote resources
----------------------------------------------------------------
+Usage Tips/Suggestions for Methods That Access Remote Resources
+***************************************************************
 
 There are currently two methods that rely on getting remote data to work.
 
@@ -12,9 +12,9 @@ The first is the :class:`~astropy.coordinates.SkyCoord` :meth:`~astropy.coordina
 for a particular named object::
 
     >>> from astropy.coordinates import SkyCoord
-    >>> SkyCoord.from_name("M42")  # doctest: +REMOTE_DATA +FLOAT_CMP
+    >>> SkyCoord.from_name("PSR J1012+5307")  # doctest: +REMOTE_DATA +FLOAT_CMP
     <SkyCoord (ICRS): (ra, dec) in deg
-        (83.82208, -5.39111)>
+        ( 153.1393271,  53.117343)>
 
 The second is the :class:`~astropy.coordinates.EarthLocation` :meth:`~astropy.coordinates.EarthLocation.of_site` method, which
 provides a similar quick way to get an
@@ -27,14 +27,15 @@ provides a similar quick way to get an
 The full list of available observatory names can be obtained with
  :meth:`astropy.coordinates.EarthLocation.get_site_names`.
 
-While these methods are convenient, there are several considerations to take into account:
+While these methods are convenient, there are several considerations to take
+into account:
 
 * Since these methods access online data, the data may evolve over time (for
   example, the accuracy of coordinates might improve, and new observatories
-  may be added). Therefore, this means that a script using these and running
-  now may give a different answer in five years. Therefore, users concerned
+  may be added). Therefore, this means that a script using these and currently
+  running may give a different answer in five years. Therefore, users concerned
   with reproducibility should not use these methods in their final scripts,
-  but can instead use them to get the values required and then hard-code them
+  but can instead use them to get the values required, and then hard-code them
   into the scripts. For example, we can check the coordinates of the Kitt
   Peak Observatories using::
 
@@ -42,12 +43,12 @@ While these methods are convenient, there are several considerations to take int
 
   Note that this command requires an internet connection.
 
-  We can then view the actual cartesian coordinates for the observatory:
+  We can then view the actual Cartesian coordinates for the observatory:
 
     >>> loc  # doctest: +REMOTE_DATA +FLOAT_CMP
     <EarthLocation (-1994502.6043061386, -5037538.54232911, 3358104.9969029757) m>
 
-  This can then easily be converted to code::
+  This can then be converted into code::
 
     >>> loc = EarthLocation(-1994502.6043061386, -5037538.54232911, 3358104.9969029757, unit='m')
 
@@ -56,7 +57,7 @@ While these methods are convenient, there are several considerations to take int
 
 * The online data may not be accurate enough for your purposes. If maximum
   accuracy is paramount, we recommend that you determine the celestial or
-  Earth coordinates yourself and hard-code these, rather than use the
+  Earth coordinates yourself and hard-code these, rather than using the
   convenience methods.
 
 * These methods will not function if an internet connection is not available.

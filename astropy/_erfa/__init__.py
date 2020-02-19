@@ -1,7 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-try:
-    # The ERFA wrappers are not guaranteed available at setup time
-    from .core import *
-except ImportError:
-    if not _ASTROPY_SETUP_:
-        raise
+
+from .core import *
+from .ufunc import (dt_eraASTROM, dt_eraLDBODY, dt_eraLEAPSECOND, dt_pv,
+                    dt_sign, dt_type, dt_ymdf, dt_hmsf, dt_dmsf)
+from .helpers import leap_seconds

@@ -50,19 +50,19 @@ int eraEpv00(double date1, double date2,
 **  2) On return, the arrays pvh and pvb contain the following:
 **
 **        pvh[0][0]  x       }
-**        pvh[0][1]  y       } heliocentric position, AU
+**        pvh[0][1]  y       } heliocentric position, au
 **        pvh[0][2]  z       }
 **
 **        pvh[1][0]  xdot    }
-**        pvh[1][1]  ydot    } heliocentric velocity, AU/d
+**        pvh[1][1]  ydot    } heliocentric velocity, au/d
 **        pvh[1][2]  zdot    }
 **
 **        pvb[0][0]  x       }
-**        pvb[0][1]  y       } barycentric position, AU
+**        pvb[0][1]  y       } barycentric position, au
 **        pvb[0][2]  z       }
 **
 **        pvb[1][0]  xdot    }
-**        pvb[1][1]  ydot    } barycentric velocity, AU/d
+**        pvb[1][1]  ydot    } barycentric velocity, au/d
 **        pvb[1][2]  zdot    }
 **
 **     The vectors are with respect to the Barycentric Celestial
@@ -94,7 +94,7 @@ int eraEpv00(double date1, double date2,
 **  5) It is permissible to use the same array for pvh and pvb, which
 **     will receive the barycentric values.
 **
-**  Copyright (C) 2013-2015, NumFOCUS Foundation.
+**  Copyright (C) 2013-2019, NumFOCUS Foundation.
 **  Derived, with permission, from the SOFA library.  See notes at end of file.
 */
 {
@@ -2385,7 +2385,7 @@ int eraEpv00(double date1, double date2,
    double t, t2, xyz, xyzd, a, b, c, ct, p, cp,
           ph[3], vh[3], pb[3], vb[3], x, y, z;
 
-/*--------------------------------------------------------------------*/
+/* ------------------------------------------------------------------ */
 
 /* Time since reference epoch, Julian years. */
    t = ((date1 - ERFA_DJ00) + date2) / ERFA_DJY;
@@ -2537,7 +2537,7 @@ int eraEpv00(double date1, double date2,
 /*----------------------------------------------------------------------
 **  
 **  
-**  Copyright (C) 2013-2015, NumFOCUS Foundation.
+**  Copyright (C) 2013-2019, NumFOCUS Foundation.
 **  All rights reserved.
 **  
 **  This library is derived, with permission, from the International

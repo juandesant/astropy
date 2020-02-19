@@ -1,15 +1,15 @@
-.. _access_table:
-
 .. include:: references.txt
 
+.. _access_table:
+
 Accessing a table
------------------
+*****************
 
 Accessing the table properties and data is straightforward and is generally consistent with
 the basic interface for `numpy` structured arrays.
 
 Quick overview
-^^^^^^^^^^^^^^
+==============
 
 For the impatient, the code below shows the basics of accessing table data.
 Where relevant there is a comment about what sort of object is returned.
@@ -65,7 +65,7 @@ to update the original table data or properties.  See also the section on
   t.pprint()   # Same as above
   t.pprint(show_unit=True)  # Show column unit
   t.pprint(show_name=False)  # Do not show column names
-  t.pprint(max_lines=-1, max_width=-1)  # Print full table no matter how long / wide it is
+  t.pprint_all() # Print full table no matter how long / wide it is (same as t.pprint(max_lines=-1, max_width=-1))
 
   t.more()  # Interactively scroll through table like Unix "more"
 
@@ -78,7 +78,7 @@ to update the original table data or properties.  See also the section on
 
 
 Details
-^^^^^^^
+=======
 
 For all the following examples it is assumed that the table has been created as below::
 
@@ -101,11 +101,20 @@ For all the following examples it is assumed that the table has been created as 
        9.000  10  11
       12.000  13  14
 
+.. Note::
+
+   In the example above the ``format``, ``unit``, and ``description`` attributes
+   of the `~astropy.table.Column` were set directly.  For :ref:`mixin_columns` like
+   `~astropy.units.Quantity` you must set via the ``info`` attribute, for example
+   ``t['a'].info.format = "%6.3f"``.  One can use the ``info`` attribute with
+   `~astropy.table.Column` objects as well, so the general solution that works
+   with any table column is to set via the ``info`` attribute.  See
+   :ref:`mixin_attributes` for more information.
 
 .. _table-summary-information:
 
 Summary information
-"""""""""""""""""""
+-------------------
 
 You can get summary information about the table as follows::
 
@@ -163,7 +172,7 @@ but provides information about a single column::
 
 
 Accessing properties
-""""""""""""""""""""
+--------------------
 
 The code below shows accessing the table columns as a |TableColumns| object,
 getting the column names, table meta-data, and number of table rows.  The table
@@ -184,7 +193,7 @@ meta-data is simply an ordered dictionary (OrderedDict_) by default.
 
 
 Accessing data
-""""""""""""""
+--------------
 
 As expected you can access a table column by name and get an element from that
 column with a numerical index::
@@ -284,6 +293,20 @@ selected rows or columns.  ::
        9.000  11
       12.000  14
 
+We can select rows from a table using conditionals to create boolean masks. A
+table indexed with a boolean array will only return rows where the mask array
+element is `True`. Different conditionals can be combined using the bitwise
+operators.  ::
+
+  >>> mask = (t['a'] > 4) & (t['b'] > 8)  # Table rows where column a > 4
+  >>> print(t[mask])                      # and b > 8
+  ...
+       a      b   c
+    m sec^-1
+    -------- --- ---
+       9.000  10  11
+      12.000  13  14
+
 Finally, you can access the underlying table data as a native `numpy`
 structured array by creating a copy or reference with ``np.array``::
 
@@ -291,13 +314,63 @@ structured array by creating a copy or reference with ``np.array``::
   >>> data = np.array(t, copy=False)  # reference to data in t
 
 
+Table Equality
+--------------
+We can check table data equality using two different methods:
+
+- The ``==`` comparison operator.  This returns a ``True`` or ``False`` for
+  each row if the *entire row* matches.  This is the same as the behavior of
+  numpy structured arrays.
+- Table :meth:`~astropy.table.Table.values_equal` to compare table values
+  element-wise.  This returns a boolean ``True`` or ``False`` for each table
+  *element*, so one gets a `~astropy.table.Table` of values.
+
+Examples::
+
+  >>> t1 = Table(rows=[[1, 2, 3],
+  ...                  [4, 5, 6],
+  ...                  [7, 7, 9]], names=['a', 'b', 'c'])
+  >>> t2 = Table(rows=[[1, 2, -1],
+  ...                  [4, -1, 6],
+  ...                  [7, 7, 9]], names=['a', 'b', 'c'])
+
+  >>> t1 == t2
+  array([False, False,  True])
+
+  >>> t1.values_equal(t2)  # Compare to another table
+  <Table length=3>
+   a     b     c
+  bool  bool  bool
+  ---- ----- -----
+  True  True False
+  True False  True
+  True  True  True
+
+  >>> t1.values_equal([2, 4, 7])  # Compare to an array column-wise
+  <Table length=3>
+    a     b     c
+   bool  bool  bool
+  ----- ----- -----
+  False  True False
+   True False False
+   True  True False
+
+  >>> t1.values_equal(7)  # Compare to a scalar column-wise
+  <Table length=3>
+    a     b     c
+   bool  bool  bool
+  ----- ----- -----
+  False False False
+  False False False
+   True  True False
+
 Formatted printing
-""""""""""""""""""
+------------------
 
 The values in a table or column can be printed or retrieved as a formatted
 table using one of several methods:
 
-- `print` statement (Python 2) or `print()` function (Python 3).
+- `print()` function.
 - Table :meth:`~astropy.table.Table.more` or Column
   :meth:`~astropy.table.Column.more` methods to interactively scroll
   through table values.
@@ -347,7 +420,7 @@ too large then rows and/or columns are cut from the middle so it fits.  For exam
   Length = 100 rows
 
 more() method
-'''''''''''''
+^^^^^^^^^^^^^
 
 In order to browse all rows of a table or column use the Table
 :meth:`~astropy.table.Table.more` or Column :func:`~astropy.table.Column.more`
@@ -366,7 +439,7 @@ supported navigation keys are:
 |  **h** : print this help
 
 pprint() method
-'''''''''''''''
+^^^^^^^^^^^^^^^
 
 In order to fully control the print output use the Table
 :meth:`~astropy.table.Table.pprint` or Column
@@ -412,10 +485,12 @@ meaning as shown below::
   Length = 100 rows
 
 In order to force printing all values regardless of the output length or width
-set ``max_lines`` or ``max_width`` to ``-1``, respectively.  For the wide
-table in this example you see 6 lines of wrapped output like the following::
+use :meth:`~astropy.table.Table.pprint_all`, which is equivalent  to setting ``max_lines``
+and ``max_width`` to ``-1`` in :meth:`~astropy.table.Table.pprint`.
+:meth:`~astropy.table.Table.pprint_all` takes the same arguments as :meth:`~astropy.table.Table.pprint`.
+For the wide table in this example you see 6 lines of wrapped output like the following::
 
-  >>> t.pprint(max_lines=8, max_width=-1)  # doctest: +SKIP
+  >>> t.pprint_all(max_lines=8)  # doctest: +SKIP
       col0         col1     col2   col3   col4   col5   col6   col7   col8   col9  col10  col11  col12  col13  col14  col15  col16  col17  col18  col19  col20  col21  col22  col23  col24  col25  col26  col27  col28     col29
       km2                                                                                                                                                                                                               kg sec m**-2
   ------------ ----------- ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------ ------------
@@ -440,7 +515,7 @@ For columns the syntax and behavior of
   Length = 100 rows
 
 Column alignment
-''''''''''''''''
+^^^^^^^^^^^^^^^^
 
 Individual columns have the ability to be aligned in a number of different
 ways, for an enhanced viewing experience::
@@ -450,9 +525,9 @@ ways, for an enhanced viewing experience::
   >>> t1['long column name 2'] = [4, 5, 6]
   >>> t1['long column name 3'] = [7, 8, 9]
   >>> t1['long column name 4'] = [700000, 800000, 900000]
-  >>> t1['long column name 2'].format = '<'
-  >>> t1['long column name 3'].format = '0='
-  >>> t1['long column name 4'].format = '^'
+  >>> t1['long column name 2'].info.format = '<'
+  >>> t1['long column name 3'].info.format = '0='
+  >>> t1['long column name 4'].info.format = '^'
   >>> t1.pprint()
    long column name 1 long column name 2 long column name 3 long column name 4
   ------------------ ------------------ ------------------ ------------------
@@ -518,18 +593,19 @@ used::
   ##2.00# 2!!!!!!
 
 pformat() method
-''''''''''''''''
+^^^^^^^^^^^^^^^^
 
 In order to get the formatted output for manipulation or writing to a file use
 the Table :meth:`~astropy.table.Table.pformat` or Column
 :func:`~astropy.table.Column.pformat` methods.  These behave just as for
 :meth:`~astropy.table.Table.pprint` but return a list corresponding to each formatted line in the
-:meth:`~astropy.table.Table.pprint` output.
+:meth:`~astropy.table.Table.pprint` output. The :meth:`~astropy.table.Table.pformat_all` method can be
+used to return a list for all lines in the Table.
 
   >>> lines = t['col3'].pformat(max_lines=8)
 
 Multidimensional columns
-''''''''''''''''''''''''
+^^^^^^^^^^^^^^^^^^^^^^^^
 
 If a column has more than one dimension then each element of the column is
 itself an array.  In the example below there are 3 rows, each of which is a
@@ -571,7 +647,7 @@ any array::
 .. _columns_with_units:
 
 Columns with Units
-''''''''''''''''''
+^^^^^^^^^^^^^^^^^^
 
 A `~astropy.table.Column` object with units within a standard
 `~astropy.table.Table` (as opposed to a `~astropy.table.QTable`) has certain
@@ -584,10 +660,10 @@ explicitly to a `~astropy.units.Quantity` object via the
   >>> t = Table(data, names=('a', 'b'))
   >>> t['a'].unit = u.m
   >>> t['b'].unit = 'km/s'
-  >>> t['a'].quantity
-  <Quantity [ 1., 2., 3.] m>
+  >>> t['a'].quantity  # doctest: +FLOAT_CMP
+  <Quantity [1., 2., 3.] m>
   >>> t['b'].to(u.kpc/u.Myr)  # doctest: +FLOAT_CMP
-  <Quantity [ 40.9084866 , 51.13560825, 61.3627299 ] kpc / Myr>
+  <Quantity [40.9084866 , 51.13560825, 61.3627299 ] kpc / Myr>
 
 Note that the :attr:`~astropy.table.Column.quantity` property is actually
 a *view* of the data in the column, not a copy.  Hence, you can set the
@@ -611,11 +687,11 @@ Even without explicit conversion, columns with units can be treated like
 like an Astropy `~astropy.units.Quantity` in *some* arithmetic
 expressions (see the warning below for caveats to this)::
 
-  >>> t['a'] + .005*u.km
-  <Quantity [ 6., 7., 8.] m>
+  >>> t['a'] + .005*u.km  # doctest: +FLOAT_CMP
+  <Quantity [6., 7., 8.] m>
   >>> from astropy.constants import c
   >>> (t['b'] / c).decompose()  # doctest: +FLOAT_CMP
-  <Quantity [ 0.15010384, 0.16678205, 0.20013846]>
+  <Quantity [0.15010384, 0.16678205, 0.20013846]>
 
 .. warning::
 
@@ -643,4 +719,76 @@ expressions (see the warning below for caveats to this)::
   `~astropy.units.Quantity`::
 
     >>> np.sin(t['angle'].quantity)  # doctest: +FLOAT_CMP
-    <Quantity [ 0.5, 1. ]>
+    <Quantity [0.5, 1. ]>
+
+.. _bytestring-columns-python-3:
+
+Bytestring columns
+^^^^^^^^^^^^^^^^^^
+
+Using bytestring columns (numpy ``'S'`` dtype) is straightforward
+with astropy tables since they can be easily compared with the natural
+Python string (``str``) type.  See `The bytes/str dichotomy in Python 3
+<https://eli.thegreenplace.net/2012/01/30/the-bytesstr-dichotomy-in-python-3>`_
+for a very brief overview of the difference.
+
+The standard method of representing strings in `numpy` is via the
+unicode ``'U'`` dtype.  The problem is that this requires 4 bytes per
+character, and if you have a very large number of strings in memory this could
+fill memory and impact performance.  A very common use case is that these
+strings are actually ASCII and can be represented with 1 byte per character.
+In astropy it is possible to work directly and conveniently with
+bytestring data in |Table| and |Column| operations.
+
+Note that the bytestring issue is a particular problem when dealing with HDF5
+files, where character data are read as bytestrings (``'S'`` dtype) when using
+the :ref:`table_io`. Since HDF5 files are frequently used to store very large
+datasets, the memory bloat associated with conversion to ``'U'`` dtype is
+unacceptable.
+
+
+Examples
+""""""""
+
+The examples below illustrate dealing with bytestring data in astropy.
+
+.. doctest-skip-all
+
+::
+
+    >>> t = Table([['abc', 'def']], names=['a'], dtype=['S'])
+
+    >>> t['a'] == 'abc'  # Gives expected answer
+    array([ True, False], dtype=bool)
+
+    >>> t['a'] == b'abc'  # Still gives expected answer
+    array([ True, False], dtype=bool)
+
+    >>> t['a'][0] == 'abc'  # Expected answer
+    True
+
+    >>> t['a'][0] == b'abc'  # Cannot compare to bytestring
+    False
+
+    >>> t['a'][0] = 'bä'
+    >>> t
+    <Table length=2>
+      a
+    bytes3
+    ------
+        bä
+       def
+
+    >>> t['a'] == 'bä'
+    array([ True, False], dtype=bool)
+
+    >>> # Round trip unicode strings through HDF5
+    >>> t.write('test.hdf5', format='hdf5', path='data', overwrite=True)
+    >>> t2 = Table.read('test.hdf5', format='hdf5', path='data')
+    >>> t2
+    <Table length=2>
+     col0
+    bytes3
+    ------
+        bä
+       def

@@ -2,14 +2,15 @@
 Special models useful for complex compound models where control is needed over
 which outputs from a source model are mapped to which inputs of a target model.
 """
+# pylint: disable=invalid-name
 
-from .core import Model
+from .core import FittableModel
 
 
 __all__ = ['Mapping', 'Identity']
 
 
-class Mapping(Model):
+class Mapping(FittableModel):
     """
     Allows inputs to be reordered, duplicated or dropped.
 
@@ -44,49 +45,49 @@ class Mapping(Model):
     >>> model(1, 2)  # doctest: +FLOAT_CMP
     (17.0, 14.2)
     """
+    linear = True  # FittableModel is non-linear by default
 
     def __init__(self, mapping, n_inputs=None, name=None, meta=None):
+        self._inputs = ()
+        self._outputs = ()
         if n_inputs is None:
-            self._inputs = tuple('x' + str(idx)
-                                 for idx in range(max(mapping) + 1))
+            self._n_inputs = max(mapping) + 1
         else:
-            self._inputs = tuple('x' + str(idx)
-                                 for idx in range(n_inputs))
-        self._outputs = tuple('x' + str(idx) for idx in range(len(mapping)))
+            self._n_inputs = n_inputs
+
+        self._n_outputs = len(mapping)
+        super().__init__(name=name, meta=meta)
+
+        self.inputs = tuple('x' + str(idx) for idx in range(self._n_inputs))
+        self.outputs = tuple('x' + str(idx) for idx in range(self._n_outputs))
+
         self._mapping = mapping
-        super(Mapping, self).__init__(name=name, meta=meta)
+        self._input_units_strict = {key: False for key in self._inputs}
+        self._input_units_allow_dimensionless = {key: False for key in self._inputs}
 
     @property
-    def inputs(self):
-        """
-        The name(s) of the input variable(s) on which a model is evaluated.
-        """
-
-        return self._inputs
+    def n_inputs(self):
+        return self._n_inputs
 
     @property
-    def outputs(self):
-        """The name(s) of the output(s) of the model."""
-
-        return self._outputs
+    def n_outputs(self):
+        return self._n_outputs
 
     @property
     def mapping(self):
         """Integers representing indices of the inputs."""
-
         return self._mapping
 
     def __repr__(self):
         if self.name is None:
-            return '<Mapping({0})>'.format(self.mapping)
-        else:
-            return '<Mapping({0}, name={1})>'.format(self.mapping, self.name)
+            return f'<Mapping({self.mapping})>'
+        return f'<Mapping({self.mapping}, name={self.name!r})>'
 
     def evaluate(self, *args):
         if len(args) != self.n_inputs:
             name = self.name if self.name is not None else "Mapping"
 
-            raise TypeError('{0} expects {1} inputs; got {2}'.format(
+            raise TypeError('{} expects {} inputs; got {}'.format(
                 name, self.n_inputs, len(args)))
 
         result = tuple(args[idx] for idx in self._mapping)
@@ -113,12 +114,14 @@ class Mapping(Model):
                             for idx in range(self.n_inputs))
         except ValueError:
             raise NotImplementedError(
-                "Mappings such as {0} that drop one or more of their inputs "
+                "Mappings such as {} that drop one or more of their inputs "
                 "are not invertible at this time.".format(self.mapping))
 
         inv = self.__class__(mapping)
         inv._inputs = self._outputs
         inv._outputs = self._inputs
+        inv._n_inputs = len(inv._inputs)
+        inv._n_outputs = len(inv._outputs)
         return inv
 
 
@@ -153,16 +156,16 @@ class Identity(Mapping):
         >>> model.inverse(2.4, 2) # doctest: +FLOAT_CMP
         (1.0, 1.0)
     """
+    linear = True  # FittableModel is non-linear by default
 
     def __init__(self, n_inputs, name=None, meta=None):
         mapping = tuple(range(n_inputs))
-        super(Identity, self).__init__(mapping, name=name, meta=meta)
+        super().__init__(mapping, name=name, meta=meta)
 
     def __repr__(self):
         if self.name is None:
-            return '<Identity({0})>'.format(self.n_inputs)
-        else:
-            return '<Identity({0}, name={1})>'.format(self.n_inputs, self.name)
+            return f'<Identity({self.n_inputs})>'
+        return f'<Identity({self.n_inputs}, name={self.name!r})>'
 
     @property
     def inverse(self):

@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------------------
 # ply: lex.py
 #
-# Copyright (C) 2001-2015,
+# Copyright (C) 2001-2017
 # David M. Beazley (Dabeaz LLC)
 # All rights reserved.
 #
@@ -31,8 +31,8 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 # -----------------------------------------------------------------------------
 
-__version__    = '3.6'
-__tabversion__ = '3.5'
+__version__    = '3.10'
+__tabversion__ = '3.10'
 
 import re
 import sys
@@ -171,12 +171,15 @@ class Lexer:
     # ------------------------------------------------------------
     # writetab() - Write lexer information to a table file
     # ------------------------------------------------------------
-    def writetab(self, basetabmodule, outputdir=''):
+    def writetab(self, lextab, outputdir=''):
+        if isinstance(lextab, types.ModuleType):
+            raise IOError("Won't overwrite existing lextab module")
+        basetabmodule = lextab.split('.')[-1]
         filename = os.path.join(outputdir, basetabmodule) + '.py'
         with open(filename, 'w') as tf:
             tf.write('# %s.py. This file automatically created by PLY (version %s). Don\'t edit!\n' % (basetabmodule, __version__))
             tf.write('_tabversion   = %s\n' % repr(__tabversion__))
-            tf.write('_lextokens    = %s\n' % repr(self.lextokens))
+            tf.write('_lextokens    = set(%s)\n' % repr(tuple(self.lextokens)))
             tf.write('_lexreflags   = %s\n' % repr(self.lexreflags))
             tf.write('_lexliterals  = %s\n' % repr(self.lexliterals))
             tf.write('_lexstateinfo = %s\n' % repr(self.lexstateinfo))
@@ -227,7 +230,7 @@ class Lexer:
             titem = []
             txtitem = []
             for pat, func_name in lre:
-                titem.append((re.compile(pat, lextab._lexreflags | re.VERBOSE), _names_to_funcs(func_name, fdict)))
+                titem.append((re.compile(pat, lextab._lexreflags), _names_to_funcs(func_name, fdict)))
 
             self.lexstatere[statename] = titem
             self.lexstateretext[statename] = txtitem
@@ -492,7 +495,7 @@ def _form_master_re(relist, reflags, ldict, toknames):
         return []
     regex = '|'.join(relist)
     try:
-        lexre = re.compile(regex, re.VERBOSE | reflags)
+        lexre = re.compile(regex, reflags)
 
         # Build the index to function map for the matching engine
         lexindexfunc = [None] * (max(lexre.groupindex.values()) + 1)
@@ -755,7 +758,7 @@ class LexerReflect(object):
                     continue
 
                 try:
-                    c = re.compile('(?P<%s>%s)' % (fname, _get_regex(f)), re.VERBOSE | self.reflags)
+                    c = re.compile('(?P<%s>%s)' % (fname, _get_regex(f)), self.reflags)
                     if c.match(''):
                         self.log.error("%s:%d: Regular expression for rule '%s' matches empty string", file, line, f.__name__)
                         self.error = True
@@ -779,7 +782,7 @@ class LexerReflect(object):
                     continue
 
                 try:
-                    c = re.compile('(?P<%s>%s)' % (name, r), re.VERBOSE | self.reflags)
+                    c = re.compile('(?P<%s>%s)' % (name, r), self.reflags)
                     if (c.match('')):
                         self.log.error("Regular expression for rule '%s' matches empty string", name)
                         self.error = True
@@ -827,7 +830,10 @@ class LexerReflect(object):
     # -----------------------------------------------------------------------------
 
     def validate_module(self, module):
-        lines, linen = inspect.getsourcelines(module)
+        try:
+            lines, linen = inspect.getsourcelines(module)
+        except IOError:
+            return
 
         fre = re.compile(r'\s*def\s+(t_[a-zA-Z_0-9]*)\(')
         sre = re.compile(r'\s*(t_[a-zA-Z_0-9]*)\s*=')
@@ -855,7 +861,11 @@ class LexerReflect(object):
 # Build all of the regular expression rules from definitions in the supplied module
 # -----------------------------------------------------------------------------
 def lex(module=None, object=None, debug=False, optimize=False, lextab='lextab',
-        reflags=0, nowarn=False, outputdir=None, debuglog=None, errorlog=None):
+        reflags=int(re.VERBOSE), nowarn=False, outputdir=None, debuglog=None, errorlog=None):
+
+    if lextab is None:
+        lextab = 'lextab'
+
     global lexer
 
     ldict = None
@@ -885,28 +895,12 @@ def lex(module=None, object=None, debug=False, optimize=False, lextab='lextab',
     else:
         ldict = get_caller_module_dict(2)
 
-    if outputdir is None:
-        # If no output directory is set, the location of the output files
-        # is determined according to the following rules:
-        #     - If lextab specifies a package, files go into that package directory
-        #     - Otherwise, files go in the same directory as the specifying module
-        if '.' not in lextab:
-            srcfile = ldict['__file__']
-        else:
-            parts = lextab.split('.')
-            pkgname = '.'.join(parts[:-1])
-            exec('import %s' % pkgname)
-            srcfile = getattr(sys.modules[pkgname], '__file__', '')
-        outputdir = os.path.dirname(srcfile)
-
     # Determine if the module is package of a package or not.
     # If so, fix the tabmodule setting so that tables load correctly
     pkg = ldict.get('__package__')
-    if pkg:
+    if pkg and isinstance(lextab, str):
         if '.' not in lextab:
             lextab = pkg + '.' + lextab
-
-    baselextab = lextab.split('.')[-1]
 
     # Collect parser information from the dictionary
     linfo = LexerReflect(ldict, log=errorlog, reflags=reflags)
@@ -1029,8 +1023,24 @@ def lex(module=None, object=None, debug=False, optimize=False, lextab='lextab',
 
     # If in optimize mode, we write the lextab
     if lextab and optimize:
+        if outputdir is None:
+            # If no output directory is set, the location of the output files
+            # is determined according to the following rules:
+            #     - If lextab specifies a package, files go into that package directory
+            #     - Otherwise, files go in the same directory as the specifying module
+            if isinstance(lextab, types.ModuleType):
+                srcfile = lextab.__file__
+            else:
+                if '.' not in lextab:
+                    srcfile = ldict['__file__']
+                else:
+                    parts = lextab.split('.')
+                    pkgname = '.'.join(parts[:-1])
+                    exec('import %s' % pkgname)
+                    srcfile = getattr(sys.modules[pkgname], '__file__', '')
+            outputdir = os.path.dirname(srcfile)
         try:
-            lexobj.writetab(baselextab, outputdir)
+            lexobj.writetab(lextab, outputdir)
         except IOError as e:
             errorlog.warning("Couldn't write lextab module %r. %s" % (lextab, e))
 

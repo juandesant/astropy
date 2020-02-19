@@ -1,7 +1,7 @@
 /*============================================================================
 
-  WCSLIB 5.14 - an implementation of the FITS WCS standard.
-  Copyright (C) 1995-2016, Mark Calabretta
+  WCSLIB 7.1 - an implementation of the FITS WCS standard.
+  Copyright (C) 1995-2020, Mark Calabretta
 
   This file is part of WCSLIB.
 
@@ -22,10 +22,10 @@
 
   Author: Mark Calabretta, Australia Telescope National Facility, CSIRO.
   http://www.atnf.csiro.au/people/Mark.Calabretta
-  $Id: sph.h,v 5.14 2016/02/07 10:49:31 mcalabre Exp $
+  $Id: sph.h,v 7.1 2019/12/31 13:25:19 mcalabre Exp $
 *=============================================================================
 *
-* WCSLIB 5.14 - C routines that implement the FITS World Coordinate System
+* WCSLIB 7.1 - C routines that implement the FITS World Coordinate System
 * (WCS) standard.  Refer to the README file provided with WCSLIB for an
 * overview of the library.
 *

@@ -1,15 +1,14 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import with_statement
 
 import os
 import time
 
+import pytest
 import numpy as np
 
 from . import FitsTestCase
 from .test_table import comparerecords
-from ....io import fits
-from ....tests.helper import pytest
+from astropy.io import fits
 
 
 class TestGroupsFunctions(FitsTestCase):
@@ -18,7 +17,7 @@ class TestGroupsFunctions(FitsTestCase):
             assert isinstance(hdul[0], fits.GroupsHDU)
             naxes = (3, 1, 128, 1, 1)
             parameters = ['UU', 'VV', 'WW', 'BASELINE', 'DATE']
-            info = [(0, 'PRIMARY', 'GroupsHDU', 147, naxes, 'float32',
+            info = [(0, 'PRIMARY', 1, 'GroupsHDU', 147, naxes, 'float32',
                      '3 Groups  5 Parameters')]
             assert hdul.info(output=False) == info
 
@@ -153,6 +152,9 @@ class TestGroupsFunctions(FitsTestCase):
 
         # Test putting the data into a GroupsHDU and round-tripping it
         ghdu = fits.GroupsHDU(data=x)
+        assert ghdu.parnames == ['abc', 'xyz']
+        assert ghdu.header['GCOUNT'] == 10
+
         ghdu.writeto(self.temp('test.fits'))
 
         with fits.open(self.temp('test.fits')) as h:
@@ -210,3 +212,13 @@ class TestGroupsFunctions(FitsTestCase):
             assert x.dtype.names == ('abc', 'xyz', '_abc', 'DATA')
             assert x.par('abc')[0] == 5
             assert (x.par('abc')[1:] == pdata1[1:] * 2).all()
+
+    def test_group_bad_naxis(self):
+        """Test file without NAXIS1 keyword.
+        Regression test for https://github.com/astropy/astropy/issues/9709
+        """
+        testfile = os.path.join('invalid', 'group_invalid.fits')
+        with fits.open(self.data(testfile)) as hdul:
+            assert len(hdul) == 1
+            assert hdul[0].header['GROUPS']
+            assert hdul[0].data is None

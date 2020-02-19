@@ -1,31 +1,28 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """General purpose timer related functions."""
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-
-from ..extern import six
-
 # STDLIB
 import time
 import warnings
-from collections import Iterable, OrderedDict
+from collections import OrderedDict
+from collections.abc import Iterable
 from functools import partial, wraps
 
 # THIRD-PARTY
 import numpy as np
 
 # LOCAL
-from .. import units as u
-from .. import log
-from .. import modeling
-from .exceptions import AstropyUserWarning
+from astropy import units as u
+from astropy import log
+from astropy import modeling
+from astropy.utils.decorators import deprecated
+from astropy.utils.exceptions import AstropyUserWarning
+
+__all__ = []
+__doctest_skip__ = ['*']
 
 
-__all__ = ['timefunc', 'RunTimePredictor']
-__doctest_skip__ = ['timefunc']
-
-
+@deprecated('4.0', alternative='astroquery.utils.timer.timefunc')
 def timefunc(num_tries=1, verbose=True):
     """Decorator to time a function or method.
 
@@ -77,14 +74,15 @@ def timefunc(num_tries=1, verbose=True):
             te = time.time()
             tt = (te - ts) / num_tries
             if verbose:  # pragma: no cover
-                log.info('{0} took {1} s on AVERAGE for {2} call(s).'.format(
+                log.info('{} took {} s on AVERAGE for {} call(s).'.format(
                     function.__name__, tt, num_tries))
             return tt, result
         return wrapper
     return real_decorator
 
 
-class RunTimePredictor(object):
+@deprecated('4.0', alternative='astroquery.utils.timer.RunTimePredictor')
+class RunTimePredictor:
     """Class to predict run time.
 
     .. note:: Only predict for single varying numeric input parameter.
@@ -102,11 +100,10 @@ class RunTimePredictor(object):
 
     Examples
     --------
-    >>> from astropy.utils.timer import RunTimePredictor
-
     Set up a predictor for :math:`10^{x}`:
 
-    >>> p = RunTimePredictor(pow, 10)
+    >>> from astropy.utils.timer import RunTimePredictor  # doctest: +IGNORE_WARNINGS
+    >>> p = RunTimePredictor(pow, 10)  # doctest: +IGNORE_WARNINGS
 
     Give it baseline data to use for prediction and
     get the function output values:
@@ -125,7 +122,7 @@ class RunTimePredictor(object):
     pow(10, 810)
     10000000000...
 
-    Fit a straight line assuming :math:`\\textnormal{arg}^{1}` relationship
+    Fit a straight line assuming :math:`\\text{arg}^{1}` relationship
     (coefficients are returned):
 
     >>> p.do_fit()  # doctest: +SKIP
@@ -224,7 +221,7 @@ class RunTimePredictor(object):
         ----------
         model : `astropy.modeling.Model`
             Model for the expected trend of run time (Y-axis)
-            w.r.t. :math:`\\textnormal{arg}^{\\textnormal{power}}` (X-axis).
+            w.r.t. :math:`\\text{arg}^{\\text{power}}` (X-axis).
             If `None`, will use `~astropy.modeling.polynomial.Polynomial1D`
             with ``degree=1``.
 
@@ -241,12 +238,12 @@ class RunTimePredictor(object):
 
         Returns
         -------
-        a : array-like
+        a : array_like
             Fitted `~astropy.modeling.FittableModel` parameters.
 
         Raises
         ------
-        AssertionError
+        ValueError
             Insufficient data points for fitting.
 
         ModelsError
@@ -257,25 +254,25 @@ class RunTimePredictor(object):
         self._power = power
         self._cache_est = OrderedDict()
 
-        x_arr = np.array(list(six.iterkeys(self._cache_good)))
-        assert x_arr.size >= min_datapoints, \
-            'Requires {0} points but has {1}'.format(min_datapoints,
-                                                     x_arr.size)
+        x_arr = np.array(list(self._cache_good.keys()))
+        if x_arr.size < min_datapoints:
+            raise ValueError('requires {} points but has {}'.format(
+                min_datapoints, x_arr.size))
 
         if model is None:
             model = modeling.models.Polynomial1D(1)
         elif not isinstance(model, modeling.core.Model):
             raise modeling.fitting.ModelsError(
-                '{0} is not a model.'.format(model))
+                f'{model} is not a model.')
 
         if fitter is None:
             fitter = modeling.fitting.LinearLSQFitter()
         elif not isinstance(fitter, modeling.fitting.Fitter):
             raise modeling.fitting.ModelsError(
-                '{0} is not a fitter.'.format(fitter))
+                f'{fitter} is not a fitter.')
 
         self._fit_func = fitter(
-            model, x_arr**power, list(six.itervalues(self._cache_good)))
+            model, x_arr**power, list(self._cache_good.values()))
 
         return self._fit_func.parameters
 
@@ -295,14 +292,15 @@ class RunTimePredictor(object):
 
         Raises
         ------
-        AssertionError
+        RuntimeError
             No fitted data for prediction.
 
         """
         if arg in self._cache_est:
             t_est = self._cache_est[arg]
         else:
-            assert self._fit_func is not None, 'No fitted data for prediction'
+            if self._fit_func is None:
+                raise RuntimeError('no fitted data for prediction')
             t_est = self._fit_func(arg**self._power)
             self._cache_est[arg] = t_est
         return t_est
@@ -311,7 +309,7 @@ class RunTimePredictor(object):
              save_as=''):  # pragma: no cover
         """Plot prediction.
 
-        .. note:: Uses `matplotlib <http://matplotlib.sourceforge.net/>`_.
+        .. note:: Uses `matplotlib <https://matplotlib.org/>`_.
 
         Parameters
         ----------
@@ -326,7 +324,7 @@ class RunTimePredictor(object):
 
         Raises
         ------
-        AssertionError
+        RuntimeError
             Insufficient data for plotting.
 
         """
@@ -336,30 +334,31 @@ class RunTimePredictor(object):
         x_arr = sorted(self._cache_good)
         y_arr = np.array([self._cache_good[x] for x in x_arr])
 
-        assert len(x_arr) > 1, 'Insufficient data for plotting'
+        if len(x_arr) <= 1:
+            raise RuntimeError('insufficient data for plotting')
 
         # Auto-ranging
         qmean = y_arr.mean() * u.second
         for cur_u in (u.minute, u.second, u.millisecond, u.microsecond,
                       u.nanosecond):
-            val = qmean.to(cur_u).value
+            val = qmean.to_value(cur_u)
             if 1000 > val >= 1:
                 break
-        y_arr = (y_arr * u.second).to(cur_u).value
+        y_arr = (y_arr * u.second).to_value(cur_u)
 
         fig, ax = plt.subplots()
         ax.plot(x_arr, y_arr, 'kx-', label='Actual')
 
         # Fitted data
         if self._fit_func is not None:
-            x_est = list(six.iterkeys(self._cache_est))
-            y_est = (np.array(list(six.itervalues(self._cache_est))) *
-                     u.second).to(cur_u).value
+            x_est = list(self._cache_est.keys())
+            y_est = (np.array(list(self._cache_est.values())) *
+                     u.second).to_value(cur_u)
             ax.scatter(x_est, y_est, marker='o', c='r', label='Predicted')
 
             x_fit = np.array(sorted(x_arr + x_est))
             y_fit = (self._fit_func(x_fit**self._power) *
-                     u.second).to(cur_u).value
+                     u.second).to_value(cur_u)
             ax.plot(x_fit, y_fit, 'b--', label='Fit')
 
         ax.set_xscale(xscale)

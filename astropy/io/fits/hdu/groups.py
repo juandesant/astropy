@@ -3,14 +3,14 @@
 import sys
 import numpy as np
 
-from .base import DTYPE2BITPIX
+from .base import DTYPE2BITPIX, DELAYED
 from .image import PrimaryHDU
 from .table import _TableLikeHDU
-from ..column import Column, ColDefs, FITS2NUMPY
-from ..fitsrec import FITS_rec, FITS_record
-from ..util import _is_int, _is_pseudo_unsigned, _unsigned_zero
+from astropy.io.fits.column import Column, ColDefs, FITS2NUMPY
+from astropy.io.fits.fitsrec import FITS_rec, FITS_record
+from astropy.io.fits.util import _is_int, _is_pseudo_unsigned, _unsigned_zero
 
-from ....utils import lazyproperty
+from astropy.utils import lazyproperty
 
 
 class Group(FITS_record):
@@ -20,7 +20,7 @@ class Group(FITS_record):
 
     def __init__(self, input, row=0, start=None, end=None, step=None,
                  base=None):
-        super(Group, self).__init__(input, row, start, end, step, base)
+        super().__init__(input, row, start, end, step, base)
 
     @property
     def parnames(self):
@@ -80,8 +80,8 @@ class Group(FITS_record):
                     for i in range(len(indx)):
                         self.array[self.row][indx[i]] = value[i]
                 else:
-                    raise ValueError('Parameter value must be a sequence '
-                                     'with %d arrays/numbers.' % len(indx))
+                    raise ValueError('Parameter value must be a sequence with '
+                                     '{} arrays/numbers.'.format(len(indx)))
 
 
 class GroupData(FITS_rec):
@@ -140,7 +140,7 @@ class GroupData(FITS_rec):
                 parbzeros = [None] * npars
 
             if parnames is None:
-                parnames = ['PAR%d' % (idx + 1) for idx in range(npars)]
+                parnames = ['PAR{}'.format(idx + 1) for idx in range(npars)]
 
             if len(parnames) != npars:
                 raise ValueError('The number of parameter data arrays does '
@@ -153,7 +153,7 @@ class GroupData(FITS_rec):
 
             fits_fmt = GroupsHDU._bitpix2tform[bitpix]  # -32 -> 'E'
             format = FITS2NUMPY[fits_fmt]  # 'E' -> 'f4'
-            data_fmt = '%s%s' % (str(input.shape[1:]), format)
+            data_fmt = '{}{}'.format(str(input.shape[1:]), format)
             formats = ','.join(([format] * npars) + [data_fmt])
             gcount = input.shape[0]
 
@@ -202,14 +202,14 @@ class GroupData(FITS_rec):
         return self
 
     def __array_finalize__(self, obj):
-        super(GroupData, self).__array_finalize__(obj)
+        super().__array_finalize__(obj)
         if isinstance(obj, GroupData):
             self.parnames = obj.parnames
         elif isinstance(obj, FITS_rec):
             self.parnames = obj._coldefs.names
 
     def __getitem__(self, key):
-        out = super(GroupData, self).__getitem__(key)
+        out = super().__getitem__(key)
         if isinstance(out, GroupData):
             out.parnames = self.parnames
         return out
@@ -253,7 +253,7 @@ class GroupsHDU(PrimaryHDU, _TableLikeHDU):
     """
     FITS Random Groups HDU class.
 
-    See the :ref:`random-groups` section in the PyFITS documentation for more
+    See the :ref:`random-groups` section in the Astropy documentation for more
     details on working with this type of HDU.
     """
 
@@ -267,7 +267,9 @@ class GroupsHDU(PrimaryHDU, _TableLikeHDU):
     """
 
     def __init__(self, data=None, header=None):
-        super(GroupsHDU, self).__init__(data=data, header=header)
+        super().__init__(data=data, header=header)
+        if data is not DELAYED:
+            self.update_header()
 
         # Update the axes; GROUPS HDUs should always have at least one axis
         if len(self._axes) <= 0:
@@ -287,6 +289,9 @@ class GroupsHDU(PrimaryHDU, _TableLikeHDU):
         The data of a random group FITS file will be like a binary table's
         data.
         """
+
+        if self._axes == [0]:
+            return
 
         data = self._get_tbdata()
         data._coldefs = self.columns
@@ -471,7 +476,7 @@ class GroupsHDU(PrimaryHDU, _TableLikeHDU):
                 # Convert the unsigned array to signed
                 output = np.array(
                     self.data - _unsigned_zero(self.data.dtype),
-                    dtype='>i%d' % self.data.dtype.itemsize)
+                    dtype=f'>i{self.data.dtype.itemsize}')
                 should_swap = False
             else:
                 output = self.data
@@ -480,12 +485,18 @@ class GroupsHDU(PrimaryHDU, _TableLikeHDU):
                 should_swap = (byteorder in swap_types)
 
             if not fileobj.simulateonly:
+
                 if should_swap:
-                    output.byteswap(True)
-                    try:
-                        fileobj.writearray(output)
-                    finally:
+                    if output.flags.writeable:
                         output.byteswap(True)
+                        try:
+                            fileobj.writearray(output)
+                        finally:
+                            output.byteswap(True)
+                    else:
+                        # For read-only arrays, there is no way around making
+                        # a byteswapped copy of the data.
+                        fileobj.writearray(output.byteswap(False))
                 else:
                     fileobj.writearray(output)
 
@@ -493,11 +504,11 @@ class GroupsHDU(PrimaryHDU, _TableLikeHDU):
         return size
 
     def _verify(self, option='warn'):
-        errs = super(GroupsHDU, self)._verify(option=option)
+        errs = super()._verify(option=option)
 
         # Verify locations and values of mandatory keywords.
         self.req_cards('NAXIS', 2,
-                       lambda v: (_is_int(v) and v >= 1 and v <= 999), 1,
+                       lambda v: (_is_int(v) and 1 <= v <= 999), 1,
                        option, errs)
         self.req_cards('NAXIS1', 3, lambda v: (_is_int(v) and v == 0), 0,
                        option, errs)
@@ -511,13 +522,15 @@ class GroupsHDU(PrimaryHDU, _TableLikeHDU):
                        errs)
         return errs
 
-    def _calculate_datasum(self, blocking):
+    def _calculate_datasum(self):
         """
         Calculate the value for the ``DATASUM`` card in the HDU.
         """
 
         if self._has_data:
+
             # We have the data to be used.
+
             # Check the byte order of the data.  If it is little endian we
             # must swap it before calculating the datasum.
             # TODO: Maybe check this on a per-field basis instead of assuming
@@ -526,16 +539,23 @@ class GroupsHDU(PrimaryHDU, _TableLikeHDU):
                 self.data.dtype.fields[self.data.dtype.names[0]][0].str[0]
 
             if byteorder != '>':
-                byteswapped = True
-                d = self.data.byteswap(True)
-                d.dtype = d.dtype.newbyteorder('>')
+                if self.data.flags.writeable:
+                    byteswapped = True
+                    d = self.data.byteswap(True)
+                    d.dtype = d.dtype.newbyteorder('>')
+                else:
+                    # If the data is not writeable, we just make a byteswapped
+                    # copy and don't bother changing it back after
+                    d = self.data.byteswap(False)
+                    d.dtype = d.dtype.newbyteorder('>')
+                    byteswapped = False
             else:
                 byteswapped = False
                 d = self.data
 
             byte_data = d.view(type=np.ndarray, dtype=np.ubyte)
 
-            cs = self._compute_checksum(byte_data, blocking=blocking)
+            cs = self._compute_checksum(byte_data)
 
             # If the data was byteswapped in this method then return it to
             # its original little-endian order.
@@ -549,11 +569,11 @@ class GroupsHDU(PrimaryHDU, _TableLikeHDU):
             # yet.  We can handle that in a generic manner so we do it in the
             # base class.  The other possibility is that there is no data at
             # all.  This can also be handled in a generic manner.
-            return super(GroupsHDU, self)._calculate_datasum(blocking=blocking)
+            return super()._calculate_datasum()
 
     def _summary(self):
-        summary = super(GroupsHDU, self)._summary()
-        name, classname, length, shape, format, gcount = summary
+        summary = super()._summary()
+        name, ver, classname, length, shape, format, gcount = summary
 
         # Drop the first axis from the shape
         if shape:
@@ -564,8 +584,8 @@ class GroupsHDU(PrimaryHDU, _TableLikeHDU):
                 format = self.columns[0].dtype.name
 
         # Update the GCOUNT report
-        gcount = '%d Groups  %d Parameters' % (self._gcount, self._pcount)
-        return (name, classname, length, shape, format, gcount)
+        gcount = f'{self._gcount} Groups  {self._pcount} Parameters'
+        return (name, ver, classname, length, shape, format, gcount)
 
 
 def _par_indices(names):

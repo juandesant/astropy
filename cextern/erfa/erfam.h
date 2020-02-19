@@ -8,7 +8,7 @@
 **
 **  Macros used by ERFA library.
 **
-**  Copyright (C) 2013-2015, NumFOCUS Foundation.
+**  Copyright (C) 2013-2019, NumFOCUS Foundation.
 **  Derived, with permission, from the SOFA library.  See notes at end of file.
 */
 
@@ -40,6 +40,12 @@ typedef struct {
    double dl;         /* deflection limiter (radians^2/2) */
    double pv[2][3];   /* barycentric PV of the body (au, au/day) */
 } eraLDBODY;
+
+/* Leap second definition */
+typedef struct {
+   int iyear, month;
+   double delat;
+} eraLEAPSECOND;
 
 /* Pi */
 #define ERFA_DPI (3.141592653589793238462643)
@@ -98,17 +104,17 @@ typedef struct {
 /* TT minus TAI (s) */
 #define ERFA_TTMTAI (32.184)
 
-/* Astronomical unit (m) */
-#define ERFA_DAU (149597870e3)
+/* Astronomical unit (m, IAU 2012) */
+#define ERFA_DAU (149597870.7e3)
 
 /* Speed of light (m/s) */
 #define ERFA_CMPS 299792458.0
 
 /* Light time for 1 au (s) */
-#define ERFA_AULT 499.004782
+#define ERFA_AULT (ERFA_DAU/ERFA_CMPS)
 
-/* Speed of light (AU per day) */
-#define ERFA_DC (ERFA_DAYSEC / ERFA_AULT)
+/* Speed of light (au per day) */
+#define ERFA_DC (ERFA_DAYSEC/ERFA_AULT)
 
 /* L_G = 1 - d(TT)/d(TCG) */
 #define ERFA_ELG (6.969290134e-10)
@@ -147,7 +153,7 @@ typedef struct {
 /*----------------------------------------------------------------------
 **  
 **  
-**  Copyright (C) 2013-2015, NumFOCUS Foundation.
+**  Copyright (C) 2013-2019, NumFOCUS Foundation.
 **  All rights reserved.
 **  
 **  This library is derived, with permission, from the International

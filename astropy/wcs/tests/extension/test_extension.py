@@ -1,26 +1,28 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import os
 import subprocess
 import sys
 
-from ....tests.helper import pytest
+import pytest
 
 
 def test_wcsapi_extension(tmpdir):
     # Test that we can build a simple C extension with the astropy.wcs C API
+
+    build_dir = tmpdir.mkdir('build').strpath
+    install_dir = tmpdir.mkdir('install').strpath
 
     setup_path = os.path.dirname(__file__)
     astropy_path = os.path.abspath(
         os.path.join(setup_path, '..', '..', '..', '..'))
 
     env = os.environ.copy()
-    paths = [str(tmpdir), astropy_path]
+    paths = [install_dir, astropy_path]
     if env.get('PYTHONPATH'):
         paths.append(env.get('PYTHONPATH'))
-    env[str('PYTHONPATH')] = str(os.pathsep.join(paths))
+    env['PYTHONPATH'] = os.pathsep.join(paths)
 
     # Build the extension
     # This used to use subprocess.check_call, but on Python 3.4 there was
@@ -28,8 +30,9 @@ def test_wcsapi_extension(tmpdir):
     # *unless* the output is redirected.  This bug also did not occur in an
     # interactive session, so it likely had something to do with pytest's
     # output capture
-    p = subprocess.Popen([sys.executable, 'setup.py', 'install',
-                          '--install-lib={0}'.format(tmpdir),
+    p = subprocess.Popen([sys.executable, 'setup.py', 'build',
+                          f'--build-base={build_dir}', 'install',
+                          f'--install-lib={install_dir}',
                           astropy_path], cwd=setup_path, env=env,
                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
@@ -51,16 +54,16 @@ def test_wcsapi_extension(tmpdir):
     # don't want to ever skip, because having it fail in that
     # environment probably indicates something more serious that we
     # want to know about.
-    if (not (str('CI') in os.environ or
-             str('TRAVIS') in os.environ or
-             str('CONTINUOUS_INTEGRATION') in os.environ) and
+    if (not ('CI' in os.environ or
+             'TRAVIS' in os.environ or
+             'CONTINUOUS_INTEGRATION' in os.environ) and
         p.returncode):
         pytest.skip("system unable to compile extensions")
         return
 
     assert p.returncode == 0, (
-        "setup.py exited with non-zero return code {0}\n"
-        "stdout:\n\n{1}\n\nstderr:\n\n{2}\n".format(
+        "setup.py exited with non-zero return code {}\n"
+        "stdout:\n\n{}\n\nstderr:\n\n{}\n".format(
             p.returncode, stdout, stderr))
 
     code = """

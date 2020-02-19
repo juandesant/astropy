@@ -1,29 +1,25 @@
 # -*- coding: utf-8 -*-
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """Function Units and Quantities."""
-from __future__ import (absolute_import, unicode_literals,
-                        division, print_function)
 
-from abc import ABCMeta, abstractmethod, abstractproperty
+from abc import ABCMeta, abstractmethod
 
 import numpy as np
 
-from ...extern import six
-from .. import (Unit, UnitBase, UnitsError, UnitTypeError,
-                dimensionless_unscaled, Quantity, quantity_helper as qh)
+from astropy.units import (Unit, UnitBase, UnitsError, UnitTypeError, UnitConversionError,
+                           dimensionless_unscaled, Quantity)
 
 __all__ = ['FunctionUnitBase', 'FunctionQuantity']
 
-SUPPORTED_UFUNCS = set([ufunc for ufunc, helper in qh.UFUNC_HELPERS.items()
-                        if helper in (qh.helper_onearg_test,
-                                      qh.helper_invariant,
-                                      qh.helper_division,
-                                      qh.helper_copysign)])
-SUPPORTED_UFUNCS |= set([getattr(np.core.umath, ufunc)
-                         for ufunc in ('sqrt', 'cbrt', 'square', 'reciprocal',
-                                       'multiply', 'power',
-                                       '_ones_like', 'ones_like')
-                         if hasattr(np.core.umath, ufunc)])
+SUPPORTED_UFUNCS = set(getattr(np.core.umath, ufunc) for ufunc in (
+    'isfinite', 'isinf', 'isnan', 'sign', 'signbit',
+    'rint', 'floor', 'ceil', 'trunc',
+    '_ones_like', 'ones_like', 'positive') if hasattr(np.core.umath, ufunc))
+
+# TODO: the following could work if helper changed relative to Quantity:
+# - spacing should return dimensionless, not same unit
+# - negative should negate unit too,
+# - add, subtract, comparisons can work if units added/subtracted
 
 SUPPORTED_FUNCTIONS = set(getattr(np, function) for function in
                           ('clip', 'trace', 'mean', 'min', 'max', 'round'))
@@ -31,8 +27,7 @@ SUPPORTED_FUNCTIONS = set(getattr(np, function) for function in
 
 # subclassing UnitBase or CompositeUnit was found to be problematic, requiring
 # a large number of overrides. Hence, define new class.
-@six.add_metaclass(ABCMeta)
-class FunctionUnitBase(object):
+class FunctionUnitBase(metaclass=ABCMeta):
     """Abstract base class for function units.
 
     Function units are functions containing a physical unit, such as dB(mW).
@@ -55,7 +50,8 @@ class FunctionUnitBase(object):
     """
     # ↓↓↓ the following four need to be set by subclasses
     # Make this a property so we can ensure subclasses define it.
-    @abstractproperty
+    @property
+    @abstractmethod
     def _default_function_unit(self):
         """Default function unit corresponding to the function.
 
@@ -65,7 +61,8 @@ class FunctionUnitBase(object):
 
     # This has to be a property because the function quantity will not be
     # known at unit definition time, as it gets defined after.
-    @abstractproperty
+    @property
+    @abstractmethod
     def _quantity_class(self):
         """Function quantity class corresponding to this function unit.
 
@@ -101,8 +98,8 @@ class FunctionUnitBase(object):
             if (not isinstance(self._physical_unit, UnitBase) or
                 self._physical_unit.is_equivalent(
                     self._default_function_unit)):
-                raise ValueError("Unit {0} is not a physical unit."
-                                 .format(self._physical_unit))
+                raise UnitConversionError("Unit {} is not a physical unit."
+                                          .format(self._physical_unit))
 
         if function_unit is None:
             self._function_unit = self._default_function_unit
@@ -113,12 +110,11 @@ class FunctionUnitBase(object):
             if function_unit.is_equivalent(self._default_function_unit):
                 self._function_unit = function_unit
             else:
-                raise ValueError("Cannot initialize '{0}' instance with "
-                                 "function unit '{1}', as it is not "
-                                 "equivalent to default function unit '{2}'."
-                                 .format(self.__class__.__name__,
-                                         function_unit,
-                                         self._default_function_unit))
+                raise UnitConversionError(
+                    "Cannot initialize '{}' instance with function unit '{}'"
+                    ", as it is not equivalent to default function unit '{}'."
+                    .format(self.__class__.__name__, function_unit,
+                            self._default_function_unit))
 
     def _copy(self, physical_unit=None):
         """Copy oneself, possibly with a different physical unit."""
@@ -169,24 +165,6 @@ class FunctionUnitBase(object):
     def physical_type(self):
         """Return the physical type of the physical unit (e.g., 'length')."""
         return self.physical_unit.physical_type
-
-    def _to(self, other):
-        """
-        Returns the scale to the specified function unit.
-
-        This is required to mimic behaviour expected for any units, e.g.,
-        in `~astropy.units.core.UnitBase.apply_equivalencies`.  It should not
-        be used for conversion, as it does not take into account differences
-        in physical unit. For conversion, use the ``to`` method.
-
-        Raises UnitsError is the physical units are not equivalent.
-        """
-        if not self.physical_unit._is_equivalent(
-                getattr(other, 'physical_unit', other)):
-            raise UnitsError("'{0!r}' is not a scaled version of '{1!r}'"
-                             .format(self, other))
-
-        return self.function_unit._to(getattr(other, 'function_unit', other))
 
     def is_equivalent(self, other, equivalencies=[]):
         """
@@ -273,9 +251,19 @@ class FunctionUnitBase(object):
             return self.function_unit.to(other_function_unit, value)
 
         else:
-            # when other is not a function unit
-            return self.physical_unit.to(other, self.to_physical(value),
-                                         equivalencies)
+            try:
+                # when other is not a function unit
+                return self.physical_unit.to(other, self.to_physical(value),
+                                             equivalencies)
+            except UnitConversionError as e:
+                if self.function_unit == Unit('mag'):
+                    # One can get to raw magnitudes via math that strips the dimensions off.
+                    # Include extra information in the exception to remind users of this.
+                    msg = "Did you perhaps subtract magnitudes so the unit got lost?"
+                    e.args += (msg,)
+                    raise e
+                else:
+                    raise
 
     def is_unity(self):
         return False
@@ -286,12 +274,17 @@ class FunctionUnitBase(object):
                 self.function_unit == getattr(other, 'function_unit', other))
 
     def __ne__(self, other):
-        return (self.physical_unit != getattr(other, 'physical_unit',
-                                              dimensionless_unscaled) or
-                self.funtional_unit != getattr(other, 'function_unit', other))
+        return not self.__eq__(other)
+
+    def __rlshift__(self, other):
+        """Unit converstion operator ``<<``"""
+        try:
+            return self._quantity_class(other, self, copy=False, subok=True)
+        except Exception:
+            return NotImplemented
 
     def __mul__(self, other):
-        if isinstance(other, (six.string_types, UnitBase, FunctionUnitBase)):
+        if isinstance(other, (str, UnitBase, FunctionUnitBase)):
             if self.physical_unit == dimensionless_unscaled:
                 # If dimensionless, drop back to normal unit and retry.
                 return self.function_unit * other
@@ -302,14 +295,14 @@ class FunctionUnitBase(object):
             # Anything not like a unit, try initialising as a function quantity.
             try:
                 return self._quantity_class(other, unit=self)
-            except UnitsError:
+            except Exception:
                 return NotImplemented
 
     def __rmul__(self, other):
         return self.__mul__(other)
 
     def __div__(self, other):
-        if isinstance(other, (six.string_types, UnitBase, FunctionUnitBase)):
+        if isinstance(other, (str, UnitBase, FunctionUnitBase)):
             if self.physical_unit == dimensionless_unscaled:
                 # If dimensionless, drop back to normal unit and retry.
                 return self.function_unit / other
@@ -320,11 +313,11 @@ class FunctionUnitBase(object):
             # Anything not like a unit, try initialising as a function quantity.
             try:
                 return self._quantity_class(1./other, unit=self)
-            except UnitsError:
+            except Exception:
                 return NotImplemented
 
     def __rdiv__(self, other):
-        if isinstance(other, (six.string_types, UnitBase, FunctionUnitBase)):
+        if isinstance(other, (str, UnitBase, FunctionUnitBase)):
             if self.physical_unit == dimensionless_unscaled:
                 # If dimensionless, drop back to normal unit and retry.
                 return other / self.function_unit
@@ -368,7 +361,7 @@ class FunctionUnitBase(object):
             provided, defaults to the generic format.
         """
         if format not in ('generic', 'unscaled', 'latex'):
-            raise ValueError("Function units cannot be written in {0} format. "
+            raise ValueError("Function units cannot be written in {} format. "
                              "Only 'generic', 'unscaled' and 'latex' are "
                              "supported.".format(format))
         self_str = self.function_unit.to_string(format)
@@ -379,7 +372,7 @@ class FunctionUnitBase(object):
             self_str += r'$\mathrm{{\left( {0} \right)}}$'.format(
                 pu_str[1:-1])   # need to strip leading and trailing "$"
         else:
-            self_str += '({0})'.format(pu_str)
+            self_str += f'({pu_str})'
         return self_str
 
     def __str__(self):
@@ -387,20 +380,20 @@ class FunctionUnitBase(object):
         self_str = str(self.function_unit)
         pu_str = str(self.physical_unit)
         if pu_str:
-            self_str += '({0})'.format(pu_str)
+            self_str += f'({pu_str})'
         return self_str
 
     def __repr__(self):
         # By default, try to give a representation using `Unit(<string>)`,
         # with string such that parsing it would give the correct FunctionUnit.
         if callable(self.function_unit):
-            return 'Unit("{0}")'.format(self.to_string())
+            return 'Unit("{}")'.format(self.to_string())
 
         else:
-            return '{0}("{1}"{2})'.format(
+            return '{}("{}"{})'.format(
                 self.__class__.__name__, self.physical_unit,
                 "" if self.function_unit is self._default_function_unit
-                else ', unit="{0}"'.format(self.function_unit))
+                else f', unit="{self.function_unit}"')
 
     def _repr_latex_(self):
         """
@@ -438,7 +431,7 @@ class FunctionQuantity(Quantity):
         converted to the function unit, after, if necessary, converting it to
         the physical unit inferred from ``unit``.
 
-    unit : string, `~astropy.units.UnitBase` or `~astropy.units.function.FunctionUnitBase` instance, optional
+    unit : str, `~astropy.units.UnitBase`, or `~astropy.units.function.FunctionUnitBase`, optional
         For an `~astropy.units.function.FunctionUnitBase` instance, the
         physical unit will be taken from it; for other input, it will be
         inferred from ``value``. By default, ``unit`` is set by the subclass.
@@ -500,34 +493,22 @@ class FunctionQuantity(Quantity):
             # Convert possible string input to a (function) unit.
             unit = Unit(unit)
 
-        value_unit = getattr(value, 'unit', None)
-        if value_unit is None:
-            # if iterable, see if first item has a unit; mixed lists fail below
-            try:
-                value_unit = getattr(value[0], 'unit')
-            except:
-                pass
-
-        if isinstance(value_unit, FunctionUnitBase):
-            if unit is None:
-                unit = value_unit
-                value = value._function_view  # for initialising Quantity
-            else:
-                # convert value to its quantity (will convert back below)
-                value_unit = value.physical_unit
-                value = value.quantity
-
         if not isinstance(unit, FunctionUnitBase):
-            unit = cls._unit_class(value_unit, function_unit=unit)
-
-        if value_unit is not None and value_unit is not unit:
-            # convert to target unit
-            value = unit.from_physical(value.to(unit.physical_unit).value)
+            # By default, use value's physical unit.
+            value_unit = getattr(value, 'unit', None)
+            if value_unit is None:
+                # if iterable, see if first item has a unit
+                # (mixed lists fail in super call below).
+                try:
+                    value_unit = getattr(value[0], 'unit')
+                except Exception:
+                    pass
+            physical_unit = getattr(value_unit, 'physical_unit', value_unit)
+            unit = cls._unit_class(physical_unit, function_unit=unit)
 
         # initialise!
-        return super(FunctionQuantity,
-                     cls).__new__(cls, value, unit, dtype=dtype, copy=copy,
-                                  order=order, subok=subok, ndmin=ndmin)
+        return super().__new__(cls, value, unit, dtype=dtype, copy=copy,
+                               order=order, subok=subok, ndmin=ndmin)
 
     # ↓↓↓ properties not found in Quantity
     @property
@@ -543,7 +524,7 @@ class FunctionQuantity(Quantity):
         """
         return self._new_view(unit=self.unit.function_unit)
 
-    # ↓↓↓ methods overridden to change the behaviour
+    # ↓↓↓ methods overridden to change the behavior
     @property
     def si(self):
         """Return a copy with the physical unit in SI units."""
@@ -561,33 +542,12 @@ class FunctionQuantity(Quantity):
         """
         return self.__class__(self.physical.decompose(bases))
 
-    # ↓↓↓ methods overridden to add additional behaviour
-    def __array_prepare__(self, obj, context=None):
-        """Check that the ufunc can deal with a FunctionQuantity."""
-
-        # If no context is set, just return the input
-        if context is None:
-            return obj
-
-        # Find out whether ufunc is supported
-        function = context[0]
-        if not (function in self._supported_ufuncs or
-                all(arg.unit.physical_unit == dimensionless_unscaled
-                    for arg in context[1][:function.nin]
-                    if (hasattr(arg, 'unit') and
-                        hasattr(arg.unit, 'physical_unit')))):
-            raise TypeError("Cannot use function '{0}' with function "
-                            "quantities that are not dimensionless."
-                            .format(context[0].__name__))
-
-        return super(FunctionQuantity, self).__array_prepare__(obj, context)
-
+    # ↓↓↓ methods overridden to add additional behavior
     def __quantity_subclass__(self, unit):
         if isinstance(unit, FunctionUnitBase):
             return self.__class__, True
         else:
-            return super(FunctionQuantity,
-                         self).__quantity_subclass__(unit)[0], False
+            return super().__quantity_subclass__(unit)[0], False
 
     def _set_unit(self, unit):
         if not isinstance(unit, self._unit_class):
@@ -595,35 +555,47 @@ class FunctionQuantity(Quantity):
             try:
                 # "or 'nonsense'" ensures `None` breaks, just in case.
                 unit = self._unit_class(function_unit=unit or 'nonsense')
-            except:
+            except Exception:
                 raise UnitTypeError(
-                    "{0} instances require {1} function units"
+                    "{} instances require {} function units"
                     .format(type(self).__name__, self._unit_class.__name__) +
-                    ", so cannot set it to '{0}'.".format(unit))
+                    f", so cannot set it to '{unit}'.")
 
         self._unit = unit
 
-    # ↓↓↓ methods overridden to change behaviour
+    def __array_ufunc__(self, function, method, *inputs, **kwargs):
+        # TODO: it would be more logical to have this in Quantity already,
+        # instead of in UFUNC_HELPERS, where it cannot be overridden.
+        # And really it should just return NotImplemented, since possibly
+        # another argument might know what to do.
+        if function not in self._supported_ufuncs:
+            raise UnitTypeError(
+                "Cannot use ufunc '{}' with function quantities"
+                .format(function.__name__))
+
+        return super().__array_ufunc__(function, method, *inputs, **kwargs)
+
+    # ↓↓↓ methods overridden to change behavior
     def __mul__(self, other):
         if self.unit.physical_unit == dimensionless_unscaled:
             return self._function_view * other
 
-        raise UnitsError("Cannot multiply function quantities which "
-                         "are not dimensionless with anything.")
+        raise UnitTypeError("Cannot multiply function quantities which "
+                            "are not dimensionless with anything.")
 
     def __truediv__(self, other):
         if self.unit.physical_unit == dimensionless_unscaled:
             return self._function_view / other
 
-        raise UnitsError("Cannot divide function quantities which "
-                         "are not dimensionless by anything.")
+        raise UnitTypeError("Cannot divide function quantities which "
+                            "are not dimensionless by anything.")
 
     def __rtruediv__(self, other):
         if self.unit.physical_unit == dimensionless_unscaled:
             return self._function_view.__rdiv__(other)
 
-        raise UnitsError("Cannot divide function quantities which "
-                         "are not dimensionless into anything.")
+        raise UnitTypeError("Cannot divide function quantities which "
+                            "are not dimensionless into anything.")
 
     def _comparison(self, other, comparison_func):
         """Do a comparison between self and other, raising UnitsError when
@@ -631,12 +603,21 @@ class FunctionQuantity(Quantity):
         unit, and returning NotImplemented when there are other errors."""
         try:
             # will raise a UnitsError if physical units not equivalent
-            return comparison_func(
-                self._to_own_unit(other, check_precision=False))
-        except UnitsError:
-            raise
-        except:
+            other_in_own_unit = self._to_own_unit(other, check_precision=False)
+        except UnitsError as exc:
+            if self.unit.physical_unit != dimensionless_unscaled:
+                raise exc
+
+            try:
+                other_in_own_unit = self._function_view._to_own_unit(
+                    other, check_precision=False)
+            except Exception:
+                raise exc
+
+        except Exception:
             return NotImplemented
+
+        return comparison_func(other_in_own_unit)
 
     def __eq__(self, other):
         try:
@@ -662,11 +643,19 @@ class FunctionQuantity(Quantity):
     def __le__(self, other):
         return self._comparison(other, self.value.__le__)
 
+    def __lshift__(self, other):
+        """Unit converstion operator `<<`"""
+        try:
+            other = Unit(other, parse_strict='silent')
+        except UnitTypeError:
+            return NotImplemented
+
+        return self.__class__(self, other, copy=False, subok=True)
+
     # Ensure Quantity methods are used only if they make sense.
     def _wrap_function(self, function, *args, **kwargs):
         if function in self._supported_functions:
-            return super(FunctionQuantity,
-                         self)._wrap_function(function, *args, **kwargs)
+            return super()._wrap_function(function, *args, **kwargs)
 
         # For dimensionless, we can convert to regular quantities.
         if all(arg.unit.physical_unit == dimensionless_unscaled
@@ -676,6 +665,25 @@ class FunctionQuantity(Quantity):
             args = tuple(getattr(arg, '_function_view', arg) for arg in args)
             return self._function_view._wrap_function(function, *args, **kwargs)
 
-        raise TypeError("Cannot use method that uses function '{0}' with "
+        raise TypeError("Cannot use method that uses function '{}' with "
                         "function quantities that are not dimensionless."
                         .format(function.__name__))
+
+    # Override functions that are supported but do not use _wrap_function
+    # in Quantity.
+    def max(self, axis=None, out=None, keepdims=False):
+        return self._wrap_function(np.max, axis, out=out, keepdims=keepdims)
+
+    def min(self, axis=None, out=None, keepdims=False):
+        return self._wrap_function(np.min, axis, out=out, keepdims=keepdims)
+
+    def sum(self, axis=None, dtype=None, out=None, keepdims=False):
+        return self._wrap_function(np.sum, axis, dtype, out=out,
+                                   keepdims=keepdims)
+
+    def cumsum(self, axis=None, dtype=None, out=None):
+        return self._wrap_function(np.cumsum, axis, dtype, out=out)
+
+    def clip(self, a_min, a_max, out=None):
+        return self._wrap_function(np.clip, self._to_own_unit(a_min),
+                                   self._to_own_unit(a_max), out=out)

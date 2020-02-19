@@ -8,7 +8,6 @@ Classes to read DAOphot table format
 :Author: Tom Aldcroft (aldcroft@head.cfa.harvard.edu)
 """
 
-from __future__ import absolute_import, division, print_function
 
 import re
 import numpy as np
@@ -17,7 +16,6 @@ from collections import defaultdict, OrderedDict
 
 from . import core
 from . import fixedwidth
-from ...extern.six.moves import zip, map
 from .misc import first_true_index, first_false_index, groupmore
 
 
@@ -29,7 +27,7 @@ class DaophotHeader(core.BaseHeader):
     comment = r'\s*#K'
 
     # Regex for extracting the format strings
-    re_format = re.compile('%-?(\d+)\.?\d?[sdfg]')
+    re_format = re.compile(r'%-?(\d+)\.?\d?[sdfg]')
     re_header_keyword = re.compile(r'[#]K'
                                    r'\s+ (?P<name> \w+)'
                                    r'\s* = (?P<stuff> .+) $',
@@ -154,7 +152,7 @@ class DaophotHeader(core.BaseHeader):
 
         Parameters
         ----------
-        lines: list
+        lines : list
             List of table lines
 
         Returns
@@ -308,14 +306,16 @@ class DaophotInputter(core.ContinuationLinesInputter):
                     outlines.append(''.join(parts))
                     parts = []
             else:
-                raise ValueError('multiline re could not match line %i: %s' % (i, line))
+                raise core.InconsistentTableError('multiline re could not match line '
+                                                  '{}: {}'.format(i, line))
 
         return outlines
 
 
 class Daophot(core.BaseReader):
     """
-    Read a DAOphot file.
+    DAOphot format table.
+
     Example::
 
       #K MERGERAD   = INDEF                   scaleunit  %-23.7g
@@ -339,7 +339,7 @@ class Daophot(core.BaseReader):
 
       >>> import os
       >>> from astropy.io import ascii
-      >>> filename = os.path.join(ascii.__path__[0], 'tests/t/daophot.dat')
+      >>> filename = os.path.join(ascii.__path__[0], 'tests/data/daophot.dat')
       >>> data = ascii.read(filename)
       >>> for name, keyword in data.meta['keywords'].items():
       ...     print(name, keyword['value'], keyword['units'], keyword['format'])

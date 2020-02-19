@@ -1,12 +1,11 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 import numpy as np
 
+from astropy.utils.decorators import deprecated_renamed_argument
 
 __all__ = ['jackknife_resampling', 'jackknife_stats']
-__doctest_requires__ = {'jackknife_stats': ['scipy.special']}
+__doctest_requires__ = {'jackknife_stats': ['scipy']}
 
 
 def jackknife_resampling(data):
@@ -40,13 +39,12 @@ def jackknife_resampling(data):
         Resampling Plans". Technical Report No. 63, Division of Biostatistics,
         Stanford University, December, 1980.
 
-    .. [3] Cowles, Kate. "Computing in Statistics: The Jackknife, Lecture 11".
-        <http://homepage.stat.uiowa.edu/~kcowles/s166_2009/lect11.pdf>.
-        September, 2009.
-    """
+    .. [3] Jackknife resampling <https://en.wikipedia.org/wiki/Jackknife_resampling>
+    """  # noqa
 
     n = data.shape[0]
-    assert n > 0, "data must contain at least one measurement"
+    if n <= 0:
+        raise ValueError("data must contain at least one measurement.")
 
     resamples = np.empty([n, n-1])
 
@@ -56,10 +54,11 @@ def jackknife_resampling(data):
     return resamples
 
 
-def jackknife_stats(data, statistic, conf_lvl=0.95):
+@deprecated_renamed_argument('conf_lvl', 'confidence_level', '4.0')
+def jackknife_stats(data, statistic, confidence_level=0.95):
     """ Performs jackknife estimation on the basis of jackknife resamples.
 
-    This function requires `SciPy <http://www.scipy.org>`_ to be installed.
+    This function requires `SciPy <https://www.scipy.org/>`_ to be installed.
 
     Parameters
     ----------
@@ -69,7 +68,7 @@ def jackknife_stats(data, statistic, conf_lvl=0.95):
         Any function (or vector of functions) on the basis of the measured
         data, e.g, sample mean, sample variance, etc. The jackknife estimate of
         this statistic will be returned.
-    conf_lvl : float, optional
+    confidence_level : float, optional
         Confidence level for the confidence interval of the Jackknife estimate.
         Must be a real-valued number in (0,1). Default value is 0.95.
 
@@ -101,16 +100,16 @@ def jackknife_stats(data, statistic, conf_lvl=0.95):
     >>> data = np.array([1,2,3,4,5,6,7,8,9,0])
     >>> resamples = jackknife_resampling(data)
     >>> resamples
-    array([[ 2.,  3.,  4.,  5.,  6.,  7.,  8.,  9.,  0.],
-           [ 1.,  3.,  4.,  5.,  6.,  7.,  8.,  9.,  0.],
-           [ 1.,  2.,  4.,  5.,  6.,  7.,  8.,  9.,  0.],
-           [ 1.,  2.,  3.,  5.,  6.,  7.,  8.,  9.,  0.],
-           [ 1.,  2.,  3.,  4.,  6.,  7.,  8.,  9.,  0.],
-           [ 1.,  2.,  3.,  4.,  5.,  7.,  8.,  9.,  0.],
-           [ 1.,  2.,  3.,  4.,  5.,  6.,  8.,  9.,  0.],
-           [ 1.,  2.,  3.,  4.,  5.,  6.,  7.,  9.,  0.],
-           [ 1.,  2.,  3.,  4.,  5.,  6.,  7.,  8.,  0.],
-           [ 1.,  2.,  3.,  4.,  5.,  6.,  7.,  8.,  9.]])
+    array([[2., 3., 4., 5., 6., 7., 8., 9., 0.],
+           [1., 3., 4., 5., 6., 7., 8., 9., 0.],
+           [1., 2., 4., 5., 6., 7., 8., 9., 0.],
+           [1., 2., 3., 5., 6., 7., 8., 9., 0.],
+           [1., 2., 3., 4., 6., 7., 8., 9., 0.],
+           [1., 2., 3., 4., 5., 7., 8., 9., 0.],
+           [1., 2., 3., 4., 5., 6., 8., 9., 0.],
+           [1., 2., 3., 4., 5., 6., 7., 9., 0.],
+           [1., 2., 3., 4., 5., 6., 7., 8., 0.],
+           [1., 2., 3., 4., 5., 6., 7., 8., 9.]])
     >>> resamples.shape
     (10, 9)
 
@@ -124,10 +123,10 @@ def jackknife_stats(data, statistic, conf_lvl=0.95):
     4.5
     >>> bias
     0.0
-    >>> stderr
+    >>> stderr  # doctest: +FLOAT_CMP
     0.95742710775633832
     >>> conf_interval
-    array([ 2.62347735,  6.37652265])
+    array([2.62347735,  6.37652265])
 
     3. Example for two estimates
 
@@ -135,23 +134,28 @@ def jackknife_stats(data, statistic, conf_lvl=0.95):
     >>> estimate, bias, stderr, conf_interval = jackknife_stats(
     ...     data, test_statistic, 0.95)
     >>> estimate
-    array([ 4.5       ,  9.16666667])
+    array([4.5       ,  9.16666667])
     >>> bias
     array([ 0.        , -0.91666667])
     >>> stderr
-    array([ 0.95742711,  2.69124476])
+    array([0.95742711,  2.69124476])
     >>> conf_interval
-    array([[  2.62347735,   3.89192387],
-           [  6.37652265,  14.44140947]])
+    array([[ 2.62347735,   3.89192387],
+           [ 6.37652265,  14.44140947]])
 
     IMPORTANT: Note that confidence intervals are given as columns
     """
-
-    from scipy.special import erfinv
+    # jackknife confidence interval
+    if not (0 < confidence_level < 1):
+        raise ValueError("confidence level must be in (0, 1).")
 
     # make sure original data is proper
     n = data.shape[0]
-    assert n > 0, "data must contain at least one measurement"
+    if n <= 0:
+        raise ValueError("data must contain at least one measurement.")
+
+    # Only import scipy if inputs are valid
+    from scipy.special import erfinv
 
     resamples = jackknife_resampling(data)
 
@@ -169,10 +173,7 @@ def jackknife_stats(data, statistic, conf_lvl=0.95):
     # bias-corrected "jackknifed estimate"
     estimate = stat_data - bias
 
-    # jackknife confidence interval
-    assert (conf_lvl > 0 and conf_lvl < 1), ("confidence level must be in "
-                                             "(0, 1).")
-    z_score = np.sqrt(2.0)*erfinv(conf_lvl)
+    z_score = np.sqrt(2.0)*erfinv(confidence_level)
     conf_interval = estimate + z_score*np.array((-std_err, std_err))
 
     return estimate, bias, std_err, conf_interval

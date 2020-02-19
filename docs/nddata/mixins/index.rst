@@ -1,5 +1,5 @@
-Mixins for added functionality
-==============================
+Mixins for Added Functionality
+******************************
 
 .. toctree::
     :maxdepth: 2

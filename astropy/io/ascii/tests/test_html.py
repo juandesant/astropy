@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
 """
@@ -8,16 +10,23 @@ Requires `BeautifulSoup <http://www.crummy.com/software/BeautifulSoup/>`_
 to be installed.
 """
 
-from .. import html
-from .. import core
-from ....table import Table
+from io import StringIO
 
+from astropy.io.ascii import html
+from astropy.io.ascii import core
+from astropy.table import Table
+
+import pytest
 import numpy as np
 
-from .common import setup_function, teardown_function
-from ....tests.helper import pytest
-from ....extern.six.moves import cStringIO
-from ....utils.xml.writer import HAS_BLEACH
+from .common import setup_function, teardown_function  # noqa
+from astropy.io import ascii
+
+try:
+    import bleach  # noqa
+    HAS_BLEACH = True
+except ImportError:
+    HAS_BLEACH = False
 
 # Check to see if the BeautifulSoup dependency is present.
 try:
@@ -27,18 +36,21 @@ try:
 except ImportError:
     HAS_BEAUTIFUL_SOUP = False
 
+
 @pytest.mark.skipif('not HAS_BEAUTIFUL_SOUP')
 def test_soupstring():
     """
     Test to make sure the class SoupString behaves properly.
     """
 
-    soup = BeautifulSoup('<html><head></head><body><p>foo</p></body></html>')
+    soup = BeautifulSoup('<html><head></head><body><p>foo</p></body></html>',
+                         'html.parser')
     soup_str = html.SoupString(soup)
     assert isinstance(soup_str, str)
     assert isinstance(soup_str, html.SoupString)
     assert soup_str == '<html><head></head><body><p>foo</p></body></html>'
     assert soup_str.soup is soup
+
 
 def test_listwriter():
     """
@@ -55,6 +67,7 @@ def test_listwriter():
 
     assert lst == [0, 1, 2, 3, 4, 'a', 'b', 'c', 'd', 'e']
 
+
 @pytest.mark.skipif('not HAS_BEAUTIFUL_SOUP')
 def test_identify_table():
     """
@@ -63,14 +76,14 @@ def test_identify_table():
     """
 
     # Should return False on non-<table> tags and None
-    soup = BeautifulSoup('<html><body></body></html>')
+    soup = BeautifulSoup('<html><body></body></html>', 'html.parser')
     assert html.identify_table(soup, {}, 0) is False
     assert html.identify_table(None, {}, 0) is False
 
-    soup = BeautifulSoup('<table id="foo"><tr><th>A</th></tr><tr>' \
-                         '<td>B</td></tr></table>').table
+    soup = BeautifulSoup('<table id="foo"><tr><th>A</th></tr><tr>'
+                         '<td>B</td></tr></table>', 'html.parser').table
     assert html.identify_table(soup, {}, 2) is False
-    assert html.identify_table(soup, {}, 1) is True # Default index of 1
+    assert html.identify_table(soup, {}, 1) is True  # Default index of 1
 
     # Same tests, but with explicit parameter
     assert html.identify_table(soup, {'table_id': 2}, 1) is False
@@ -93,7 +106,7 @@ def test_missing_data():
                 '<tr><td>1</td></tr>',
                 '</table>']
     dat = Table.read(table_in, format='ascii.html')
-    assert dat.masked is True
+    assert dat.masked is False
     assert np.all(dat['A'].mask == [True, False])
     assert dat['A'].dtype.kind == 'i'
 
@@ -104,7 +117,7 @@ def test_missing_data():
                 '<tr><td>1</td></tr>',
                 '</table>']
     dat = Table.read(table_in, format='ascii.html', fill_values=[('...', '0')])
-    assert dat.masked is True
+    assert dat.masked is False
     assert np.all(dat['A'].mask == [True, False])
     assert dat['A'].dtype.kind == 'i'
 
@@ -161,12 +174,12 @@ def test_identify_table_fail():
     with pytest.raises(core.InconsistentTableError) as err:
         Table.read(table_in, format='ascii.html', htmldict={'table_id': 'bad_id'},
                    guess=False)
-    assert str(err).endswith("ERROR: HTML table id 'bad_id' not found")
+    assert err.match("ERROR: HTML table id 'bad_id' not found$")
 
     with pytest.raises(core.InconsistentTableError) as err:
         Table.read(table_in, format='ascii.html', htmldict={'table_id': 3},
                    guess=False)
-    assert str(err).endswith("ERROR: HTML table number 3 not found")
+    assert err.match("ERROR: HTML table number 3 not found$")
 
 
 @pytest.mark.skipif('not HAS_BEAUTIFUL_SOUP')
@@ -177,8 +190,8 @@ def test_backend_parsers():
     """
     for parser in ('lxml', 'xml', 'html.parser', 'html5lib'):
         try:
-            table = Table.read('t/html2.html', format='ascii.html',
-                               htmldict={'parser': parser}, guess=False)
+            Table.read('data/html2.html', format='ascii.html',
+                       htmldict={'parser': parser}, guess=False)
         except FeatureNotFound:
             if parser == 'html.parser':
                 raise
@@ -186,8 +199,9 @@ def test_backend_parsers():
 
     # reading should fail if the parser is invalid
     with pytest.raises(FeatureNotFound):
-        Table.read('t/html2.html', format='ascii.html',
+        Table.read('data/html2.html', format='ascii.html',
                    htmldict={'parser': 'foo'}, guess=False)
+
 
 @pytest.mark.skipif('HAS_BEAUTIFUL_SOUP')
 def test_htmlinputter_no_bs4():
@@ -200,6 +214,7 @@ def test_htmlinputter_no_bs4():
     with pytest.raises(core.OptionalTableImportError):
         inputter.process_lines([])
 
+
 @pytest.mark.skipif('not HAS_BEAUTIFUL_SOUP')
 def test_htmlinputter():
     """
@@ -207,7 +222,7 @@ def test_htmlinputter():
     into a list of SoupStrings representing table elements.
     """
 
-    f = 't/html.html'
+    f = 'data/html.html'
     with open(f) as fd:
         table = fd.read()
 
@@ -242,6 +257,7 @@ def test_htmlinputter():
                 '<tr><td>9</td><td>i</td><td>-125.0</td></tr>']
     assert [str(x) for x in inputter.get_lines(table)] == expected
 
+
 @pytest.mark.skipif('not HAS_BEAUTIFUL_SOUP')
 def test_htmlsplitter():
     """
@@ -252,8 +268,10 @@ def test_htmlsplitter():
 
     splitter = html.HTMLSplitter()
 
-    lines = [html.SoupString(BeautifulSoup('<table><tr><th>Col 1</th><th>Col 2</th></tr></table>').tr),
-            html.SoupString(BeautifulSoup('<table><tr><td>Data 1</td><td>Data 2</td></tr></table>').tr)]
+    lines = [html.SoupString(BeautifulSoup('<table><tr><th>Col 1</th><th>Col 2</th></tr></table>',
+                                           'html.parser').tr),
+             html.SoupString(BeautifulSoup('<table><tr><td>Data 1</td><td>Data 2</td></tr></table>',
+                                           'html.parser').tr)]
     expected_data = [['Col 1', 'Col 2'], ['Data 1', 'Data 2']]
     assert list(splitter(lines)) == expected_data
 
@@ -266,6 +284,7 @@ def test_htmlsplitter():
     with pytest.raises(core.InconsistentTableError):
         list(splitter([]))
 
+
 @pytest.mark.skipif('not HAS_BEAUTIFUL_SOUP')
 def test_htmlheader_start():
     """
@@ -274,7 +293,7 @@ def test_htmlheader_start():
     for sample input.
     """
 
-    f = 't/html.html'
+    f = 'data/html.html'
     with open(f) as fd:
         table = fd.read()
 
@@ -284,25 +303,27 @@ def test_htmlheader_start():
 
     lines = inputter.get_lines(table)
     assert str(lines[header.start_line(lines)]) == \
-           '<tr><th>Column 1</th><th>Column 2</th><th>Column 3</th></tr>'
+        '<tr><th>Column 1</th><th>Column 2</th><th>Column 3</th></tr>'
     inputter.html['table_id'] = 'second'
     lines = inputter.get_lines(table)
     assert str(lines[header.start_line(lines)]) == \
-           '<tr><th>Column A</th><th>Column B</th><th>Column C</th></tr>'
+        '<tr><th>Column A</th><th>Column B</th><th>Column C</th></tr>'
     inputter.html['table_id'] = 3
     lines = inputter.get_lines(table)
     assert str(lines[header.start_line(lines)]) == \
-           '<tr><th>C1</th><th>C2</th><th>C3</th></tr>'
+        '<tr><th>C1</th><th>C2</th><th>C3</th></tr>'
 
     # start_line should return None if no valid header is found
-    lines = [html.SoupString(BeautifulSoup('<table><tr><td>Data</td></tr></table>').tr),
-             html.SoupString(BeautifulSoup('<p>Text</p>').p)]
+    lines = [html.SoupString(BeautifulSoup('<table><tr><td>Data</td></tr></table>',
+                                           'html.parser').tr),
+             html.SoupString(BeautifulSoup('<p>Text</p>', 'html.parser').p)]
     assert header.start_line(lines) is None
 
     # Should raise an error if a non-SoupString is present
     lines.append('<tr><th>Header</th></tr>')
     with pytest.raises(TypeError):
         header.start_line(lines)
+
 
 @pytest.mark.skipif('not HAS_BEAUTIFUL_SOUP')
 def test_htmldata():
@@ -312,7 +333,7 @@ def test_htmldata():
     t/html.html for sample input.
     """
 
-    f = 't/html.html'
+    f = 'data/html.html'
     with open(f) as fd:
         table = fd.read()
 
@@ -322,28 +343,28 @@ def test_htmldata():
 
     lines = inputter.get_lines(table)
     assert str(lines[data.start_line(lines)]) == \
-           '<tr><td>1</td><td>a</td><td>1.05</td></tr>'
+        '<tr><td>1</td><td>a</td><td>1.05</td></tr>'
     # end_line returns the index of the last data element + 1
     assert str(lines[data.end_line(lines) - 1]) == \
-           '<tr><td>3</td><td>c</td><td>-1.25</td></tr>'
+        '<tr><td>3</td><td>c</td><td>-1.25</td></tr>'
 
     inputter.html['table_id'] = 'second'
     lines = inputter.get_lines(table)
     assert str(lines[data.start_line(lines)]) == \
-           '<tr><td>4</td><td>d</td><td>10.5</td></tr>'
+        '<tr><td>4</td><td>d</td><td>10.5</td></tr>'
     assert str(lines[data.end_line(lines) - 1]) == \
-           '<tr><td>6</td><td>f</td><td>-12.5</td></tr>'
+        '<tr><td>6</td><td>f</td><td>-12.5</td></tr>'
 
     inputter.html['table_id'] = 3
     lines = inputter.get_lines(table)
     assert str(lines[data.start_line(lines)]) == \
-           '<tr><td>7</td><td>g</td><td>105.0</td></tr>'
+        '<tr><td>7</td><td>g</td><td>105.0</td></tr>'
     assert str(lines[data.end_line(lines) - 1]) == \
-           '<tr><td>9</td><td>i</td><td>-125.0</td></tr>'
+        '<tr><td>9</td><td>i</td><td>-125.0</td></tr>'
 
     # start_line should raise an error if no table data exists
-    lines = [html.SoupString(BeautifulSoup('<div></div>').div),
-             html.SoupString(BeautifulSoup('<p>Text</p>').p)]
+    lines = [html.SoupString(BeautifulSoup('<div></div>', 'html.parser').div),
+             html.SoupString(BeautifulSoup('<p>Text</p>', 'html.parser').p)]
     with pytest.raises(core.InconsistentTableError):
         data.start_line(lines)
 
@@ -356,6 +377,7 @@ def test_htmldata():
         data.start_line(lines)
     with pytest.raises(TypeError):
         data.end_line(lines)
+
 
 def test_multicolumn_write():
     """
@@ -413,6 +435,7 @@ def test_multicolumn_write():
     """
     out = html.HTML().write(table)[0].strip()
     assert out == expected.strip()
+
 
 @pytest.mark.skipif('not HAS_BLEACH')
 def test_multicolumn_write_escape():
@@ -472,6 +495,7 @@ def test_multicolumn_write_escape():
     out = html.HTML(htmldict={'raw_html_cols': 'C3'}).write(table)[0].strip()
     assert out == expected.strip()
 
+
 def test_write_no_multicols():
     """
     Test to make sure that the HTML writer will not use
@@ -517,8 +541,9 @@ def test_write_no_multicols():
  </body>
 </html>
     """
-    assert html.HTML({'multicol':False}).write(table)[0].strip() == \
-                                                   expected.strip()
+    assert html.HTML({'multicol': False}).write(table)[0].strip() == \
+        expected.strip()
+
 
 @pytest.mark.skipif('not HAS_BEAUTIFUL_SOUP')
 def test_multicolumn_read():
@@ -531,12 +556,13 @@ def test_multicolumn_read():
     casts all elements to string prior to type conversion operations.
     """
 
-    table = Table.read('t/html2.html', format='ascii.html')
-    str_type = np.dtype((np.str, 21))
+    table = Table.read('data/html2.html', format='ascii.html')
+    str_type = np.dtype((str, 21))
     expected = Table(np.array([(['1', '2.5000000000000000001'], 3),
                                (['1a', '1'], 3.5)],
                               dtype=[('A', str_type, (2,)), ('B', '<f8')]))
     assert np.all(table == expected)
+
 
 @pytest.mark.skipif('not HAS_BLEACH')
 def test_raw_html_write():
@@ -546,7 +572,7 @@ def test_raw_html_write():
     t = Table([['<em>x</em>'], ['<em>y</em>']], names=['a', 'b'])
 
     # One column contains raw HTML (string input)
-    out = cStringIO()
+    out = StringIO()
     t.write(out, format='ascii.html', htmldict={'raw_html_cols': 'a'})
     expected = """\
    <tr>
@@ -556,12 +582,12 @@ def test_raw_html_write():
     assert expected in out.getvalue()
 
     # One column contains raw HTML (list input)
-    out = cStringIO()
+    out = StringIO()
     t.write(out, format='ascii.html', htmldict={'raw_html_cols': ['a']})
     assert expected in out.getvalue()
 
     # Two columns contains raw HTML (list input)
-    out = cStringIO()
+    out = StringIO()
     t.write(out, format='ascii.html', htmldict={'raw_html_cols': ['a', 'b']})
     expected = """\
    <tr>
@@ -576,12 +602,12 @@ def test_raw_html_write_clean():
     """
     Test that columns can contain raw HTML which is not escaped.
     """
-    import bleach
+    import bleach  # noqa
 
     t = Table([['<script>x</script>'], ['<p>y</p>'], ['<em>y</em>']], names=['a', 'b', 'c'])
 
     # Confirm that <script> and <p> get escaped but not <em>
-    out = cStringIO()
+    out = StringIO()
     t.write(out, format='ascii.html', htmldict={'raw_html_cols': t.colnames})
     expected = """\
    <tr>
@@ -592,7 +618,7 @@ def test_raw_html_write_clean():
     assert expected in out.getvalue()
 
     # Confirm that we can whitelist <p>
-    out = cStringIO()
+    out = StringIO()
     t.write(out, format='ascii.html',
             htmldict={'raw_html_cols': t.colnames,
                       'raw_html_clean_kwargs': {'tags': bleach.ALLOWED_TAGS + ['p']}})
@@ -603,3 +629,113 @@ def test_raw_html_write_clean():
     <td><em>y</em></td>
    </tr>"""
     assert expected in out.getvalue()
+
+
+def test_write_table_html_fill_values():
+    """
+    Test that passing fill_values should replace any matching row
+    """
+    buffer_output = StringIO()
+    t = Table([[1], [2]], names=('a', 'b'))
+    ascii.write(t, buffer_output, fill_values=('1', 'Hello world'),
+                format='html')
+
+    t_expected = Table([['Hello world'], [2]], names=('a', 'b'))
+    buffer_expected = StringIO()
+    ascii.write(t_expected, buffer_expected, format='html')
+
+    assert buffer_output.getvalue() == buffer_expected.getvalue()
+
+
+def test_write_table_html_fill_values_optional_columns():
+    """
+    Test that passing optional column in fill_values should only replace
+    matching columns
+    """
+    buffer_output = StringIO()
+    t = Table([[1], [1]], names=('a', 'b'))
+    ascii.write(t, buffer_output, fill_values=('1', 'Hello world', 'b'),
+                format='html')
+
+    t_expected = Table([[1], ['Hello world']], names=('a', 'b'))
+    buffer_expected = StringIO()
+    ascii.write(t_expected, buffer_expected, format='html')
+
+    assert buffer_output.getvalue() == buffer_expected.getvalue()
+
+
+def test_write_table_html_fill_values_masked():
+    """
+    Test that passing masked values in fill_values should only replace
+    masked columns or values
+    """
+    buffer_output = StringIO()
+    t = Table([[1], [1]], names=('a', 'b'), masked=True, dtype=('i4', 'i8'))
+    t['a'] = np.ma.masked
+    ascii.write(t, buffer_output, fill_values=(ascii.masked, 'TEST'),
+                format='html')
+
+    t_expected = Table([['TEST'], [1]], names=('a', 'b'))
+    buffer_expected = StringIO()
+    ascii.write(t_expected, buffer_expected, format='html')
+
+    assert buffer_output.getvalue() == buffer_expected.getvalue()
+
+
+def test_multicolumn_table_html_fill_values():
+    """
+    Test to make sure that the HTML writer writes multidimensional
+    columns with correctly replaced fill_values.
+    """
+    col1 = [1, 2, 3]
+    col2 = [(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)]
+    col3 = [('a', 'a', 'a'), ('b', 'b', 'b'), ('c', 'c', 'c')]
+
+    buffer_output = StringIO()
+    t = Table([col1, col2, col3], names=('C1', 'C2', 'C3'))
+    ascii.write(t, buffer_output, fill_values=('a', 'z'),
+                format='html')
+
+    col1 = [1, 2, 3]
+    col2 = [(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)]
+    col3 = [('z', 'z', 'z'), ('b', 'b', 'b'), ('c', 'c', 'c')]
+
+    buffer_expected = StringIO()
+    t_expected = Table([col1, col2, col3], names=('C1', 'C2', 'C3'))
+    ascii.write(t_expected, buffer_expected, format='html')
+
+    assert buffer_output.getvalue() == buffer_expected.getvalue()
+
+
+def test_multi_column_write_table_html_fill_values_masked():
+    """
+    Test that passing masked values in fill_values should only replace
+    masked columns or values for multidimensional tables
+    """
+    buffer_output = StringIO()
+    t = Table([[1, 2, 3, 4], ['--', 'a', '--', 'b']], names=('a', 'b'), masked=True)
+    t['a'][0:2] = np.ma.masked
+    t['b'][0:2] = np.ma.masked
+    ascii.write(t, buffer_output, fill_values=[(ascii.masked, 'MASKED')],
+                format='html')
+
+    t_expected = Table([['MASKED', 'MASKED', 3, 4], [
+                       'MASKED', 'MASKED', '--', 'b']], names=('a', 'b'))
+    buffer_expected = StringIO()
+    ascii.write(t_expected, buffer_expected, format='html')
+    print(buffer_expected.getvalue())
+
+    assert buffer_output.getvalue() == buffer_expected.getvalue()
+
+
+@pytest.mark.skipif('not HAS_BEAUTIFUL_SOUP')
+def test_read_html_unicode():
+    """
+    Test reading an HTML table with unicode values
+    """
+    table_in = ['<table>',
+                '<tr><td>&#x0394;</td></tr>',
+                '<tr><td>Δ</td></tr>',
+                '</table>']
+    dat = Table.read(table_in, format='ascii.html')
+    assert np.all(dat['col1'] == ['Δ', 'Δ'])

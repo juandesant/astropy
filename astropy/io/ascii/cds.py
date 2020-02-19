@@ -8,17 +8,17 @@ cds.py:
 :Author: Tom Aldcroft (aldcroft@head.cfa.harvard.edu)
 """
 
-from __future__ import absolute_import, division, print_function
 
 import fnmatch
 import itertools
 import re
 import os
+from contextlib import suppress
 
 from . import core
 from . import fixedwidth
 
-from ...utils.compat import suppress
+from astropy.units import Unit
 
 
 __doctest_skip__ = ['*']
@@ -36,10 +36,9 @@ class CdsHeader(core.BaseHeader):
     def get_type_map_key(self, col):
         match = re.match(r'\d*(\S)', col.raw_type.lower())
         if not match:
-            raise ValueError('Unrecognized CDS format "%s" for column "%s"' % (
+            raise ValueError('Unrecognized CDS format "{}" for column "{}"'.format(
                 col.raw_type, col.name))
         return match.group(1)
-
 
     def get_cols(self, lines):
         """
@@ -66,7 +65,7 @@ class CdsHeader(core.BaseHeader):
                 line = line.strip()
                 if in_header:
                     lines.append(line)
-                    if line.startswith('------') or line.startswith('======='):
+                    if line.startswith(('------', '=======')):
                         comment_lines += 1
                         if comment_lines == 3:
                             break
@@ -86,7 +85,7 @@ class CdsHeader(core.BaseHeader):
                                 break
 
             else:
-                raise core.InconsistentTableError("Can't find table {0} in {1}".format(
+                raise core.InconsistentTableError("Can't find table {} in {}".format(
                     self.data.table_name, self.readme))
 
         found_line = False
@@ -94,8 +93,8 @@ class CdsHeader(core.BaseHeader):
         for i_col_def, line in enumerate(lines):
             if re.match(r'Byte-by-byte Description', line, re.IGNORECASE):
                 found_line = True
-            elif found_line: # First line after list of file descriptions
-                i_col_def -= 1 # Set i_col_def to last description line
+            elif found_line:  # First line after list of file descriptions
+                i_col_def -= 1  # Set i_col_def to last description line
                 break
 
         re_col_def = re.compile(r"""\s*
@@ -108,8 +107,8 @@ class CdsHeader(core.BaseHeader):
                                 re.VERBOSE)
 
         cols = []
-        for line in itertools.islice(lines, i_col_def+4, None):
-            if line.startswith('------') or line.startswith('======='):
+        for line in itertools.islice(lines, i_col_def + 4, None):
+            if line.startswith(('------', '=======')):
                 break
             match = re_col_def.match(line)
             if match:
@@ -117,17 +116,20 @@ class CdsHeader(core.BaseHeader):
                 col.start = int(re.sub(r'[-\s]', '',
                                        match.group('start') or match.group('end'))) - 1
                 col.end = int(match.group('end'))
-                col.unit = match.group('units')
-                if col.unit == '---':
+                unit = match.group('units')
+                if unit == '---':
                     col.unit = None  # "---" is the marker for no unit in CDS table
+                else:
+                    col.unit = Unit(unit, format='cds', parse_strict='warn')
                 col.description = (match.group('descr') or '').strip()
                 col.raw_type = match.group('format')
                 col.type = self.get_col_type(col)
 
                 match = re.match(
-                    r'\? (?P<equal> =)? (?P<nullval> \S*) (\s+ (?P<descriptiontext> \S.*))?', col.description, re.VERBOSE)
+                    r'\? (?P<equal> =)? (?P<nullval> \S*) (\s+ (?P<descriptiontext> \S.*))?',
+                    col.description, re.VERBOSE)
                 if match:
-                    col.description=(match.group('descriptiontext') or '').strip()
+                    col.description = (match.group('descriptiontext') or '').strip()
                     if issubclass(col.type, core.FloatType):
                         fillval = 'nan'
                     else:
@@ -138,7 +140,7 @@ class CdsHeader(core.BaseHeader):
                         # CDS tables can use -, --, ---, or ---- to mark missing values
                         # see https://github.com/astropy/astropy/issues/1335
                         for i in [1, 2, 3, 4]:
-                            self.data.fill_values.append(('-'*i, fillval, col.name))
+                            self.data.fill_values.append(('-' * i, fillval, col.name))
                     else:
                         col.null = match.group('nullval')
                         self.data.fill_values.append((col.null, fillval, col.name))
@@ -148,7 +150,7 @@ class CdsHeader(core.BaseHeader):
                 if cols:
                     cols[-1].description += line.strip()
                 else:
-                    raise ValueError('Line "%s" not parsable as CDS header' % line)
+                    raise ValueError(f'Line "{line}" not parsable as CDS header')
 
         self.names = [x.name for x in cols]
 
@@ -168,15 +170,18 @@ class CdsData(core.BaseData):
         # attribute.
         if self.header.readme and self.table_name:
             return lines
-        i_sections = [i for (i, x) in enumerate(lines)
-                      if x.startswith('------') or x.startswith('=======')]
+        i_sections = [i for i, x in enumerate(lines)
+                      if x.startswith(('------', '======='))]
         if not i_sections:
             raise core.InconsistentTableError('No CDS section delimiter found')
         return lines[i_sections[-1]+1:]
 
 
 class Cds(core.BaseReader):
-    """Read a CDS format table.  See http://vizier.u-strasbg.fr/doc/catstd.htx.
+    """CDS format table.
+
+    See: http://vizier.u-strasbg.fr/doc/catstd.htx
+
     Example::
 
       Table: Table name here
@@ -225,10 +230,10 @@ class Cds(core.BaseReader):
     the header information is at the top of the given table.  Examples::
 
       >>> from astropy.io import ascii
-      >>> table = ascii.read("t/cds.dat")
-      >>> table = ascii.read("t/vizier/table1.dat", readme="t/vizier/ReadMe")
-      >>> table = ascii.read("t/cds/multi/lhs2065.dat", readme="t/cds/multi/ReadMe")
-      >>> table = ascii.read("t/cds/glob/lmxbrefs.dat", readme="t/cds/glob/ReadMe")
+      >>> table = ascii.read("data/cds.dat")
+      >>> table = ascii.read("data/vizier/table1.dat", readme="data/vizier/ReadMe")
+      >>> table = ascii.read("data/cds/multi/lhs2065.dat", readme="data/cds/multi/ReadMe")
+      >>> table = ascii.read("data/cds/glob/lmxbrefs.dat", readme="data/cds/glob/ReadMe")
 
     The table name and the CDS ReadMe file can be entered as URLs.  This can be used
     to directly load tables from the Internet.  For example, Vizier tables from the
@@ -253,20 +258,20 @@ class Cds(core.BaseReader):
     ``InconsistentTableError`` is raised if the ``readme`` file does not
     have header information for the given table.
 
-      >>> readme = "t/vizier/ReadMe"
+      >>> readme = "data/vizier/ReadMe"
       >>> r = ascii.get_reader(ascii.Cds, readme=readme)
-      >>> table = r.read("t/vizier/table1.dat")
+      >>> table = r.read("data/vizier/table1.dat")
       >>> # table5.dat has the same ReadMe file
-      >>> table = r.read("t/vizier/table5.dat")
+      >>> table = r.read("data/vizier/table5.dat")
 
     If no ``readme`` parameter is specified, then the header
     information is assumed to be at the top of the given table.
 
       >>> r = ascii.get_reader(ascii.Cds)
-      >>> table = r.read("t/cds.dat")
+      >>> table = r.read("data/cds.dat")
       >>> #The following gives InconsistentTableError, since no
       >>> #readme file was given and table1.dat does not have a header.
-      >>> table = r.read("t/vizier/table1.dat")
+      >>> table = r.read("data/vizier/table1.dat")
       Traceback (most recent call last):
         ...
       InconsistentTableError: No CDS section delimiter found
@@ -286,7 +291,7 @@ class Cds(core.BaseReader):
     header_class = CdsHeader
 
     def __init__(self, readme=None):
-        super(Cds, self).__init__()
+        super().__init__()
         self.header.readme = readme
 
     def write(self, table=None):
@@ -316,7 +321,7 @@ class Cds(core.BaseReader):
             for data_start in range(len(lines)):
                 self.data.start_line = data_start
                 with suppress(Exception):
-                    table = super(Cds, self).read(lines)
+                    table = super().read(lines)
                     return table
         else:
-            return super(Cds, self).read(table)
+            return super().read(table)

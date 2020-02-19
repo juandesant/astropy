@@ -3,19 +3,10 @@
 Contains a class that makes it simple to stream out well-formed and
 nicely-indented XML.
 """
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-from ...extern import six
 
 # STDLIB
 import contextlib
 import textwrap
-
-try:
-    import bleach
-    HAS_BLEACH = True
-except ImportError:
-    HAS_BLEACH = False
 
 try:
     from . import _iterparser
@@ -28,7 +19,6 @@ except ImportError:
         s = s.replace("<", "&lt;")
         s = s.replace(">", "&gt;")
         return s
-
 
     def xml_escape(s):
         """
@@ -136,18 +126,18 @@ class XMLWriter:
         self._data = []
         self._tags.append(tag)
         self.write(self.get_indentation_spaces(-1))
-        self.write("<%s" % tag)
+        self.write(f"<{tag}")
         if attrib or extra:
             attrib = attrib.copy()
             attrib.update(extra)
-            attrib = list(six.iteritems(attrib))
+            attrib = list(attrib.items())
             attrib.sort()
             for k, v in attrib:
                 if v is not None:
                     # This is just busy work -- we know our keys are clean
                     # k = xml_escape_cdata(k)
                     v = self.xml_escape(v)
-                    self.write(" %s=\"%s\"" % (k, v))
+                    self.write(f" {k}=\"{v}\"")
         self._open = 1
 
         return len(self._tags)
@@ -164,23 +154,26 @@ class XMLWriter:
         In order to explicitly allow certain XML tags (e.g. link reference or
         emphasis tags), use ``method='bleach_clean'``.  This sanitizes the data
         string using the ``clean`` function of the
-        `http://bleach.readthedocs.io/en/latest/clean.html <bleach>`_ package.
+        `https://bleach.readthedocs.io/en/latest/clean.html <bleach>`_ package.
         Any additional keyword arguments will be passed directly to the
         ``clean`` function.
+
+        Finally, use ``method='none'`` to disable any sanitization. This should
+        be used sparingly.
 
         Example::
 
           w = writer.XMLWriter(ListWriter(lines))
           with w.xml_cleaning_method('bleach_clean'):
               w.start('td')
-              w.data('<a href="http://google.com">google.com</a>')
+              w.data('<a href="https://google.com">google.com</a>')
               w.end()
 
         Parameters
         ----------
         method : str
-            Cleaning method.  Allowed values are "escape_xml" and
-            "bleach_clean".
+            Cleaning method.  Allowed values are "escape_xml",
+            "bleach_clean", and "none".
 
         **clean_kwargs : keyword args
             Additional keyword args that are passed to the
@@ -189,15 +182,21 @@ class XMLWriter:
         current_xml_escape_cdata = self.xml_escape_cdata
 
         if method == 'bleach_clean':
-            if HAS_BLEACH:
-                if clean_kwargs is None:
-                    clean_kwargs = {}
-                self.xml_escape_cdata = lambda x: bleach.clean(x, **clean_kwargs)
-            else:
+            # NOTE: bleach is imported locally to avoid importing it when
+            # it is not nocessary
+            try:
+                import bleach
+            except ImportError:
                 raise ValueError('bleach package is required when HTML escaping is disabled.\n'
                                  'Use "pip install bleach".')
+
+            if clean_kwargs is None:
+                clean_kwargs = {}
+            self.xml_escape_cdata = lambda x: bleach.clean(x, **clean_kwargs)
+        elif method == "none":
+            self.xml_escape_cdata = lambda x: x
         elif method != 'escape_xml':
-            raise ValueError('allowed values of method are "escape_xml" and "bleach_clean"')
+            raise ValueError('allowed values of method are "escape_xml", "bleach_clean", and "none"')
 
         yield
 
@@ -234,7 +233,7 @@ class XMLWriter:
         """
         self._flush()
         self.write(self.get_indentation_spaces())
-        self.write("<!-- %s -->\n" % self.xml_escape_cdata(comment))
+        self.write("<!-- {} -->\n".format(self.xml_escape_cdata(comment)))
 
     def data(self, text):
         """
@@ -259,11 +258,14 @@ class XMLWriter:
             If omitted, the current element is closed.
         """
         if tag:
-            assert self._tags, "unbalanced end(%s)" % tag
-            assert tag == self._tags[-1],\
-                   "expected end(%s), got %s" % (self._tags[-1], tag)
+            if not self._tags:
+                raise ValueError(f"unbalanced end({tag})")
+            if tag != self._tags[-1]:
+                raise ValueError("expected end({}), got {}".format(
+                        self._tags[-1], tag))
         else:
-            assert self._tags, "unbalanced end()"
+            if not self._tags:
+                raise ValueError("unbalanced end()")
         tag = self._tags.pop()
         if self._data:
             self._flush(indent, wrap)
@@ -273,7 +275,7 @@ class XMLWriter:
             return
         if indent:
             self.write(self.get_indentation_spaces())
-        self.write("</%s>\n" % tag)
+        self.write(f"</{tag}>\n")
 
     def close(self, id):
         """
@@ -340,5 +342,5 @@ class XMLWriter:
         d = {}
         for attr in attrs:
             if getattr(obj, attr) is not None:
-                d[attr.replace('_', '-')] = six.text_type(getattr(obj, attr))
+                d[attr.replace('_', '-')] = str(getattr(obj, attr))
         return d

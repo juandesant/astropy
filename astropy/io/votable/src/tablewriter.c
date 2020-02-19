@@ -9,6 +9,7 @@
  *
  ******************************************************************************/
 
+#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
 /******************************************************************************
@@ -31,17 +32,6 @@ next_power_of_2(Py_ssize_t n)
 
     return n == 0 ? 2 : n;
 }
-
-/******************************************************************************
- * Python version compatibility macros
- ******************************************************************************/
-#if PY_MAJOR_VERSION >= 3
-#  define IS_PY3K
-#endif
-
-#ifndef Py_TYPE
-#  define Py_TYPE(o) ((o)->ob_type)
-#endif
 
 /******************************************************************************
  * Write TABLEDATA
@@ -71,7 +61,7 @@ _buffer_realloc(
         return -1;
     }
 
-    new_mem = realloc((void *)*buffer, n * sizeof(CHAR));
+    new_mem = PyMem_Realloc((void *)*buffer, n * sizeof(CHAR));
     if (new_mem == NULL) {
         PyErr_SetString(PyExc_MemoryError, "Out of memory for XML text.");
         return -1;
@@ -282,7 +272,7 @@ write_tabledata(PyObject* self, PyObject *args, PyObject *kwds)
                     goto exit;
                 }
 
-                str_len = PyUnicode_GetSize(str_val);
+                str_len = PyUnicode_GetLength(str_val);
                 if (str_len) {
                     if (_write_cstring(&buf, &buf_size, &x, "  <TD>", 6) ||
                         _write_string(&buf, &buf_size, &x, str_tmp, str_len) ||
@@ -353,7 +343,6 @@ struct module_state {
     void* none;
 };
 
-#ifdef IS_PY3K
 static int module_traverse(PyObject* m, visitproc visit, void* arg)
 {
     return 0;
@@ -376,34 +365,8 @@ static struct PyModuleDef moduledef = {
     NULL
 };
 
-#  define INITERROR return NULL
-
 PyMODINIT_FUNC
 PyInit_tablewriter(void)
-#else /* Not PY3K */
-#  define INITERROR return
-
-#  ifndef PyMODINIT_FUNC  /* declarations for DLL import/export */
-#    define PyMODINIT_FUNC void
-#  endif
-
-PyMODINIT_FUNC
-inittablewriter(void)
-#endif
 {
-    PyObject* m;
-
-#ifdef IS_PY3K
-    m = PyModule_Create(&moduledef);
-#else
-    m = Py_InitModule3("tablewriter", module_methods,
-                       "Fast way to write VOTABLE TABLEDATA");
-#endif
-
-    if (m == NULL)
-        INITERROR;
-
-#ifdef IS_PY3K
-    return m;
-#endif
+    return PyModule_Create(&moduledef);
 }

@@ -1,7 +1,7 @@
 /*============================================================================
 
-  WCSLIB 5.14 - an implementation of the FITS WCS standard.
-  Copyright (C) 1995-2016, Mark Calabretta
+  WCSLIB 7.1 - an implementation of the FITS WCS standard.
+  Copyright (C) 1995-2020, Mark Calabretta
 
   This file is part of WCSLIB.
 
@@ -22,10 +22,10 @@
 
   Author: Mark Calabretta, Australia Telescope National Facility, CSIRO.
   http://www.atnf.csiro.au/people/Mark.Calabretta
-  $Id: dis.h,v 5.14 2016/02/07 10:49:31 mcalabre Exp $
+  $Id: dis.h,v 7.1 2019/12/31 13:25:19 mcalabre Exp $
 *=============================================================================
 *
-* WCSLIB 5.14 - C routines that implement the FITS World Coordinate System
+* WCSLIB 7.1 - C routines that implement the FITS World Coordinate System
 * (WCS) standard.  Refer to the README file provided with WCSLIB for an
 * overview of the library.
 *
@@ -261,13 +261,54 @@
 * DSS's AMDXm (or AMDYm) keyvalues and TPD coefficients, while still simple,
 * is not quite as straightforward as for TPV and SIP.
 *
-* WAT uses all but the radial terms: 3, 11, 23, 39, and 59.  While the mapping
-* between WAT's monomial coefficients and TPD is fairly simple, for its
-* expression in terms of a sum of Chebyshev or Legendre polynomials it is much
-* less so. 
+* WAT uses all but the radial terms, namely 3, 11, 23, 39, and 59.  While the
+* mapping between WAT's monomial coefficients and TPD is fairly simple, for
+* its expression in terms of a sum of Chebyshev or Legendre polynomials it is
+* much less so.
 *
-* Summary of the dis routines
-* ---------------------------
+* Historical idiosyncrasies:
+* --------------------------
+* In addition to the above, some historical distortion functions have further
+* idiosyncrasies that must be taken into account when translating them to TPD.
+*
+* WCS Paper IV specifies that a distortion function returns a correction to be
+* added to pixel coordinates (prior distortion) or intermediate pixel
+* coordinates (sequent distortion).  The correction is meant to be small so
+* that ignoring the distortion function, i.e. setting the correction to zero,
+* produces a commensurately small error.
+*
+* However, rather than an additive correction, some historical distortion
+* functions (TPV, DSS) define a polynomial that returns the corrected
+* coordinates directly.
+*
+* The difference between the two approaches is readily accounted for simply by
+* adding or subtracting 1 from the coefficient of the first degree term of the
+* polynomial.  However, it opens the way for considerable confusion.
+*
+* Additional to the formalism of WCS Paper IV, both the Polynomial and TPD
+* distortion functions recognise a keyword
+*
+=   DPja = 'DOCORR: 0'
+*
+* which is meant to apply generally to indicate that the distortion function
+* returns the corrected coordinates directly.  Any other value for DOCORR (or
+* its absence) indicates that the distortion function returns an additive
+* correction.
+*
+* WCS Paper IV also specifies that the independent variables of a distortion
+* function are pixel coordinates (prior distortion) or intermediate pixel
+* coordinates (sequent distortion).
+*
+* On the contrary, the independent variables of the SIP polynomial are pixel
+* coordinate offsets from the reference pixel.  This is readily handled via
+* the renormalisation parameters
+*
+=   DPja = 'OFFSET.jhat: <value>'
+*
+* where the value corresponds to CRPIXja.
+*
+* Summary of the dis routines:
+* ----------------------------
 * These routines apply the distortion functions defined by the extension to
 * the FITS WCS standard proposed in Paper IV.  They are based on the disprm
 * struct which contains all information needed for the computations.  The
@@ -275,8 +316,10 @@
 * are maintained by these routines, somewhat like a C++ class but with no
 * encapsulation.
 *
-* disndp(), dpfill(), disini(), discpy(), and disfree() are provided to manage
-* the disprm struct, and another, disprt(), prints its contents.
+* dpfill(), dpkeyi(), and dpkeyd() are provided to manage the dpkey struct.
+*
+* disndp(), disini(), disinit(), discpy(), and disfree() are provided to
+* manage the disprm struct, and another, disprt(), prints its contents.
 *
 * disperr() prints the error message(s) (if any) stored in a disprm struct.
 *
@@ -300,14 +343,16 @@
 *
 * disndp() - Memory allocation for DPja and DQia
 * ----------------------------------------------
-* disndp() changes the value of NDPMAX (default 256).  This global variable
-* controls the number of dpkey structs, for holding DPja or DQia keyvalues,
-* that disini() should allocate space for.
+* disndp() sets or gets the value of NDPMAX (default 256).  This global
+* variable controls the maximum number of dpkey structs, for holding DPja or
+* DQia keyvalues, that disini() should allocate space for.  It is also used by
+* disinit() as the default value of ndpmax.
 *
 * PLEASE NOTE: This function is not thread-safe.
 *
 * Given:
-*   n         int       Value of NDPMAX; ignored if < 0.
+*   n         int       Value of NDPMAX; ignored if < 0.  Use a value less
+*                       than zero to get the current value.
 *
 * Function return value:
 *             int       Current value of NDPMAX.
@@ -367,17 +412,48 @@
 *                         0: Success.
 *
 *
+* dpkeyi() - Get the data value in a dpkey struct as int
+* ------------------------------------------------------
+* dpkeyi() returns the data value in a dpkey struct as an integer value.
+*
+* Given and returned:
+*   dp        const struct dpkey *
+*                       Parsed contents of a DPja or DQia keyrecord.
+*
+* Function return value:
+*             int       The record's value as int.
+*
+*
+* dpkeyd() - Get the data value in a dpkey struct as double
+* ---------------------------------------------------------
+* dpkeyd() returns the data value in a dpkey struct as a floating point
+* value.
+*
+* Given and returned:
+*   dp        const struct dpkey *
+*                       Parsed contents of a DPja or DQia keyrecord.
+*
+* Function return value:
+*             double    The record's value as double.
+*
+*
 * disini() - Default constructor for the disprm struct
 * ----------------------------------------------------
-* disini() allocates memory for arrays in a disprm struct and sets all members
-* of the struct to default values.  Memory is allocated for up to NDPMAX DPja
-* or DQia keywords per WCS representation.  This may be changed via disndp()
-* before disini() is called.
+* disini() is a thin wrapper on disinit().  It invokes it with ndpmax set
+* to -1 which causes it to use the value of the global variable NDPMAX.  It
+* is thereby potentially thread-unsafe if NDPMAX is altered dynamically via
+* disndp().  Use disinit() for a thread-safe alternative in this case.
 *
-* PLEASE NOTE: every disprm struct must be initialized by disini(), possibly
+*
+* disinit() - Default constructor for the disprm struct
+* ----------------------------------------------------
+* disinit() allocates memory for arrays in a disprm struct and sets all
+* members of the struct to default values.
+*
+* PLEASE NOTE: every disprm struct must be initialized by disinit(), possibly
 * repeatedly.  On the first invokation, and only the first invokation,
 * disprm::flag must be set to -1 to initialize memory management, regardless
-* of whether disini() will actually be used to allocate memory.
+* of whether disinit() will actually be used to allocate memory.
 *
 * Given:
 *   alloc     int       If true, allocate memory unconditionally for arrays in
@@ -400,6 +476,13 @@
 *                       (memory leaks may result if it had already been
 *                       initialized).
 *
+* Given:
+*   ndpmax    int       The number of DPja or DQia keywords to allocate space
+*                       for.  If set to -1, the value of the global variable
+*                       NDPMAX will be used.  This is potentially
+*                       thread-unsafe if disndp() is being used dynamically to
+*                       alter its value.
+*
 * Function return value:
 *             int       Status return value:
 *                         0: Success.
@@ -412,8 +495,8 @@
 *
 * discpy() - Copy routine for the disprm struct
 * ---------------------------------------------
-* discpy() does a deep copy of one disprm struct to another, using disini() to
-* allocate memory unconditionally for its arrays if required.  Only the
+* discpy() does a deep copy of one disprm struct to another, using disinit()
+* to allocate memory unconditionally for its arrays if required.  Only the
 * "information to be provided" part of the struct is copied; a call to
 * disset() is required to initialize the remainder.
 *
@@ -445,12 +528,12 @@
 *
 * disfree() - Destructor for the disprm struct
 * --------------------------------------------
-* disfree() frees memory allocated for the disprm arrays by disini().
-* disini() keeps a record of the memory it allocates and disfree() will only
+* disfree() frees memory allocated for the disprm arrays by disinit().
+* disinit() keeps a record of the memory it allocates and disfree() will only
 * attempt to free this.
 *
 * PLEASE NOTE: disfree() must not be invoked on a disprm struct that was not
-* initialized by disini().
+* initialized by disinit().
 *
 * Given:
 *   dis       struct disprm*
@@ -719,7 +802,7 @@
 * distortion functions.  It consists of certain members that must be set by
 * the user ("given") and others that are set by the WCSLIB routines
 * ("returned").  While the addresses of the arrays themselves may be set by
-* disini() if it (optionally) allocates memory, their contents must be set by
+* disinit() if it (optionally) allocates memory, their contents must be set by
 * the user.
 *
 *   int flag
@@ -735,7 +818,7 @@
 *     returned members of the disprm struct.  disset() will reset flag to
 *     indicate that this has been done.
 *
-*     PLEASE NOTE: flag must be set to -1 when disini() is called for the
+*     PLEASE NOTE: flag must be set to -1 when disinit() is called for the
 *     first time for a particular disprm struct in order to initialize memory
 *     management.  It must ONLY be used on the first initialization otherwise
 *     memory leaks may result.
@@ -743,7 +826,7 @@
 *   int naxis
 *     (Given or returned) Number of pixel and world coordinate elements.
 *
-*     If disini() is used to initialize the disprm struct (as would normally
+*     If disinit() is used to initialize the disprm struct (as would normally
 *     be the case) then it will set naxis from the value passed to it as a
 *     function argument.  The user should not subsequently modify it.
 *
@@ -757,7 +840,7 @@
 *   int ndpmax
 *     (Given) The length of the disprm::dp[] array.
 *
-*     ndpmax will be set by disini() if it allocates memory for disprm::dp[],
+*     ndpmax will be set by disinit() if it allocates memory for disprm::dp[],
 *     otherwise it must be set by the user.  See also disndp().
 *
 *   struct dpkey dp
@@ -786,6 +869,20 @@
 *     It is not necessary to reset the disprm struct (via disset()) when
 *     disprm::totdis is changed.
 *
+*   int *docorr
+*     (Returned) Pointer to the first element of an array of int containing
+*     flags that indicate the mode of correction for each axis.
+*
+*     If docorr is zero, the distortion function returns the corrected
+*     coordinates directly.  Any other value indicates that the distortion
+*     function computes a correction to be added to pixel coordinates (prior
+*     distortion) or intermediate pixel coordinates (sequent distortion).
+*
+*   int *Nhat
+*     (Returned) Pointer to the first element of an array of int containing
+*     the number of coordinate axes that form the independent variables of the
+*     distortion function for each axis.
+*
 *   int **axmap
 *     (Returned) Pointer to the first element of an array of int* containing
 *     pointers to the first elements of the axis mapping arrays for each axis.
@@ -805,23 +902,20 @@
 *     where -1 indicates that there is no corresponding independent
 *     variable.
 *
-*   int *Nhat
-*     (Returned) Pointer to the first element of an array of int* containing
-*     the number of coordinate axes that form the independent variables of the
-*     distortion function.
-*
 *   double **offset
 *     (Returned) Pointer to the first element of an array of double*
-*     containing an offset used to renormalize the independent variables of
-*     the distortion function for each axis.
+*     containing pointers to the first elements of arrays of offsets used to
+*     renormalize the independent variables of the distortion function for
+*     each axis.
 *
 *     The offsets are subtracted from the independent variables before
 *     scaling.
 *
 *   double **scale
 *     (Returned) Pointer to the first element of an array of double*
-*     containing a scale used to renormalize the independent variables of the
-*     distortion function for each axis.
+*     containing pointers to the first elements of arrays of scales used to
+*     renormalize the independent variables of the distortion function for
+*     each axis.
 *
 *     The scale is applied to the independent variables after the offsets are
 *     subtracted.
@@ -966,10 +1060,11 @@ struct disprm {
 
   /* Information derived from the parameters supplied.                      */
   /*------------------------------------------------------------------------*/
-  int    **axmap;		/* For each axis, the axis mapping array.   */
+  int    *docorr;		/* For each axis, the mode of correction.   */
   int    *Nhat;			/* For each axis, the number of coordinate  */
 				/* axes that form the independent variables */
 				/* of the distortion function.              */
+  int    **axmap;		/* For each axis, the axis mapping array.   */
   double **offset;		/* For each axis, renormalization offsets.  */
   double **scale;		/* For each axis, renormalization scales.   */
   int    **iparm;		/* For each axis, the array of integer      */
@@ -1005,7 +1100,13 @@ int disndp(int n);
 int dpfill(struct dpkey *dp, const char *keyword, const char *field, int j,
            int type, int i, double f);
 
+int    dpkeyi(const struct dpkey *dp);
+
+double dpkeyd(const struct dpkey *dp);
+
 int disini(int alloc, int naxis, struct disprm *dis);
+
+int disinit(int alloc, int naxis, struct disprm *dis, int ndpmax);
 
 int discpy(int alloc, const struct disprm *dissrc, struct disprm *disdst);
 

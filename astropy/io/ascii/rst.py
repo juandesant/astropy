@@ -3,13 +3,13 @@
 :Author: Simon Gibbons (simongibbons@gmail.com)
 """
 
-from __future__ import absolute_import, division, print_function
 
 from .core import DefaultSplitter
 from .fixedwidth import (FixedWidth,
                          FixedWidthData,
                          FixedWidthHeader,
                          FixedWidthTwoLineDataSplitter)
+
 
 class SimpleRSTHeader(FixedWidthHeader):
     position_line = 0
@@ -18,20 +18,22 @@ class SimpleRSTHeader(FixedWidthHeader):
     position_char = '='
 
     def get_fixedwidth_params(self, line):
-        vals, starts, ends = super(SimpleRSTHeader, self).get_fixedwidth_params(line)
+        vals, starts, ends = super().get_fixedwidth_params(line)
         # The right hand column can be unbounded
         ends[-1] = None
         return vals, starts, ends
+
 
 class SimpleRSTData(FixedWidthData):
     start_line = 3
     end_line = -1
     splitter_class = FixedWidthTwoLineDataSplitter
 
+
 class RST(FixedWidth):
-    """
-    Read or write a `reStructuredText simple format table
-    <http://docutils.sourceforge.net/docs/ref/rst/restructuredtext.html#simple-tables>`_.
+    """reStructuredText simple format table.
+
+    See: http://docutils.sourceforge.net/docs/ref/rst/restructuredtext.html#simple-tables
 
     Example::
 
@@ -45,6 +47,7 @@ class RST(FixedWidth):
     Currently there is no support for reading tables which utilize continuation lines,
     or for ones which define column spans through the use of an additional
     line of dashes in the header.
+
     """
     _format_name = 'rst'
     _description = 'reStructuredText simple table'
@@ -52,9 +55,9 @@ class RST(FixedWidth):
     header_class = SimpleRSTHeader
 
     def __init__(self):
-        super(RST, self).__init__(delimiter_pad=None, bookend=False)
+        super().__init__(delimiter_pad=None, bookend=False)
 
     def write(self, lines):
-        lines = super(RST, self).write(lines)
+        lines = super().write(lines)
         lines = [lines[1]] + lines + [lines[1]]
         return lines

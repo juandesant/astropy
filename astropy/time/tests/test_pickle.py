@@ -1,12 +1,12 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+import pickle
 import numpy as np
 
-from .. import Time
-from ...extern.six.moves import cPickle as pickle
+from astropy.time import Time
 
 
-class TestPickle():
+class TestPickle:
     """Basic pickle test of time"""
 
     def test_pickle(self):

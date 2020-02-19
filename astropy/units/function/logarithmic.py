@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import (absolute_import, unicode_literals,
-                        division, print_function)
 import numpy as np
 
-from .. import CompositeUnit, UnitsError, dimensionless_unscaled
-from . import magnitude_zero_points as mag0
+from astropy.units import (dimensionless_unscaled, photometric, Unit,
+                           CompositeUnit, UnitsError, UnitTypeError,
+                           UnitConversionError)
+
 from .core import FunctionUnitBase, FunctionQuantity
 from .units import dex, dB, mag
 
@@ -70,9 +70,9 @@ class LogUnit(FunctionUnitBase):
         # u.dex, and u.dB are OK, i.e., other does not have to be LogUnit
         # (this will indirectly test whether other is a unit at all).
         try:
-            self._function_unit._to(getattr(other, 'function_unit', other))
+            getattr(other, 'function_unit', other)._to(self._function_unit)
         except AttributeError:
-            # if other is not a unit (_to cannot decompose).
+            # if other is not a unit (i.e., does not have _to).
             return NotImplemented
         except UnitsError:
             raise UnitsError("Can only add/subtract logarithmic units of"
@@ -119,11 +119,6 @@ class MagUnit(LogUnit):
         By default, this is ``mag``, but this allows one to use an equivalent
         unit such as ``2 mag``.
     """
-    def __init__(self, *args, **kwargs):
-        # Ensure we recognize magnitude zero points here.
-        with mag0.enable():
-            super(MagUnit, self).__init__(*args, **kwargs)
-
     @property
     def _default_function_unit(self):
         return mag
@@ -192,7 +187,7 @@ class LogQuantity(FunctionQuantity):
         it will converted to the logarithmic unit, after, if necessary,
         converting it to the physical unit inferred from ``unit``.
 
-    unit : string, `~astropy.units.UnitBase` or `~astropy.units.function.FunctionUnitBase` instance, optional
+    unit : str, `~astropy.units.UnitBase`, or `~astropy.units.function.FunctionUnitBase`, optional
         For an `~astropy.units.function.FunctionUnitBase` instance, the
         physical unit will be taken from it; for other input, it will be
         inferred from ``value``. By default, ``unit`` is set by the subclass.
@@ -213,15 +208,15 @@ class LogQuantity(FunctionQuantity):
     Examples
     --------
     Typically, use is made of an `~astropy.units.function.FunctionQuantity`
-    subclasses, as in::
+    subclass, as in::
 
         >>> import astropy.units as u
-        >>> u.Magnitude(15.)
-        <Magnitude 15.0 mag>
+        >>> u.Magnitude(-2.5)
+        <Magnitude -2.5 mag>
         >>> u.Magnitude(10.*u.count/u.second)
         <Magnitude -2.5 mag(ct / s)>
-        >>> u.Decibel(1.*u.W, u.DecibelUnit(u.mW))
-        <Decibel 30.0 dB(mW)>
+        >>> u.Decibel(1.*u.W, u.DecibelUnit(u.mW))  # doctest: +FLOAT_CMP
+        <Decibel 30. dB(mW)>
 
     """
     # only override of FunctionQuantity
@@ -273,6 +268,41 @@ class LogQuantity(FunctionQuantity):
         self._set_unit(new_unit)
         return self
 
+    def __pow__(self, other):
+        # We check if this power is OK by applying it first to the unit.
+        try:
+            other = float(other)
+        except TypeError:
+            return NotImplemented
+        new_unit = self.unit ** other
+        new_value = self.view(np.ndarray) ** other
+        return self._new_view(new_value, new_unit)
+
+    def __ilshift__(self, other):
+        try:
+            other = Unit(other)
+        except UnitTypeError:
+            return NotImplemented
+
+        if not isinstance(other, self._unit_class):
+            return NotImplemented
+
+        try:
+            factor = self.unit.physical_unit._to(other.physical_unit)
+        except UnitConversionError:
+            # Maybe via equivalencies?  Now we do make a temporary copy.
+            try:
+                value = self._to_value(other)
+            except UnitConversionError:
+                return NotImplemented
+
+            self.view(np.ndarray)[...] = value
+        else:
+            self.view(np.ndarray)[...] += self.unit.from_physical(factor)
+
+        self._set_unit(other)
+        return self
+
     # Could add __mul__ and __div__ and try interpreting other as a power,
     # but this seems just too error-prone.
 
@@ -321,16 +351,16 @@ dB._function_unit_class = DecibelUnit
 mag._function_unit_class = MagUnit
 
 
-STmag = MagUnit(mag0.ST)
+STmag = MagUnit(photometric.STflux)
 STmag.__doc__ = "ST magnitude: STmag=-21.1 corresponds to 1 erg/s/cm2/A"
 
-ABmag = MagUnit(mag0.AB)
+ABmag = MagUnit(photometric.ABflux)
 ABmag.__doc__ = "AB magnitude: ABmag=-48.6 corresponds to 1 erg/s/cm2/Hz"
 
-M_bol = MagUnit(mag0.Bol)
+M_bol = MagUnit(photometric.Bol)
 M_bol.__doc__ = ("Absolute bolometric magnitude: M_bol=0 corresponds to "
-                 "L_bol0={0}".format(mag0.Bol.si))
+                 "L_bol0={}".format(photometric.Bol.si))
 
-m_bol = MagUnit(mag0.bol)
+m_bol = MagUnit(photometric.bol)
 m_bol.__doc__ = ("Apparent bolometric magnitude: m_bol=0 corresponds to "
-                 "f_bol0={0}".format(mag0.bol.si))
+                 "f_bol0={}".format(photometric.bol.si))

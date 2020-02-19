@@ -2,18 +2,18 @@ import textwrap
 import copy
 from collections import OrderedDict
 
-from ..extern import six
-
 
 __all__ = ['get_header_from_yaml', 'get_yaml_from_header', 'get_yaml_from_table']
+
 
 class ColumnOrderList(list):
     """
     List of tuples that sorts in a specific order that makes sense for
     astropy table column attributes.
     """
+
     def sort(self, *args, **kwargs):
-        super(ColumnOrderList, self).sort()
+        super().sort()
 
         column_keys = ['name', 'unit', 'datatype', 'format', 'description', 'meta']
         in_dict = dict(self)
@@ -31,6 +31,7 @@ class ColumnOrderList(list):
 
         self.extend(out_list)
 
+
 class ColumnDict(dict):
     """
     Specialized dict subclass to represent attributes of a Column
@@ -43,7 +44,8 @@ class ColumnDict(dict):
         Return items as a ColumnOrderList, which sorts in the preferred
         way for column attributes.
         """
-        return ColumnOrderList(super(ColumnDict, self).items())
+        return ColumnOrderList(super().items())
+
 
 def _construct_odict(load, node):
     """
@@ -77,23 +79,22 @@ def _construct_odict(load, node):
     yield omap
     if not isinstance(node, yaml.SequenceNode):
         raise yaml.constructor.ConstructorError(
-            "while constructing an ordered map",
-            node.start_mark,
-            "expected a sequence, but found %s" % node.id, node.start_mark
-        )
+            "while constructing an ordered map", node.start_mark,
+            f"expected a sequence, but found {node.id}", node.start_mark)
+
     for subnode in node.value:
         if not isinstance(subnode, yaml.MappingNode):
             raise yaml.constructor.ConstructorError(
                 "while constructing an ordered map", node.start_mark,
-                "expected a mapping of length 1, but found %s" % subnode.id,
-                subnode.start_mark
-            )
+                f"expected a mapping of length 1, but found {subnode.id}",
+                subnode.start_mark)
+
         if len(subnode.value) != 1:
             raise yaml.constructor.ConstructorError(
                 "while constructing an ordered map", node.start_mark,
-                "expected a single mapping item, but found %d items" % len(subnode.value),
-                subnode.start_mark
-            )
+                "expected a single mapping item, but found {} items".format(len(subnode.value)),
+                subnode.start_mark)
+
         key_node, value_node = subnode.value[0]
         key = load.construct_object(key_node)
         value = load.construct_object(value_node)
@@ -142,7 +143,7 @@ def _repr_odict(dumper, data):
     >>> yaml.dump(data, default_flow_style=True)  # doctest: +SKIP
     '!!omap [foo: bar, mumble: quux, baz: gorp]\\n'
     """
-    return _repr_pairs(dumper, u'tag:yaml.org,2002:omap', six.iteritems(data))
+    return _repr_pairs(dumper, 'tag:yaml.org,2002:omap', data.items())
 
 
 def _repr_column_dict(dumper, data):
@@ -153,7 +154,7 @@ def _repr_column_dict(dumper, data):
     are written in a fixed order that makes sense for astropy table
     columns.
     """
-    return dumper.represent_mapping(u'tag:yaml.org,2002:map', data)
+    return dumper.represent_mapping('tag:yaml.org,2002:map', data)
 
 
 def _get_col_attributes(col):
@@ -165,7 +166,7 @@ def _get_col_attributes(col):
     attrs['name'] = col.info.name
 
     type_name = col.info.dtype.type.__name__
-    if six.PY3 and (type_name.startswith('bytes') or type_name.startswith('str')):
+    if type_name.startswith(('bytes', 'str')):
         type_name = 'string'
     if type_name.endswith('_'):
         type_name = type_name[:-1]  # string_ and bool_ lose the final _ for ECSV
@@ -198,7 +199,7 @@ def get_yaml_from_table(table):
         List of text lines with YAML header content
     """
 
-    header = {'cols': list(six.itervalues(table.columns))}
+    header = {'cols': list(table.columns.values())}
     if table.meta:
         header['meta'] = table.meta
 
@@ -230,12 +231,16 @@ def get_yaml_from_header(header):
     try:
         import yaml
     except ImportError:
-        raise ImportError('`import yaml` failed, PyYAML package is required for ECSV format')
+        raise ImportError('`import yaml` failed, PyYAML package is '
+                          'required for serializing mixin columns')
 
-    class TableDumper(yaml.Dumper):
+    from astropy.io.misc.yaml import AstropyDumper
+
+    class TableDumper(AstropyDumper):
         """
         Custom Dumper that represents OrderedDict as an !!omap object.
         """
+
         def represent_mapping(self, tag, mapping, flow_style=None):
             """
             This is a combination of the Python 2 and 3 versions of this method
@@ -282,7 +287,8 @@ def get_yaml_from_header(header):
     header['datatype'] = [_get_col_attributes(col) for col in header['cols']]
     del header['cols']
 
-    lines = yaml.dump(header, Dumper=TableDumper).splitlines()
+    lines = yaml.dump(header, default_flow_style=None,
+                      Dumper=TableDumper, width=130).splitlines()
     return lines
 
 
@@ -292,10 +298,9 @@ class YamlParseError(Exception):
 
 def get_header_from_yaml(lines):
     """
-    Get a header dict from input ``lines`` which should be valid YAML in the
-    ECSV meta format.  This input will typically be created by
-    get_yaml_from_header.  The output is a dictionary which describes all the
-    table and column meta.
+    Get a header dict from input ``lines`` which should be valid YAML.  This
+    input will typically be created by get_yaml_from_header.  The output is a
+    dictionary which describes all the table and column meta.
 
     The get_cols() method in the io/ascii/ecsv.py file should be used as a
     guide to using the information when constructing a table using this
@@ -310,21 +315,25 @@ def get_header_from_yaml(lines):
     -------
     header : dict
         Dictionary describing table and column meta
+
     """
 
     try:
         import yaml
     except ImportError:
-        raise ImportError('`import yaml` failed, PyYAML package is required for ECSV format')
+        raise ImportError('`import yaml` failed, PyYAML package '
+                          'is required for serializing mixin columns')
 
-    class TableLoader(yaml.SafeLoader):
+    from astropy.io.misc.yaml import AstropyLoader
+
+    class TableLoader(AstropyLoader):
         """
         Custom Loader that constructs OrderedDict from an !!omap object.
         This does nothing but provide a namespace for adding the
         custom odict constructor.
         """
 
-    TableLoader.add_constructor(u'tag:yaml.org,2002:omap', _construct_odict)
+    TableLoader.add_constructor('tag:yaml.org,2002:omap', _construct_odict)
     # Now actually load the YAML data structure into `meta`
     header_yaml = textwrap.dedent('\n'.join(lines))
     try:

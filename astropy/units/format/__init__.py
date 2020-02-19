@@ -4,8 +4,6 @@
 A collection of different unit formats.
 """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
 # This is pretty atrocious, but it will prevent a circular import for those
 # formatters that need access to the units.core module An entry for it should
@@ -23,7 +21,6 @@ from .ogip import OGIP
 from .unicode_format import Unicode
 from .vounit import VOUnit
 
-from ...extern.six import string_types
 
 __all__ = [
     'Base', 'Generic', 'CDS', 'Console', 'Fits', 'Latex', 'LatexInline',
@@ -47,11 +44,11 @@ def get_format(format=None):
     """
     if isinstance(format, type) and issubclass(format, Base):
         return format
-    elif not (isinstance(format, string_types) or format is None):
+    elif not (isinstance(format, str) or format is None):
         raise TypeError(
-            "Formatter must a subclass or instance of a subclass of {0!r} "
+            "Formatter must a subclass or instance of a subclass of {!r} "
             "or a string giving the name of the formatter.  Valid formatter "
-            "names are: [{1}]".format(Base, ', '.join(Base.registry)))
+            "names are: [{}]".format(Base, ', '.join(Base.registry)))
 
     if format is None:
         format = 'generic'
@@ -61,5 +58,5 @@ def get_format(format=None):
     if format_lower in Base.registry:
         return Base.registry[format_lower]
 
-    raise ValueError("Unknown format {0!r}.  Valid formatter names are: "
-                     "[{1}]".format(format, ', '.join(Base.registry)))
+    raise ValueError("Unknown format {!r}.  Valid formatter names are: "
+                     "[{}]".format(format, ', '.join(Base.registry)))

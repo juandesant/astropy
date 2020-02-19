@@ -4,28 +4,28 @@
 This module contains functions/values used repeatedly in different modules of
 the ``builtin_frames`` package.
 """
-from __future__ import (absolute_import, unicode_literals, division,
-                        print_function)
 
 import warnings
 
 import numpy as np
 
-from ... import units as u
-from ... import _erfa as erfa
-from ...time import Time
-from ...utils import iers
-from ...utils.exceptions import AstropyWarning
+from astropy import units as u
+from astropy import _erfa as erfa
+from astropy.time import Time
+from astropy.utils import iers
+from astropy.utils.exceptions import AstropyWarning
 
-# The UTC time scale is not properly defined prior to 1960, so Time('B1950',
-# scale='utc') will emit a warning. Instead, we use Time('B1950', scale='tai')
-# which is equivalent, but does not emit a warning.
-EQUINOX_J2000 = Time('J2000', scale='utc')
-EQUINOX_B1950 = Time('B1950', scale='tai')
+
+# We use tt as the time scale for this equinoxes, primarily because it is the
+# convention for J2000 (it is unclear if there is any "right answer" for B1950)
+# while #8600 makes this the default behavior, we show it here to ensure it's
+# clear which is used here
+EQUINOX_J2000 = Time('J2000', scale='tt')
+EQUINOX_B1950 = Time('B1950', scale='tt')
 
 # This is a time object that is the default "obstime" when such an attribute is
 # necessary.  Currently, we use J2000.
-DEFAULT_OBSTIME = Time('J2000', scale='utc')
+DEFAULT_OBSTIME = Time('J2000', scale='tt')
 
 PIOVER2 = np.pi / 2.
 
@@ -38,15 +38,16 @@ def get_polar_motion(time):
     gets the two polar motion components in radians for use with apio13
     """
     # Get the polar motion from the IERS table
-    xp, yp, status = iers.IERS_Auto.open().pm_xy(time, return_status=True)
+    iers_table = iers.earth_orientation_table.get()
+    xp, yp, status = iers_table.pm_xy(time, return_status=True)
 
     wmsg = None
     if np.any(status == iers.TIME_BEFORE_IERS_RANGE):
         wmsg = ('Tried to get polar motions for times before IERS data is '
                 'valid. Defaulting to polar motion from the 50-yr mean for those. '
                 'This may affect precision at the 10s of arcsec level')
-        xp.ravel()[status.ravel() == iers.TIME_BEFORE_IERS_RANGE] = _DEFAULT_PM[0]
-        yp.ravel()[status.ravel() == iers.TIME_BEFORE_IERS_RANGE] = _DEFAULT_PM[1]
+        xp[status == iers.TIME_BEFORE_IERS_RANGE] = _DEFAULT_PM[0]
+        yp[status == iers.TIME_BEFORE_IERS_RANGE] = _DEFAULT_PM[1]
 
         warnings.warn(wmsg, AstropyWarning)
 
@@ -55,12 +56,12 @@ def get_polar_motion(time):
                 'valid. Defaulting to polar motion from the 50-yr mean for those. '
                 'This may affect precision at the 10s of arcsec level')
 
-        xp.ravel()[status.ravel() == iers.TIME_BEYOND_IERS_RANGE] = _DEFAULT_PM[0]
-        yp.ravel()[status.ravel() == iers.TIME_BEYOND_IERS_RANGE] = _DEFAULT_PM[1]
+        xp[status == iers.TIME_BEYOND_IERS_RANGE] = _DEFAULT_PM[0]
+        yp[status == iers.TIME_BEYOND_IERS_RANGE] = _DEFAULT_PM[1]
 
         warnings.warn(wmsg, AstropyWarning)
 
-    return xp.to(u.radian).value, yp.to(u.radian).value
+    return xp.to_value(u.radian), yp.to_value(u.radian)
 
 
 def _warn_iers(ierserr):
@@ -120,7 +121,36 @@ def norm(p):
     """
     Normalise a p-vector.
     """
-    return p/np.sqrt(np.einsum('...i,...i', p, p))[..., np.newaxis]
+    return p / np.sqrt(np.einsum('...i,...i', p, p))[..., np.newaxis]
+
+
+def get_cip(jd1, jd2):
+    """
+    Find the X, Y coordinates of the CIP and the CIO locator, s.
+
+    Parameters
+    ----------
+    jd1 : float or `np.ndarray`
+        First part of two part Julian date (TDB)
+    jd2 : float or `np.ndarray`
+        Second part of two part Julian date (TDB)
+
+    Returns
+    --------
+    x : float or `np.ndarray`
+        x coordinate of the CIP
+    y : float or `np.ndarray`
+        y coordinate of the CIP
+    s : float or `np.ndarray`
+        CIO locator, s
+    """
+    # classical NPB matrix, IAU 2006/2000A
+    rpnb = erfa.pnm06a(jd1, jd2)
+    # CIP X, Y coordinates from array
+    x, y = erfa.bpn2xy(rpnb)
+    # CIO locator, s
+    s = erfa.s06(jd1, jd2, x, y)
+    return x, y, s
 
 
 def aticq(ri, di, astrom):
@@ -226,3 +256,37 @@ def atciqz(rc, dc, astrom):
     # CIRS (GCRS) RA, Dec
     ri, di = erfa.c2s(pi)
     return erfa.anp(ri), di
+
+
+def prepare_earth_position_vel(time):
+    """
+    Get barycentric position and velocity, and heliocentric position of Earth
+
+    Parameters
+    -----------
+    time : `~astropy.time.Time`
+        time at which to calculate position and velocity of Earth
+
+    Returns
+    --------
+    earth_pv : `np.ndarray`
+        Barycentric position and velocity of Earth, in au and au/day
+    earth_helio : `np.ndarray`
+        Heliocentric position of Earth in au
+    """
+    # this goes here to avoid circular import errors
+    from astropy.coordinates.solar_system import (get_body_barycentric, get_body_barycentric_posvel)
+    # get barycentric position and velocity of earth
+    earth_p, earth_v = get_body_barycentric_posvel('earth', time)
+
+    # get heliocentric position of earth, preparing it for passing to erfa.
+    sun = get_body_barycentric('sun', time)
+    earth_heliocentric = (earth_p -
+                          sun).get_xyz(xyz_axis=-1).to_value(u.au)
+
+    # Also prepare earth_pv for passing to erfa, which wants it as
+    # a structured dtype.
+    earth_pv = erfa.pav2pv(
+        earth_p.get_xyz(xyz_axis=-1).to_value(u.au),
+        earth_v.get_xyz(xyz_axis=-1).to_value(u.au/u.d))
+    return earth_pv, earth_heliocentric

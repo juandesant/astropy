@@ -1,22 +1,18 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-
+import pytest
 import numpy as np
-
-from numpy.testing import assert_equal
-from numpy.testing.utils import assert_allclose
+from numpy.testing import assert_equal, assert_allclose
 
 try:
-    import scipy  # pylint: disable=W0611
+    import scipy  # pylint: disable=W0611 # noqa
 except ImportError:
     HAS_SCIPY = False
 else:
     HAS_SCIPY = True
 
-from ...tests.helper import pytest
-from ..jackknife import jackknife_resampling, jackknife_stats
+from astropy.stats.jackknife import jackknife_resampling, jackknife_stats
+from astropy.utils.exceptions import AstropyDeprecationWarning
 
 
 def test_jackknife_resampling():
@@ -58,3 +54,12 @@ def test_jackknife_stats_conf_interval():
     # test confidence interval
     answer = np.array((70.14615, 157.42616))
     assert_allclose(answer, jackknife_stats(data, mle_var, 0.95)[3], atol=1e-4)
+
+
+def test_jackknife_stats_exceptions():
+    with pytest.raises(ValueError):
+        with pytest.warns(AstropyDeprecationWarning):
+            jackknife_stats(np.array([]), np.mean, conf_lvl=0.9)
+
+    with pytest.raises(ValueError):
+        jackknife_stats(np.arange(2), np.mean, confidence_level=42)

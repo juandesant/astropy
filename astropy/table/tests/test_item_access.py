@@ -1,13 +1,12 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-# TEST_UNICODE_LITERALS
 
 """ Verify item access API in:
 https://github.com/astropy/astropy/wiki/Table-item-access-definition
 """
-import numpy as np
 
-from ...tests.helper import pytest
+import pytest
+import numpy as np
 
 
 @pytest.mark.usefixtures('table_data')
@@ -27,7 +26,7 @@ class TestTableColumnsItems(BaseTestItems):
         assert self.tc['a'].name == 'a'
         assert self.tc['a'][1] == 2
         assert self.tc['a'].description == 'da'
-        assert self.tc['a'].format == 'fa'
+        assert self.tc['a'].format == '%i'
         assert self.tc['a'].meta == {'ma': 1}
         assert self.tc['a'].unit == 'ua'
         assert self.tc['a'].attrs_equal(table_data.COLS[0])
@@ -45,7 +44,7 @@ class TestTableColumnsItems(BaseTestItems):
         assert self.tc[1].name == 'b'
         assert np.all(self.tc[1].data == table_data.COLS[1].data)
         assert self.tc[1].description == 'db'
-        assert self.tc[1].format == 'fb'
+        assert self.tc[1].format == '%d'
         assert self.tc[1].meta == {'mb': 1}
         assert self.tc[1].unit == 'ub'
         assert self.tc[1].attrs_equal(table_data.COLS[1])
@@ -92,34 +91,36 @@ class TestTableColumnsItems(BaseTestItems):
 @pytest.mark.usefixtures('table_data')
 class TestTableItems(BaseTestItems):
 
-    def test_column(self, table_data):
+    @pytest.mark.parametrize("idx", [1, np.int64(1), np.array(1)])
+    def test_column(self, table_data, idx):
         """Column access returns REFERENCE to data"""
         self.t = table_data.Table(table_data.COLS)
         self.tc = self.t.columns
 
         a = self.t['a']
-        assert a[1] == 2
-        a[1] = 0
-        assert self.t['a'][1] == 0
+        assert a[idx] == 2
+        a[idx] = 0
+        assert self.t['a'][idx] == 0
 
-    def test_row(self, table_data):
+    @pytest.mark.parametrize("idx", [1, np.int64(1), np.array(1)])
+    def test_row(self, table_data, idx):
         """Row  access returns REFERENCE to data"""
         self.t = table_data.Table(table_data.COLS)
         self.tc = self.t.columns
 
-        row = self.t[1]
+        row = self.t[idx]
         assert row['a'] == 2
-        assert row[1] == 5
+        assert row[idx] == 5
         assert row.columns['a'].attrs_equal(table_data.COLS[0])
         assert row.columns['b'].attrs_equal(table_data.COLS[1])
         assert row.columns['c'].attrs_equal(table_data.COLS[2])
 
         # Check that setting by col index sets the table and row value
-        row[1] = 0
-        assert row[1] == 0
+        row[idx] = 0
+        assert row[idx] == 0
         assert row['b'] == 0
-        assert self.t['b'][1] == 0
-        assert self.t[1]['b'] == 0
+        assert self.t['b'][idx] == 0
+        assert self.t[idx]['b'] == 0
 
         # Check that setting by col name sets the table and row value
         row['a'] = 0
@@ -219,13 +220,13 @@ class TestTableItems(BaseTestItems):
         """Selecting a column that doesn't exist fails"""
         self.t = table_data.Table(table_data.COLS)
 
-        with pytest.raises(ValueError) as err:
+        with pytest.raises(KeyError) as err:
             self.t[['xxxx']]
-        assert 'Slice name(s) xxxx not valid column name(s)' in str(err)
+        assert "'xxxx'" in str(err.value)
 
-        with pytest.raises(ValueError) as err:
+        with pytest.raises(KeyError) as err:
             self.t[['xxxx', 'yyyy']]
-        assert 'Slice name(s) xxxx, yyyy not valid column name(s)' in str(err)
+        assert "'xxxx'" in str(err.value)
 
     def test_np_where(self, table_data):
         """Select rows using output of np.where"""

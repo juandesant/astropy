@@ -13,7 +13,7 @@ in this source distribution.
 Differences from SOFA
 ---------------------
 
-This version of ERFA (v1.2.0) is based on SOFA version "20150209_a", with the
+This version of ERFA (v1.6.0) is based on SOFA version "20190722", with the
 differences outlined below.
 
 ERFA branding
@@ -34,10 +34,37 @@ Bugfixes
 ERFA includes smaller changes that may or may not eventually make it into SOFA,
 addressing localized bugs or similar smaller issues:
 
-* Typos have been corrected in the documentation of atco13 and atio13 (see https://github.com/liberfa/erfa/issues/29).
+* ERFA 1.6.0 and SOFA "20190722"
 
-Note: Issues identified in ERFA should always be reported upstream to SOFA
-at sofa@ukho.gov.uk.
+  + There are no differences between ERFA 1.6.0 and SOFA "20190722" except
+    for the ``eraVersion`` and ``eraSofaVersion`` functions added in ERFA 1.4.0.
+
+* ERFA 1.5.0 and SOFA "20180130"
+
+  + There are no differences between ERFA 1.5.0 and SOFA "20180130" except
+    for the ``eraVersion`` and ``eraSofaVersion`` functions added in ERFA 1.4.0.
+
+* ERFA 1.4.0 and SOFA "20170420"
+
+  + ERFA 1.4.0 adds the ``eraVersion`` and ``eraSofaVersion`` functions to
+    determine the installed version of ERFA (and the SOFA version it is derived
+    from).
+
+  + ERFA 1.4.0 includes some bug fixes contributed to ERFA after 1.3.0 but
+    before 1.4.0.  These were incorporated (with modification) into
+    SOFA "20170420" (without attribution) and hence these are not differences
+    between ERFA and SOFA. (See https://github.com/liberfa/erfa/issues/40 and
+    https://github.com/liberfa/erfa/issues/41)
+
+* ERFA 1.3.0 and SOFA "20160503_a"
+
+  + There are no differences between ERFA 1.3.0 and SOFA "20160503_a".
+
+* ERFA 1.2.0 and SOFA "20150209_a"
+
+  + Typos have been corrected in the documentation of atco13 and atio13 (see https://github.com/liberfa/erfa/issues/29).
+
+Note that issues identified in ERFA should generally also be reported upstream to SOFA at sofa@ukho.gov.uk.
 
 Building and installing ERFA
 ----------------------------
@@ -86,3 +113,8 @@ Travis build status
     :target: https://travis-ci.org/liberfa/erfa
 
 .. _erfa-fetch repository: https://github.com/liberfa/erfa-fetch
+
+Cite As
+-------
+.. image:: https://zenodo.org/badge/DOI/10.5281/zenodo.1021149.svg
+   :target: https://doi.org/10.5281/zenodo.1021149

@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from ....io import fits
+from astropy.io import fits
 from . import FitsTestCase
 
 
@@ -50,7 +50,7 @@ class TestNonstandardHdus(FitsTestCase):
         # Just to be meta, let's append to the same hdulist that the fitshdu
         # encapuslates
         hdul_orig.append(fitshdu)
-        hdul_orig.writeto(self.temp('tmp.fits'), clobber=True)
+        hdul_orig.writeto(self.temp('tmp.fits'), overwrite=True)
         del hdul_orig[-1]
 
         hdul = fits.open(self.temp('tmp.fits'))
@@ -64,3 +64,6 @@ class TestNonstandardHdus(FitsTestCase):
         assert (hdul[2].data == wrapped[2].data).all()
         assert (hdul[3].data == wrapped[3].data).all()
         assert (hdul[4].data == wrapped[4].data).all()
+
+        hdul_orig.close()
+        hdul.close()

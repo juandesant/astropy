@@ -4,10 +4,6 @@ Contains a class to handle a validation result for a single VOTable
 file.
 """
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-from ....extern import six
-from ....extern.six.moves import http_client, urllib
-from ....extern.six.moves import cPickle as pickle
 
 # STDLIB
 from xml.parsers.expat import ExpatError
@@ -17,14 +13,18 @@ import shutil
 import socket
 import subprocess
 import warnings
+import pickle
+import urllib.request
+import urllib.error
+import http.client
 
 # VO
-from .. import table
-from .. import exceptions
-from .. import xmlutil
+from astropy.io.votable import table
+from astropy.io.votable import exceptions
+from astropy.io.votable import xmlutil
 
 
-class Result(object):
+class Result:
     def __init__(self, url, root='results', timeout=10):
         self.url = url
         m = hashlib.md5()
@@ -64,7 +64,7 @@ class Result(object):
             try:
                 with open(path, 'rb') as fd:
                     self._attributes = pickle.load(fd)
-            except:
+            except Exception:
                 shutil.rmtree(self.get_dirpath())
                 os.makedirs(self.get_dirpath())
                 self._attributes = {}
@@ -99,16 +99,13 @@ class Result(object):
         def fail(reason):
             reason = str(reason)
             with open(path, 'wb') as fd:
-                fd.write('FAILED: {0}\n'.format(reason).encode('utf-8'))
+                fd.write(f'FAILED: {reason}\n'.encode('utf-8'))
             self['network_error'] = reason
 
         r = None
         try:
-            if six.PY3:
-                r = urllib.request.urlopen(
-                    self.url.decode('ascii'), timeout=self.timeout)
-            elif six.PY2:
-                r = urllib.request.urlopen(self.url, timeout=self.timeout)
+            r = urllib.request.urlopen(
+                self.url.decode('ascii'), timeout=self.timeout)
         except urllib.error.URLError as e:
             if hasattr(e, 'reason'):
                 reason = e.reason
@@ -116,8 +113,8 @@ class Result(object):
                 reason = e.code
             fail(reason)
             return
-        except http_client.HTTPException as e:
-            fail("HTTPException: %s" % str(e))
+        except http.client.HTTPException as e:
+            fail("HTTPException: {}".format(str(e)))
             return
         except (socket.timeout, socket.error) as e:
             fail("Timeout")
@@ -166,7 +163,7 @@ class Result(object):
         with open(path, 'rb') as input:
             with warnings.catch_warnings(record=True) as warning_lines:
                 try:
-                    t = table.parse(input, pedantic=False, filename=path)
+                    t = table.parse(input, verify='warn', filename=path)
                 except (ValueError, TypeError, ExpatError) as e:
                     lines.append(str(e))
                     nexceptions += 1
@@ -226,8 +223,8 @@ class Result(object):
     def validate_with_votlint(self, path_to_stilts_jar):
         filename = self.get_vo_xml_path()
         p = subprocess.Popen(
-            "java -jar %s votlint validate=false %s" %
-            (path_to_stilts_jar, filename),
+            "java -jar {} votlint validate=false {}".format(
+                path_to_stilts_jar, filename),
             shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = p.communicate()
         if len(stdout) or p.returncode:
@@ -238,26 +235,26 @@ class Result(object):
 
 
 def get_result_subsets(results, root, s=None):
-    all_results      = []
-    correct          = []
-    not_expected     = []
-    fail_schema      = []
-    schema_mismatch  = []
-    fail_votlint     = []
+    all_results = []
+    correct = []
+    not_expected = []
+    fail_schema = []
+    schema_mismatch = []
+    fail_votlint = []
     votlint_mismatch = []
     network_failures = []
-    version_10       = []
-    version_11       = []
-    version_12       = []
-    version_unknown  = []
-    has_warnings     = []
-    warning_set      = {}
-    has_exceptions   = []
-    exception_set    = {}
+    version_10 = []
+    version_11 = []
+    version_12 = []
+    version_unknown = []
+    has_warnings = []
+    warning_set = {}
+    has_exceptions = []
+    exception_set = {}
 
     for url in results:
         if s:
-            six.next(s)
+            next(s)
 
         if isinstance(url, Result):
             x = url
@@ -332,29 +329,29 @@ def get_result_subsets(results, root, s=None):
         ('version1.2', 'Version 1.2', version_12),
         ('version_unknown', 'Version unknown', version_unknown),
         ('warnings', 'Warnings', has_warnings)]
-    for warning_code, warnings in warning_set:
+    for warning_code, warning in warning_set:
         if s:
-            six.next(s)
+            next(s)
 
         warning_class = getattr(exceptions, warning_code, None)
         if warning_class:
             warning_descr = warning_class.get_short_name()
             tables.append(
                 (warning_code,
-                 '%s: %s' % (warning_code, warning_descr),
-                 warnings, ['ul', 'li']))
+                 f'{warning_code}: {warning_descr}',
+                 warning, ['ul', 'li']))
     tables.append(
         ('exceptions', 'Exceptions', has_exceptions))
     for exception_code, exc in exception_set:
         if s:
-            six.next(s)
+            next(s)
 
         exception_class = getattr(exceptions, exception_code, None)
         if exception_class:
             exception_descr = exception_class.get_short_name()
             tables.append(
                 (exception_code,
-                 '%s: %s' % (exception_code, exception_descr),
+                 f'{exception_code}: {exception_descr}',
                  exc, ['ul', 'li']))
 
     return tables

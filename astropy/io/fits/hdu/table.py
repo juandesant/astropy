@@ -1,14 +1,15 @@
 # Licensed under a 3-clause BSD style license - see PYFITS.rst
 
-from __future__ import division  # confidence high
 
 import contextlib
 import csv
+import operator
 import os
 import re
 import sys
 import textwrap
 import warnings
+from contextlib import suppress
 
 import numpy as np
 from numpy import char as chararray
@@ -17,27 +18,23 @@ from .base import DELAYED, _ValidHDU, ExtensionHDU
 # This module may have many dependencies on astropy.io.fits.column, but
 # astropy.io.fits.column has fewer dependencies overall, so it's easier to
 # keep table/column-related utilities in astropy.io.fits.column
-from .. import _numpy_hacks as nh
-from ..column import (FITS2NUMPY, KEYWORD_NAMES, KEYWORD_TO_ATTRIBUTE,
+from astropy.io.fits.column import (FITS2NUMPY, KEYWORD_NAMES, KEYWORD_TO_ATTRIBUTE,
                       ATTRIBUTE_TO_KEYWORD, TDEF_RE, Column, ColDefs,
                       _AsciiColDefs, _FormatP, _FormatQ, _makep,
                       _parse_tformat, _scalar_to_format, _convert_format,
-                      _cmp_recformats, _get_index)
-from ..fitsrec import FITS_rec, _get_recarray_field, _has_unicode_fields
-from ..header import Header, _pad_length
-from ..util import _is_int, _str_to_num
+                      _cmp_recformats)
+from astropy.io.fits.fitsrec import FITS_rec, _get_recarray_field, _has_unicode_fields
+from astropy.io.fits.header import Header, _pad_length
+from astropy.io.fits.util import _is_int, _str_to_num
 
-from ....extern import six
-from ....extern.six import string_types
-from ....extern.six.moves import xrange as range
-from ....utils import deprecated, lazyproperty
-from ....utils.compat import suppress
-from ....utils.exceptions import AstropyUserWarning
+from astropy.utils import lazyproperty
+from astropy.utils.exceptions import AstropyDeprecationWarning
+from astropy.utils.decorators import deprecated_renamed_argument
 
 
 class FITSTableDumpDialect(csv.excel):
     """
-    A CSV dialect for the PyFITS format of ASCII dumps of FITS tables.
+    A CSV dialect for the Astropy format of ASCII dumps of FITS tables.
     """
 
     delimiter = ' '
@@ -73,7 +70,7 @@ class _TableLikeHDU(_ValidHDU):
 
     @classmethod
     def from_columns(cls, columns, header=None, nrows=0, fill=False,
-                     **kwargs):
+                     character_as_bytes=False, **kwargs):
         """
         Given either a `ColDefs` object, a sequence of `Column` objects,
         or another table HDU or table data (a `FITS_rec` or multi-field
@@ -81,9 +78,7 @@ class _TableLikeHDU(_ValidHDU):
         the class this method was called on using the column definition from
         the input.
 
-        This is an alternative to the now deprecated `new_table` function,
-        and otherwise accepts the same arguments.  See also
-        `FITS_rec.from_columns`.
+        See also `FITS_rec.from_columns`.
 
         Parameters
         ----------
@@ -115,6 +110,11 @@ class _TableLikeHDU(_ValidHDU):
             copy the data from input, undefined cells will still be filled with
             zeros/blanks.
 
+        character_as_bytes : bool
+            Whether to return bytes for string columns when accessed from the
+            HDU. By default this is `False` and (unicode) strings are returned,
+            but for large tables this may use up a lot of memory.
+
         Notes
         -----
 
@@ -123,8 +123,9 @@ class _TableLikeHDU(_ValidHDU):
         """
 
         coldefs = cls._columns_type(columns)
-        data = FITS_rec.from_columns(coldefs, nrows=nrows, fill=fill)
-        hdu = cls(data=data, header=header, **kwargs)
+        data = FITS_rec.from_columns(coldefs, nrows=nrows, fill=fill,
+                                     character_as_bytes=character_as_bytes)
+        hdu = cls(data=data, header=header, character_as_bytes=character_as_bytes, **kwargs)
         coldefs._add_listener(hdu)
         return hdu
 
@@ -235,6 +236,30 @@ class _TableLikeHDU(_ValidHDU):
 class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
     """
     FITS table extension base HDU class.
+
+    Parameters
+    ----------
+    data : array
+        Data to be used.
+    header : `Header` instance
+        Header to be used. If the ``data`` is also specified, header keywords
+        specifically related to defining the table structure (such as the
+        "TXXXn" keywords like TTYPEn) will be overridden by the supplied column
+        definitions, but all other informational and data model-specific
+        keywords are kept.
+    name : str
+        Name to be populated in ``EXTNAME`` keyword.
+    uint : bool, optional
+        Set to `True` if the table contains unsigned integer columns.
+    ver : int > 0 or None, optional
+        The ver of the HDU, will be the value of the keyword ``EXTVER``.
+        If not given or None, it defaults to the value of the ``EXTVER``
+        card of the ``header`` or 1.
+        (default: None)
+    character_as_bytes : bool
+        Whether to return bytes for string columns. By default this is `False`
+        and (unicode) strings are returned, but this does not respect memory
+        mapping and loads the whole column in memory when accessed.
     """
 
     _manages_own_heap = False
@@ -247,29 +272,14 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
     which perform their own heap maintenance.
     """
 
-    def __init__(self, data=None, header=None, name=None, uint=False):
-        """
-        Parameters
-        ----------
-        header : Header instance
-            header to be used
+    def __init__(self, data=None, header=None, name=None, uint=False, ver=None,
+                 character_as_bytes=False):
 
-        data : array
-            data to be used
+        super().__init__(data=data, header=header, name=name, ver=ver)
 
-        name : str
-            name to be populated in ``EXTNAME`` keyword
-
-        uint : bool, optional
-            set to `True` if the table contains unsigned integer columns.
-        """
-
-        super(_TableBaseHDU, self).__init__(data=data, header=header,
-                                            name=name)
-
-        if header is not None and not isinstance(header, Header):
-            raise ValueError('header must be a Header object.')
         self._uint = uint
+        self._character_as_bytes = character_as_bytes
+
         if data is DELAYED:
             # this should never happen
             if header is None:
@@ -282,16 +292,17 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
         else:
             # construct a list of cards of minimal header
             cards = [
-                ('XTENSION',      '', ''),
-                ('BITPIX',         8, 'array data type'),
-                ('NAXIS',          2, 'number of array dimensions'),
-                ('NAXIS1',         0, 'length of dimension 1'),
-                ('NAXIS2',         0, 'length of dimension 2'),
-                ('PCOUNT',         0, 'number of group parameters'),
-                ('GCOUNT',         1, 'number of groups'),
-                ('TFIELDS',        0, 'number of table fields')]
+                ('XTENSION', self._extension, self._ext_comment),
+                ('BITPIX', 8, 'array data type'),
+                ('NAXIS', 2, 'number of array dimensions'),
+                ('NAXIS1', 0, 'length of dimension 1'),
+                ('NAXIS2', 0, 'length of dimension 2'),
+                ('PCOUNT', 0, 'number of group parameters'),
+                ('GCOUNT', 1, 'number of groups'),
+                ('TFIELDS', 0, 'number of table fields')]
 
             if header is not None:
+
                 # Make a "copy" (not just a view) of the input header, since it
                 # may get modified.  the data is still a "view" (for now)
                 hcopy = header.copy(strip=True)
@@ -304,45 +315,31 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
                 if isinstance(data, self._data_type):
                     self.data = data
                 else:
-                    # Just doing a view on the input data screws up unsigned
-                    # columns, so treat those more carefully.
-                    # TODO: I need to read this code a little more closely
-                    # again, but I think it can be simplified quite a bit with
-                    # the use of some appropriate utility functions
-                    update_coldefs = {}
-                    if 'u' in [data.dtype[k].kind for k in data.dtype.names]:
-                        self._uint = True
-                        bzeros = {2: np.uint16(2**15), 4: np.uint32(2**31),
-                                  8: np.uint64(2**63)}
+                    self.data = self._data_type.from_columns(data)
 
-                        new_dtype = [
-                            (k, data.dtype[k].kind.replace('u', 'i') +
-                            str(data.dtype[k].itemsize))
-                            for k in data.dtype.names]
-
-                        new_data = np.zeros(data.shape, dtype=new_dtype)
-
-                        for k in data.dtype.fields:
-                            dtype = data.dtype[k]
-                            if dtype.kind == 'u':
-                                new_data[k] = data[k] - bzeros[dtype.itemsize]
-                                update_coldefs[k] = bzeros[dtype.itemsize]
-                            else:
-                                new_data[k] = data[k]
-                        self.data = new_data.view(self._data_type)
-                        # Uck...
-                        self.data._uint = True
-                    else:
-                        self.data = data.view(self._data_type)
-                    for k in update_coldefs:
-                        indx = _get_index(self.data.names, k)
-                        self.data._coldefs[indx].bzero = update_coldefs[k]
-                        # This is so bad that we have to update this in
-                        # duplicate...
-                        self.data._coldefs.bzeros[indx] = update_coldefs[k]
-                        # More uck...
-                        self.data._coldefs[indx]._physical_values = False
-                        self.data._coldefs[indx]._pseudo_unsigned_ints = True
+                # TEMP: Special column keywords are normally overwritten by attributes
+                # from Column objects. In Astropy 3.0, several new keywords are now
+                # recognized as being special column keywords, but we don't
+                # automatically clear them yet, as we need to raise a deprecation
+                # warning for at least one major version.
+                if header is not None:
+                    future_ignore = set()
+                    for keyword in header.keys():
+                        match = TDEF_RE.match(keyword)
+                        try:
+                            base_keyword = match.group('label')
+                        except Exception:
+                            continue                # skip if there is no match
+                        if base_keyword in {'TCTYP', 'TCUNI', 'TCRPX', 'TCRVL', 'TCDLT', 'TRPOS'}:
+                            future_ignore.add(base_keyword)
+                    if future_ignore:
+                        keys = ', '.join(x + 'n' for x in sorted(future_ignore))
+                        warnings.warn("The following keywords are now recognized as special "
+                                      "column-related attributes and should be set via the "
+                                      "Column objects: {}. In future, these values will be "
+                                      "dropped from manually specified headers automatically "
+                                      "and replaced with values generated based on the "
+                                      "Column objects.".format(keys), AstropyDeprecationWarning)
 
                 # TODO: Too much of the code in this class uses header keywords
                 # in making calculations related to the data size.  This is
@@ -370,14 +367,12 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
             else:
                 raise TypeError('Table data has incorrect type.')
 
-        if not (isinstance(self._header[0], string_types) and
-                self._header[0].rstrip() == self._extension):
-            self._header[0] = (self._extension, self._ext_comment)
-
         # Ensure that the correct EXTNAME is set on the new header if one was
         # created, or that it overrides the existing EXTNAME if different
         if name:
             self.name = name
+        if ver is not None:
+            self.ver = ver
 
     @classmethod
     def match_header(cls, header):
@@ -403,6 +398,7 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
     def data(self):
         data = self._get_tbdata()
         data._coldefs = self.columns
+        data._character_as_bytes = self._character_as_bytes
         # Columns should now just return a reference to the data._coldefs
         del self.columns
         return data
@@ -529,14 +525,26 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
                     format = format_cls(format.dtype, repeat=format.repeat,
                                         max=_max)
                     self._header['TFORM' + str(idx + 1)] = format.tform
-        return super(_TableBaseHDU, self)._prewriteto(checksum, inplace)
+        return super()._prewriteto(checksum, inplace)
 
     def _verify(self, option='warn'):
         """
         _TableBaseHDU verify method.
         """
 
-        errs = super(_TableBaseHDU, self)._verify(option=option)
+        errs = super()._verify(option=option)
+        if not (isinstance(self._header[0], str) and
+                self._header[0].rstrip() == self._extension):
+
+            err_text = 'The XTENSION keyword must match the HDU type.'
+            fix_text = 'Converted the XTENSION keyword to {}.'.format(self._extension)
+
+            def fix(header=self._header):
+                header[0] = (self._extension, self._ext_comment)
+
+            errs.append(self.run_option(option, err_text=err_text,
+                                        fix_text=fix_text, fix=fix))
+
         self.req_cards('NAXIS', None, lambda v: (v == 2), 2, option, errs)
         self.req_cards('BITPIX', None, lambda v: (v == 8), 8, option, errs)
         self.req_cards('TFIELDS', 7,
@@ -558,7 +566,6 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
         # if data is touched, use data info.
         if self._data_loaded:
             if self.data is None:
-                shape, format = (), ''
                 nrows = 0
             else:
                 nrows = len(self.data)
@@ -568,19 +575,18 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
 
         # if data is not touched yet, use header info.
         else:
-            shape = ()
             nrows = self._header['NAXIS2']
             ncols = self._header['TFIELDS']
             format = ', '.join([self._header['TFORM' + str(j + 1)]
                                 for j in range(ncols)])
-            format = '[%s]' % format
-        dims = "%dR x %dC" % (nrows, ncols)
+            format = f'[{format}]'
+        dims = f"{nrows}R x {ncols}C"
         ncards = len(self._header)
 
-        return (self.name, class_name, ncards, dims, format)
+        return (self.name, self.ver, class_name, ncards, dims, format)
 
     def _update_column_removed(self, columns, idx):
-        super(_TableBaseHDU, self)._update_column_removed(columns, idx)
+        super()._update_column_removed(columns, idx)
 
         # Fix the header to reflect the column removal
         self._clear_table_keywords(index=idx)
@@ -617,7 +623,7 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
             else:
                 for after_keyword in KEYWORD_NAMES[keyword_idx + 1:]:
                     after_keyword += str(col_idx + 1)
-                    if after_keyword in header:
+                    if after_keyword in self._header:
                         self._header.insert(after_keyword,
                                             (keyword, new_value))
                         break
@@ -644,24 +650,33 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
             match = TDEF_RE.match(keyword)
             try:
                 base_keyword = match.group('label')
-            except:
+            except Exception:
                 continue                # skip if there is no match
 
             if base_keyword in KEYWORD_TO_ATTRIBUTE:
+
+                # TEMP: For Astropy 3.0 we don't clear away the following keywords
+                # as we are first raising a deprecation warning that these will be
+                # dropped automatically if they were specified in the header. We
+                # can remove this once we are happy to break backward-compatibility
+                if base_keyword in {'TCTYP', 'TCUNI', 'TCRPX', 'TCRVL', 'TCDLT', 'TRPOS'}:
+                    continue
+
                 num = int(match.group('num')) - 1  # convert to zero-base
                 table_keywords.append((idx, match.group(0), base_keyword,
                                        num))
 
         # First delete
-        for idx, keyword, _, num in sorted(table_keywords,
-                                           key=lambda k: k[0], reverse=True):
+        rev_sorted_idx_0 = sorted(table_keywords, key=operator.itemgetter(0),
+                                  reverse=True)
+        for idx, keyword, _, num in rev_sorted_idx_0:
             if index is None or index == num:
                 del self._header[idx]
 
         # Now shift up remaining column keywords if only one column was cleared
         if index is not None:
-            for _, keyword, base_keyword, num in sorted(table_keywords,
-                                                        key=lambda k: k[3]):
+            sorted_idx_3 = sorted(table_keywords, key=operator.itemgetter(3))
+            for _, keyword, base_keyword, num in sorted_idx_3:
                 if num <= index:
                     continue
 
@@ -679,7 +694,7 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
         """Populate the new table definition keywords from the header."""
 
         for idx, column in enumerate(self.columns):
-            for keyword, attr in six.iteritems(KEYWORD_TO_ATTRIBUTE):
+            for keyword, attr in KEYWORD_TO_ATTRIBUTE.items():
                 val = getattr(column, attr)
                 if val is not None:
                     keyword = keyword + str(idx + 1)
@@ -689,6 +704,25 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
 class TableHDU(_TableBaseHDU):
     """
     FITS ASCII table extension HDU class.
+
+    Parameters
+    ----------
+    data : array or `FITS_rec`
+        Data to be used.
+    header : `Header`
+        Header to be used.
+    name : str
+        Name to be populated in ``EXTNAME`` keyword.
+    ver : int > 0 or None, optional
+        The ver of the HDU, will be the value of the keyword ``EXTVER``.
+        If not given or None, it defaults to the value of the ``EXTVER``
+        card of the ``header`` or 1.
+        (default: None)
+    character_as_bytes : bool
+        Whether to return bytes for string columns. By default this is `False`
+        and (unicode) strings are returned, but this does not respect memory
+        mapping and loads the whole column in memory when accessed.
+
     """
 
     _extension = 'TABLE'
@@ -700,14 +734,14 @@ class TableHDU(_TableBaseHDU):
     __format_RE = re.compile(
         r'(?P<code>[ADEFIJ])(?P<width>\d+)(?:\.(?P<prec>\d+))?')
 
-    def __init__(self, data=None, header=None, name=None):
-        super(TableHDU, self).__init__(data, header, name=name)
+    def __init__(self, data=None, header=None, name=None, ver=None, character_as_bytes=False):
+        super().__init__(data, header, name=name, ver=ver, character_as_bytes=character_as_bytes)
 
     @classmethod
     def match_header(cls, header):
         card = header.cards[0]
         xtension = card.value
-        if isinstance(xtension, string_types):
+        if isinstance(xtension, str):
             xtension = xtension.rstrip()
         return card.keyword == 'XTENSION' and xtension == cls._extension
 
@@ -720,7 +754,7 @@ class TableHDU(_TableBaseHDU):
         dup = np.rec.find_duplicate(names)
 
         if dup:
-            raise ValueError("Duplicate field names: %s" % dup)
+            raise ValueError(f"Duplicate field names: {dup}")
 
         # TODO: Determine if this extra logic is necessary--I feel like the
         # _AsciiColDefs class should be responsible for telling the table what
@@ -743,7 +777,7 @@ class TableHDU(_TableBaseHDU):
         self._init_tbdata(data)
         return data.view(self._data_type)
 
-    def _calculate_datasum(self, blocking):
+    def _calculate_datasum(self):
         """
         Calculate the value for the ``DATASUM`` card in the HDU.
         """
@@ -753,26 +787,26 @@ class TableHDU(_TableBaseHDU):
             # We need to pad the data to a block length before calculating
             # the datasum.
             bytes_array = self.data.view(type=np.ndarray, dtype=np.ubyte)
-            padding = np.fromstring(_pad_length(self.size) * b' ',
+            padding = np.frombuffer(_pad_length(self.size) * b' ',
                                     dtype=np.ubyte)
 
             d = np.append(bytes_array, padding)
 
-            cs = self._compute_checksum(d, blocking=blocking)
+            cs = self._compute_checksum(d)
             return cs
         else:
             # This is the case where the data has not been read from the file
             # yet.  We can handle that in a generic manner so we do it in the
             # base class.  The other possibility is that there is no data at
             # all.  This can also be handled in a generic manner.
-            return super(TableHDU, self)._calculate_datasum(blocking)
+            return super()._calculate_datasum()
 
     def _verify(self, option='warn'):
         """
         `TableHDU` verify method.
         """
 
-        errs = super(TableHDU, self)._verify(option=option)
+        errs = super()._verify(option=option)
         self.req_cards('PCOUNT', None, lambda v: (v == 0), 0, option, errs)
         tfields = self._header['TFIELDS']
         for idx in range(tfields):
@@ -784,29 +818,63 @@ class TableHDU(_TableBaseHDU):
 class BinTableHDU(_TableBaseHDU):
     """
     Binary table HDU class.
+
+    Parameters
+    ----------
+    data : array, `FITS_rec`, or `~astropy.table.Table`
+        Data to be used.
+    header : `Header`
+        Header to be used.
+    name : str
+        Name to be populated in ``EXTNAME`` keyword.
+    uint : bool, optional
+        Set to `True` if the table contains unsigned integer columns.
+    ver : int > 0 or None, optional
+        The ver of the HDU, will be the value of the keyword ``EXTVER``.
+        If not given or None, it defaults to the value of the ``EXTVER``
+        card of the ``header`` or 1.
+        (default: None)
+    character_as_bytes : bool
+        Whether to return bytes for string columns. By default this is `False`
+        and (unicode) strings are returned, but this does not respect memory
+        mapping and loads the whole column in memory when accessed.
+
     """
 
     _extension = 'BINTABLE'
     _ext_comment = 'binary table extension'
 
+    def __init__(self, data=None, header=None, name=None, uint=False, ver=None,
+                 character_as_bytes=False):
+        from astropy.table import Table
+        if isinstance(data, Table):
+            from astropy.io.fits.convenience import table_to_hdu
+            hdu = table_to_hdu(data)
+            if header is not None:
+                hdu.header.update(header)
+            data = hdu.data
+            header = hdu.header
+
+        super().__init__(data, header, name=name, uint=uint, ver=ver,
+                         character_as_bytes=character_as_bytes)
 
     @classmethod
     def match_header(cls, header):
         card = header.cards[0]
         xtension = card.value
-        if isinstance(xtension, string_types):
+        if isinstance(xtension, str):
             xtension = xtension.rstrip()
         return (card.keyword == 'XTENSION' and
                 xtension in (cls._extension, 'A3DTABLE'))
 
-    def _calculate_datasum_with_heap(self, blocking):
+    def _calculate_datasum_with_heap(self):
         """
         Calculate the value for the ``DATASUM`` card given the input data
         """
 
         with _binary_table_byte_swap(self.data) as data:
             dout = data.view(type=np.ndarray, dtype=np.ubyte)
-            csum = self._compute_checksum(dout, blocking=blocking)
+            csum = self._compute_checksum(dout)
 
             # Now add in the heap data to the checksum (we can skip any gap
             # between the table and the heap since it's all zeros and doesn't
@@ -826,12 +894,11 @@ class BinTableHDU(_TableBaseHDU):
                         if not len(coldata):
                             continue
 
-                        csum = self._compute_checksum(coldata, csum,
-                                                      blocking=blocking)
+                        csum = self._compute_checksum(coldata, csum)
 
             return csum
 
-    def _calculate_datasum(self, blocking):
+    def _calculate_datasum(self):
         """
         Calculate the value for the ``DATASUM`` card in the HDU.
         """
@@ -840,13 +907,13 @@ class BinTableHDU(_TableBaseHDU):
             # This method calculates the datasum while incorporating any
             # heap data, which is obviously not handled from the base
             # _calculate_datasum
-            return self._calculate_datasum_with_heap(blocking)
+            return self._calculate_datasum_with_heap()
         else:
             # This is the case where the data has not been read from the file
             # yet.  We can handle that in a generic manner so we do it in the
             # base class.  The other possibility is that there is no data at
             # all.  This can also be handled in a generic manner.
-            return super(BinTableHDU, self)._calculate_datasum(blocking)
+            return super()._calculate_datasum()
 
     def _writedata_internal(self, fileobj):
         size = 0
@@ -908,11 +975,21 @@ class BinTableHDU(_TableBaseHDU):
         for idx in range(len(self.data)):
             for field in fields:
                 item = field[idx]
+                field_width = None
 
                 if field.dtype.kind == 'U':
+                    # Read the field *width* by reading past the field kind.
+                    i = field.dtype.str.index(field.dtype.kind)
+                    field_width = int(field.dtype.str[i+1:])
                     item = np.char.encode(item, 'ascii')
 
                 fileobj.writearray(item)
+                if field_width is not None:
+                    j = item.dtype.str.index(item.dtype.kind)
+                    item_length = int(item.dtype.str[j+1:])
+                    # Fix padding problem (see #5296).
+                    padding = '\x00'*(field_width - item_length)
+                    fileobj.write(padding.encode('ascii'))
 
     _tdump_file_format = textwrap.dedent("""
 
@@ -967,7 +1044,8 @@ class BinTableHDU(_TableBaseHDU):
           image.
       """)
 
-    def dump(self, datafile=None, cdfile=None, hfile=None, clobber=False):
+    @deprecated_renamed_argument('clobber', 'overwrite', '2.0')
+    def dump(self, datafile=None, cdfile=None, hfile=None, overwrite=False):
         """
         Dump the table HDU to a file in ASCII format.  The table may be dumped
         in three separate files, one containing column definitions, one
@@ -988,8 +1066,13 @@ class BinTableHDU(_TableBaseHDU):
             Output header parameters file.  The default is `None`,
             no header parameters output is produced.
 
-        clobber : bool
-            Overwrite the output files if they exist.
+        overwrite : bool, optional
+            If ``True``, overwrite the output file if it exists. Raises an
+            ``OSError`` if ``False`` and the output file exists. Default is
+            ``False``.
+
+            .. versionchanged:: 1.3
+               ``overwrite`` replaces the deprecated ``clobber`` argument.
 
         Notes
         -----
@@ -1004,17 +1087,15 @@ class BinTableHDU(_TableBaseHDU):
         files = [datafile, cdfile, hfile]
 
         for f in files:
-            if isinstance(f, string_types):
+            if isinstance(f, str):
                 if os.path.exists(f) and os.path.getsize(f) != 0:
-                    if clobber:
-                        warnings.warn("Overwriting existing file '%s'." % f,
-                                      AstropyUserWarning)
+                    if overwrite:
                         os.remove(f)
                     else:
                         exist.append(f)
 
         if exist:
-            raise IOError('  '.join(["File '%s' already exists." % f
+            raise OSError('  '.join([f"File '{f}' already exists."
                                      for f in exist]))
 
         # Process the data
@@ -1028,12 +1109,8 @@ class BinTableHDU(_TableBaseHDU):
         if hfile:
             self._header.tofile(hfile, sep='\n', endcard=False, padding=False)
 
-    if isinstance(dump.__doc__, string_types):
+    if isinstance(dump.__doc__, str):
         dump.__doc__ += _tdump_file_format.replace('\n', '\n        ')
-
-    @deprecated('0.1', alternative=':meth:`dump`')
-    def tdump(self, datafile=None, cdfile=None, hfile=None, clobber=False):
-        self.dump(datafile, cdfile, hfile, clobber)
 
     def load(cls, datafile, cdfile=None, hfile=None, replace=False,
              header=None):
@@ -1066,15 +1143,15 @@ class BinTableHDU(_TableBaseHDU):
             `None`, the header parameter definitions are taken from
             the current values in this objects header.
 
-        replace : bool
+        replace : bool, optional
             When `True`, indicates that the entire header should be
             replaced with the contents of the ASCII file instead of
             just updating the current header.
 
-        header : Header object
+        header : `~astropy.io.fits.Header`, optional
             When the cdfile and hfile are missing, use this Header object in
             the creation of the new table and HDU.  Otherwise this Header
-            supercedes the keywords from hfile, which is only used to update
+            supersedes the keywords from hfile, which is only used to update
             values not present in this Header, unless ``replace=True`` in which
             this Header's values are completely replaced with the values from
             hfile.
@@ -1113,18 +1190,12 @@ class BinTableHDU(_TableBaseHDU):
         hdu.columns = coldefs
         return hdu
 
-    if isinstance(load.__doc__, string_types):
+    if isinstance(load.__doc__, str):
         load.__doc__ += _tdump_file_format.replace('\n', '\n        ')
 
     load = classmethod(load)
     # Have to create a classmethod from this here instead of as a decorator;
     # otherwise we can't update __doc__
-
-    @deprecated('0.1', alternative=':meth:`load`')
-    @classmethod
-    def tcreate(cls, datafile, cdfile=None, hfile=None, replace=False,
-                header=None):
-        return cls.load(datafile, cdfile, hfile, replace, header)
 
     def _dump_data(self, fileobj):
         """
@@ -1138,7 +1209,7 @@ class BinTableHDU(_TableBaseHDU):
 
         close_file = False
 
-        if isinstance(fileobj, string_types):
+        if isinstance(fileobj, str):
             fileobj = open(fileobj, 'w')
             close_file = True
 
@@ -1148,15 +1219,15 @@ class BinTableHDU(_TableBaseHDU):
         def format_value(val, format):
             if format[0] == 'S':
                 itemsize = int(format[1:])
-                return '%-*s' % (itemsize, val)
+                return '{:{size}}'.format(val, size=itemsize)
             elif format in np.typecodes['AllInteger']:
                 # output integer
-                return '%21d' % val
+                return f'{val:21d}'
             elif format in np.typecodes['Complex']:
-                return '%21.15g+%.15gj' % (val.real, val.imag)
+                return f'{val.real:21.15g}+{val.imag:.15g}j'
             elif format in np.typecodes['Float']:
                 # output floating point
-                return '%#21.15g' % val
+                return f'{val:#21.15g}'
 
         for row in self.data:
             line = []   # the line for this row of the table
@@ -1173,7 +1244,7 @@ class BinTableHDU(_TableBaseHDU):
                     # the length of the array for this row and set the format
                     # for the VLA data
                     line.append('VLA_Length=')
-                    line.append('%-21d' % len(row[column.name]))
+                    line.append('{:21d}'.format(len(row[column.name])))
                     _, dtype, option = _parse_tformat(column.format)
                     vla_format = FITS2NUMPY[option[0]][0]
 
@@ -1208,7 +1279,7 @@ class BinTableHDU(_TableBaseHDU):
 
         close_file = False
 
-        if isinstance(fileobj, string_types):
+        if isinstance(fileobj, str):
             fileobj = open(fileobj, 'w')
             close_file = True
 
@@ -1217,7 +1288,7 @@ class BinTableHDU(_TableBaseHDU):
         for column in self.columns:
             line = [column.name, column.format]
             attrs = ['disp', 'unit', 'dim', 'null', 'bscale', 'bzero']
-            line += ['%-16s' % (value if value else '""')
+            line += ['{:16s}'.format(value if value else '""')
                      for value in (getattr(column, attr) for attr in attrs)]
             fileobj.write(' '.join(line))
             fileobj.write('\n')
@@ -1233,7 +1304,7 @@ class BinTableHDU(_TableBaseHDU):
 
         close_file = False
 
-        if isinstance(fileobj, string_types):
+        if isinstance(fileobj, str):
             fileobj = open(fileobj, 'r')
             close_file = True
 
@@ -1297,8 +1368,7 @@ class BinTableHDU(_TableBaseHDU):
 
         # TODO: In the future maybe enable loading a bit at a time so that we
         # can convert from this format to an actual FITS file on disk without
-        # needing enough physical memory to hold the entire thing at once;
-        # new_table() could use a similar feature.
+        # needing enough physical memory to hold the entire thing at once
         hdu = BinTableHDU.from_columns(np.recarray(shape=1, dtype=dtype),
                                        nrows=nrows, fill=True)
 
@@ -1377,7 +1447,7 @@ class BinTableHDU(_TableBaseHDU):
 
         close_file = False
 
-        if isinstance(fileobj, string_types):
+        if isinstance(fileobj, str):
             fileobj = open(fileobj, 'r')
             close_file = True
 
@@ -1400,67 +1470,6 @@ class BinTableHDU(_TableBaseHDU):
             fileobj.close()
 
         return ColDefs(columns)
-
-
-@deprecated('0.4',
-            alternative=':meth:`BinTableHDU.from_columns` for new BINARY '
-                        'tables or :meth:`TableHDU.from_columns` for new '
-                        'ASCII tables')
-def new_table(input, header=None, nrows=0, fill=False, tbtype=BinTableHDU):
-    """
-    Create a new table from the input column definitions.
-
-    Warning: Creating a new table using this method creates an in-memory *copy*
-    of all the column arrays in the input.  This is because if they are
-    separate arrays they must be combined into a single contiguous array.
-
-    If the column data is already in a single contiguous array (such as an
-    existing record array) it may be better to create a `BinTableHDU` instance
-    directly.  See the Astropy documentation for more details.
-
-    Parameters
-    ----------
-    input : sequence of `Column` or a `ColDefs`
-        The data to create a table from
-
-    header : `Header` instance
-        Header to be used to populate the non-required keywords
-
-    nrows : int
-        Number of rows in the new table
-
-    fill : bool
-        If `True`, will fill all cells with zeros or blanks.  If
-        `False`, copy the data from input, undefined cells will still
-        be filled with zeros/blanks.
-
-    tbtype : str or type
-        Table type to be created (`BinTableHDU` or `TableHDU`) or the class
-        name as a string.  Currently only `BinTableHDU` and `TableHDU` (ASCII
-        tables) are supported.
-    """
-
-    # tbtype defaults to classes now, but in all prior version of PyFITS it was
-    # a string, so we still support that use case as well
-    if not isinstance(tbtype, string_types):
-        cls = tbtype
-        tbtype = cls.__name__
-    else:
-        # Right now the string input must be one of 'TableHDU' or 'BinTableHDU'
-        # and nothing else, though we will allow this to be case insensitive
-        # This could be done more generically through the HDU registry, but my
-        # hope is to deprecate this function anyways so there's not much point
-        # in trying to make it more "generic".
-        if tbtype.lower() == 'tablehdu':
-            cls = TableHDU
-        elif tbtype.lower() == 'bintablehdu':
-            cls = BinTableHDU
-        else:
-            raise ValueError("tbtype must be one of 'TableHDU' or "
-                             "'BinTableHDU'")
-
-    # construct a table HDU of the requested type
-    return cls.from_columns(input, header=header, nrows=nrows, fill=fill)
 
 
 @contextlib.contextmanager
@@ -1520,10 +1529,9 @@ def _binary_table_byte_swap(data):
     for arr in reversed(to_swap):
         arr.byteswap(True)
 
-    new_dtype = nh.realign_dtype(np.dtype(list(zip(names, formats))),
-                                 offsets)
-
-    data.dtype = new_dtype
+    data.dtype = np.dtype({'names': names,
+                           'formats': formats,
+                           'offsets': offsets})
 
     yield data
 

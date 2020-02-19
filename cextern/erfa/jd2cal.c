@@ -21,7 +21,7 @@ int eraJd2cal(double dj1, double dj2,
 **  Returned (function value):
 **               int      status:
 **                           0 = OK
-**                          -1 = unacceptable date (Note 3)
+**                          -1 = unacceptable date (Note 1)
 **
 **  Notes:
 **
@@ -50,7 +50,7 @@ int eraJd2cal(double dj1, double dj2,
 **     P. Kenneth Seidelmann (ed), University Science Books (1992),
 **     Section 12.92 (p604).
 **
-**  Copyright (C) 2013-2015, NumFOCUS Foundation.
+**  Copyright (C) 2013-2019, NumFOCUS Foundation.
 **  Derived, with permission, from the SOFA library.  See notes at end of file.
 */
 {
@@ -61,12 +61,13 @@ int eraJd2cal(double dj1, double dj2,
    long jd, l, n, i, k;
    double dj, d1, d2, f1, f2, f, d;
 
+
 /* Verify date is acceptable. */
    dj = dj1 + dj2;
    if (dj < DJMIN || dj > DJMAX) return -1;
 
 /* Copy the date, big then small, and re-align to midnight. */
-   if (dj1 >= dj2) {
+   if (fabs(dj1) >= fabs(dj2)) {
       d1 = dj1;
       d2 = dj2;
    } else {
@@ -80,8 +81,8 @@ int eraJd2cal(double dj1, double dj2,
    f2 = fmod(d2, 1.0);
    f = fmod(f1 + f2, 1.0);
    if (f < 0.0) f += 1.0;
-   d = floor(d1 - f1) + floor(d2 - f2) + floor(f1 + f2 - f);
-   jd = (long) floor(d) + 1L;
+   d = ERFA_DNINT(d1-f1) + ERFA_DNINT(d2-f2) + ERFA_DNINT(f1+f2-f);
+   jd = (long) ERFA_DNINT(d) + 1L;
 
 /* Express day in Gregorian calendar. */
    l = jd + 68569L;
@@ -102,7 +103,7 @@ int eraJd2cal(double dj1, double dj2,
 /*----------------------------------------------------------------------
 **  
 **  
-**  Copyright (C) 2013-2015, NumFOCUS Foundation.
+**  Copyright (C) 2013-2019, NumFOCUS Foundation.
 **  All rights reserved.
 **  
 **  This library is derived, with permission, from the International

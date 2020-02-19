@@ -5,10 +5,8 @@ This package defines the SI units.  They are also available in the
 `astropy.units` namespace.
 
 """
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
-from ..constants import si as _si
+from astropy.constants import si as _si
 from .core import UnitBase, Unit, def_unit
 
 import numpy as _numpy
@@ -32,7 +30,7 @@ def_unit(['m', 'meter'], namespace=_ns, prefixes=True,
 
 def_unit(['micron'], um, namespace=_ns,
          doc="micron: alias for micrometer (um)",
-         format={'latex': r'\mu m', 'unicode': 'μm'})
+         format={'latex': r'\mu m', 'unicode': '\N{MICRO SIGN}m'})
 
 def_unit(['Angstrom', 'AA', 'angstrom'], 0.1 * nm, namespace=_ns,
          doc="ångström: 10 ** -10 m",
@@ -71,9 +69,9 @@ def_unit(['arcsec', 'arcsecond'], 1.0 / 3600.0 * deg, namespace=_ns,
 # These special formats should only be used for the non-prefix versions
 arcsec._format = {'latex': r'{}^{\prime\prime}', 'unicode': '″'}
 def_unit(['mas'], 0.001 * arcsec, namespace=_ns,
-         doc="arc second: angular measurement")
+         doc="milli arc second: angular measurement")
 def_unit(['uas'], 0.000001 * arcsec, namespace=_ns,
-         doc="arc second: angular measurement",
+         doc="micro arc second: angular measurement",
          format={'latex': r'\mu as', 'unicode': 'μas'})
 
 def_unit(['sr', 'steradian'], rad ** 2, namespace=_ns, prefixes=True,
@@ -161,6 +159,7 @@ def_unit(['eV', 'electronvolt'], _si.e.value * J, namespace=_ns, prefixes=True,
 def_unit(['Pa', 'Pascal', 'pascal'], J * m ** -3, namespace=_ns, prefixes=True,
          doc="Pascal: pressure")
 def_unit(['bar'], 1e5 * Pa, namespace=_ns,
+         prefixes=[(['m'], ['milli'], 1.e-3)],
          doc="bar: pressure")
 
 
@@ -208,7 +207,7 @@ def_unit(['cd', 'candela'], namespace=_ns, prefixes=True,
 def_unit(['lm', 'lumen'], cd * sr, namespace=_ns, prefixes=True,
          doc="lumen: luminous flux")
 def_unit(['lx', 'lux'], lm * m ** -2, namespace=_ns, prefixes=True,
-         doc="lux: luminous emittence")
+         doc="lux: luminous emittance")
 
 ###########################################################################
 # RADIOACTIVITY

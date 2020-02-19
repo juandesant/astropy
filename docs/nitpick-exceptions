@@ -18,6 +18,23 @@ py:class astropy.modeling.projections.Projection
 py:class astropy.io.fits.hdu.base.ExtensionHDU
 py:class astropy.io.fits.util.NotifierMixin
 
+# astropy.io.misc.yaml
+py:class yaml.dumper.SafeDumper
+py:class yaml.loader.SafeLoader
+py:class yaml.representer.SafeRepresenter
+py:class yaml.scanner.Scanner
+py:class yaml.constructor.SafeConstructor
+py:class yaml.constructor.BaseConstructor
+py:class yaml.parser.Parser
+py:class yaml.dumper.SafeDumper
+py:class yaml.representer.BaseRepresenter
+py:class yaml.reader.Reader
+py:class yaml.resolver.BaseResolver
+py:class yaml.serializer.Serializer
+py:class yaml.composer.Composer
+py:class yaml.resolver.Resolver
+py:class yaml.emitter.Emitter
+
 # astropy.utils
 py:class astropy.extern.six.Iterator
 py:class type
@@ -26,9 +43,20 @@ py:class json.encoder.JSONEncoder
 # astropy.table
 py:class astropy.table.column.BaseColumn
 py:class astropy.table.groups.BaseGroups
+py:class astropy.table.bst.FastBase
 
 # astropy.time
 py:class astropy.time.core.TimeUnique
+
+# astropy.visualization
+py:class matplotlib.axes._subplots.WCSAxesSubplot
+py:obj Bbox
+py:obj Transform
+py:obj Patch
+py:obj Figure
+py:obj AbstractPathEffect
+py:obj matplotlib.axis.Axes.get_window_extent
+py:obj matplotlib.spines.get_window_extent
 
 # numpy inherited docstrings
 py:obj dtype
@@ -65,3 +93,8 @@ py:obj RuntimeError
 py:obj NotImplementedError
 py:obj AttributeError
 py:obj NotImplementedError
+py:obj RendererBase
+py:obj Artist
+py:obj BboxBase
+py:obj Text
+py:obj text

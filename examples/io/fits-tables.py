@@ -12,13 +12,11 @@ The example uses `astropy.utils.data` to download multi-extension FITS (MEF)
 file, `astropy.io.fits` to investigate the header, and
 `astropy.table.Table` to explore the data.
 
--------------------
 
 *By: Lia Corrales, Adrian Price-Whelan, and Kelle Cruz*
 
 *License: BSD*
 
--------------------
 
 """
 
@@ -27,15 +25,14 @@ file, `astropy.io.fits` to investigate the header, and
 # example. Also import `~astropy.table.Table` from the `astropy.table` subpackage
 # and `astropy.io.fits`
 
-from astropy.utils.data import download_file
+from astropy.utils.data import get_pkg_data_filename
 from astropy.table import Table
 from astropy.io import fits
 
 ##############################################################################
 # Download a FITS file
 
-event_filename = download_file('http://data.astropy.org/tutorials/FITS-tables/chandra_events.fits',
-                               cache=True)
+event_filename = get_pkg_data_filename('tutorials/FITS-tables/chandra_events.fits')
 
 ##############################################################################
 # Display information about the contents of the FITS file.

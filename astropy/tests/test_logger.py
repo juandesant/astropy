@@ -1,16 +1,18 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
-import imp
+import importlib
 import sys
 import warnings
+import logging
+import locale
 
-from .helper import pytest, catch_warnings
-from .. import log
-from ..logger import LoggingError, conf
-from ..utils.exceptions import AstropyWarning, AstropyUserWarning
+import pytest
+
+from .helper import catch_warnings
+from astropy import log
+from astropy.logger import LoggingError, conf
+from astropy.utils.exceptions import AstropyWarning, AstropyUserWarning
 
 
 # Save original values of hooks. These are not the system values, but the
@@ -29,8 +31,8 @@ except NameError:
 def setup_function(function):
 
     # Reset modules to default
-    imp.reload(warnings)
-    imp.reload(sys)
+    importlib.reload(warnings)
+    importlib.reload(sys)
 
     # Reset internal original hooks
     log._showwarning_orig = None
@@ -45,7 +47,9 @@ def setup_function(function):
     if log.exception_logging_enabled():
         log.disable_exception_logging()
 
+
 teardown_module = setup_function
+
 
 def test_warnings_logging_disable_no_enable():
     with pytest.raises(LoggingError) as e:
@@ -131,7 +135,7 @@ def test_warnings_logging_with_custom_class():
 
 
 def test_warning_logging_with_io_votable_warning():
-    from ..io.votable.exceptions import W02, vo_warn
+    from astropy.io.votable.exceptions import W02, vo_warn
 
     with catch_warnings() as warn_list:
         log.enable_warnings_logging()
@@ -141,8 +145,8 @@ def test_warning_logging_with_io_votable_warning():
     assert len(log_list) == 1
     assert len(warn_list) == 0
     assert log_list[0].levelname == 'WARNING'
-    x = log_list[0].message.startswith(("W02: ?:?:?: W02: a attribute 'b' is "
-                                        "invalid.  Must be a standard XML id"))
+    x = log_list[0].message.startswith("W02: ?:?:?: W02: a attribute 'b' is "
+                                        "invalid.  Must be a standard XML id")
     assert x
     assert log_list[0].origin == 'astropy.tests.test_logger'
 
@@ -155,7 +159,7 @@ def test_import_error_in_warning_logging():
     this problem.
     """
 
-    class FakeModule(object):
+    class FakeModule:
         def __getattr__(self, attr):
             raise ImportError('_showwarning should ignore any exceptions '
                               'here')
@@ -185,7 +189,7 @@ def test_exception_logging_enable_twice():
 
 # You can't really override the exception handler in IPython this way, so
 # this test doesn't really make sense in the IPython context.
-@pytest.mark.skipif(str("ip is not None"))
+@pytest.mark.skipif("ip is not None")
 def test_exception_logging_overridden():
     log.enable_exception_logging()
     sys.excepthook = lambda etype, evalue, tb: None
@@ -194,7 +198,7 @@ def test_exception_logging_overridden():
     assert e.value.args[0] == 'Cannot disable exception logging: sys.excepthook was not set by this logger, or has been overridden'
 
 
-@pytest.mark.xfail(str("ip is not None"))
+@pytest.mark.xfail("ip is not None")
 def test_exception_logging():
 
     # Without exception logging
@@ -236,12 +240,12 @@ def test_exception_logging():
     assert len(log_list) == 0
 
 
-@pytest.mark.xfail(str("ip is not None"))
+@pytest.mark.xfail("ip is not None")
 def test_exception_logging_origin():
     # The point here is to get an exception raised from another location
     # and make sure the error's origin is reported correctly
 
-    from ..utils.collections import HomogeneousList
+    from astropy.utils.collections import HomogeneousList
 
     l = HomogeneousList(int)
     try:
@@ -261,9 +265,8 @@ def test_exception_logging_origin():
     assert log_list[0].origin == 'astropy.utils.collections'
 
 
-@pytest.mark.skipif("sys.version_info[:2] >= (3, 5)",
-                    reason="Infinite recursion on Python 3.5")
-@pytest.mark.xfail(str("ip is not None"))
+@pytest.mark.skip(reason="Infinite recursion on Python 3.5+, probably a real issue")
+#@pytest.mark.xfail("ip is not None")
 def test_exception_logging_argless_exception():
     """
     Regression test for a crash that occurred on Python 3 when logging an
@@ -481,3 +484,24 @@ def test_log_to_file_origin2(tmpdir):
     log_file.close()
 
     assert len(log_entries) == 0
+
+
+@pytest.mark.parametrize(('encoding'), ['', 'utf-8', 'cp1252'])
+def test_log_to_file_encoding(tmpdir, encoding):
+
+    local_path = tmpdir.join('test.log')
+    log_path = str(local_path.realpath())
+
+    orig_encoding = conf.log_file_encoding
+
+    conf.log_file_encoding = encoding
+
+    with log.log_to_file(log_path):
+        for handler in log.handlers:
+            if isinstance(handler, logging.FileHandler):
+                if encoding:
+                    assert handler.stream.encoding == encoding
+                else:
+                    assert handler.stream.encoding == locale.getpreferredencoding()
+
+    conf.log_file_encoding = orig_encoding

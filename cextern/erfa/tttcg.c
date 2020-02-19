@@ -32,7 +32,7 @@ int eraTttcg(double tt1, double tt2, double *tcg1, double *tcg2)
 **
 **     IAU 2000 Resolution B1.9
 **
-**  Copyright (C) 2013-2015, NumFOCUS Foundation.
+**  Copyright (C) 2013-2019, NumFOCUS Foundation.
 **  Derived, with permission, from the SOFA library.  See notes at end of file.
 */
 {
@@ -43,8 +43,9 @@ int eraTttcg(double tt1, double tt2, double *tcg1, double *tcg2)
 /* TT to TCG rate */
    static const double elgg = ERFA_ELG/(1.0-ERFA_ELG);
 
+
 /* Result, safeguarding precision. */
-   if ( tt1 > tt2 ) {
+   if ( fabs(tt1) > fabs(tt2) ) {
       *tcg1 = tt1;
       *tcg2 = tt2 + ( ( tt1 - ERFA_DJM0 ) + ( tt2 - t77t ) ) * elgg;
    } else {
@@ -59,7 +60,7 @@ int eraTttcg(double tt1, double tt2, double *tcg1, double *tcg2)
 /*----------------------------------------------------------------------
 **  
 **  
-**  Copyright (C) 2013-2015, NumFOCUS Foundation.
+**  Copyright (C) 2013-2019, NumFOCUS Foundation.
 **  All rights reserved.
 **  
 **  This library is derived, with permission, from the International

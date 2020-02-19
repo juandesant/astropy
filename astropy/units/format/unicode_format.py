@@ -5,8 +5,6 @@
 Handles the "Unicode" unit format.
 """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
 from . import console, utils
 
@@ -41,7 +39,7 @@ class Unicode(console.Console):
             parts.append(m.replace('-', '−'))
 
         if ex:
-            parts.append("10{0}".format(
+            parts.append("10{}".format(
                 cls._format_superscript(ex)))
 
         return cls._times.join(parts)

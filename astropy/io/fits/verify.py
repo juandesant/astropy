@@ -1,11 +1,10 @@
 # Licensed under a 3-clause BSD style license - see PYFITS.rst
-from __future__ import unicode_literals
 
+import operator
 import warnings
 
-from ...extern.six import next
-from ...utils import indent
-from ...utils.exceptions import AstropyUserWarning
+from astropy.utils import indent
+from astropy.utils.exceptions import AstropyUserWarning
 
 
 class VerifyError(Exception):
@@ -25,7 +24,7 @@ VERIFY_OPTIONS = ['ignore', 'warn', 'exception', 'fix', 'silentfix',
                   'silentfix+ignore', 'silentfix+warn', 'silentfix+exception']
 
 
-class _Verify(object):
+class _Verify:
     """
     Shared methods for verification.
     """
@@ -42,7 +41,7 @@ class _Verify(object):
             fixable = False
         # fix the value
         elif not fixable:
-            text = 'Unfixable error: %s' % text
+            text = f'Unfixable error: {text}'
         else:
             if fix:
                 fix()
@@ -60,13 +59,13 @@ class _Verify(object):
             Output verification option.  Must be one of ``"fix"``,
             ``"silentfix"``, ``"ignore"``, ``"warn"``, or
             ``"exception"``.  May also be any combination of ``"fix"`` or
-            ``"silentfix"`` with ``"+ignore"``, ``+warn``, or ``+exception"
+            ``"silentfix"`` with ``"+ignore"``, ``"+warn"``, or ``"+exception"``
             (e.g. ``"fix+warn"``).  See :ref:`verify` for more info.
         """
 
         opt = option.lower()
         if opt not in VERIFY_OPTIONS:
-            raise ValueError('Option %r not recognized.' % option)
+            raise ValueError(f'Option {option!r} not recognized.')
 
         if opt == 'ignore':
             return
@@ -96,7 +95,7 @@ class _Verify(object):
             # Don't print *unfixable* issues, but do print fixed issues; this
             # is probably not very useful but the option exists for
             # completeness
-            line_filter = lambda x: x[0]
+            line_filter = operator.itemgetter(0)
         else:
             line_filter = None
 
@@ -127,10 +126,8 @@ class _ErrList(list):
     different class levels.
     """
 
-    def __new__(cls, val=None, unit='Element'):
-        return super(cls, cls).__new__(cls, val)
-
-    def __init__(self, val=None, unit='Element'):
+    def __init__(self, val=(), unit='Element'):
+        super().__init__(val)
         self.unit = unit
 
     def __str__(self):
@@ -164,7 +161,7 @@ class _ErrList(list):
                     if self.unit:
                         # This line is sort of a header for the next level in
                         # the hierarchy
-                        yield None, indent('%s %s:' % (self.unit, element),
+                        yield None, indent(f'{self.unit} {element}:',
                                            shift=shift)
                     yield first_line
 

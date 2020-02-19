@@ -1,22 +1,26 @@
 # -*- coding: utf-8 -*-
 
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import gc
 import locale
 import re
+from distutils.version import LooseVersion
 
-from numpy.testing import assert_array_equal, assert_array_almost_equal
+import pytest
 import numpy as np
+from numpy.testing import assert_array_equal, assert_array_almost_equal
 
-from ...tests.helper import pytest, raises, catch_warnings
-from ...io import fits
-from .. import wcs
-from .. import _wcs
-from ...utils.data import get_pkg_data_contents, get_pkg_data_fileobj, get_pkg_data_filename
-from ... import units as u
-
+from astropy.tests.helper import raises, catch_warnings
+from astropy.io import fits
+from astropy.wcs import wcs
+from astropy.wcs import _wcs
+from astropy.wcs.wcs import FITSFixedWarning
+from astropy.utils.data import (
+    get_pkg_data_contents, get_pkg_data_fileobj, get_pkg_data_filename)
+from astropy.utils.misc import _set_locale
+from astropy import units as u
+from astropy.units.core import UnitsWarning
 
 ######################################################################
 
@@ -50,7 +54,7 @@ def test_axis_types():
 def test_cd():
     w = _wcs.Wcsprm()
     w.cd = [[1, 0], [0, 1]]
-    assert w.cd.dtype == np.float
+    assert w.cd.dtype == float
     assert w.has_cd() is True
     assert_array_equal(w.cd, [[1, 0], [0, 1]])
     del w.cd
@@ -167,7 +171,7 @@ def test_colnum_invalid():
 
 def test_crder():
     w = _wcs.Wcsprm()
-    assert w.crder.dtype == np.float
+    assert w.crder.dtype == float
     assert np.all(np.isnan(w.crder))
     w.crder[0] = 0
     assert np.isnan(w.crder[1])
@@ -178,7 +182,7 @@ def test_crder():
 def test_crota():
     w = _wcs.Wcsprm()
     w.crota = [1, 0]
-    assert w.crota.dtype == np.float
+    assert w.crota.dtype == float
     assert w.has_crota() is True
     assert_array_equal(w.crota, [1, 0])
     del w.crota
@@ -204,7 +208,7 @@ def test_crota_missing2():
 
 def test_crpix():
     w = _wcs.Wcsprm()
-    assert w.crpix.dtype == np.float
+    assert w.crpix.dtype == float
     assert_array_equal(w.crpix, [0, 0])
     w.crpix = [42, 54]
     assert_array_equal(w.crpix, [42, 54])
@@ -217,7 +221,7 @@ def test_crpix():
 
 def test_crval():
     w = _wcs.Wcsprm()
-    assert w.crval.dtype == np.float
+    assert w.crval.dtype == float
     assert_array_equal(w.crval, [0, 0])
     w.crval = [42, 54]
     assert_array_equal(w.crval, [42, 54])
@@ -227,7 +231,7 @@ def test_crval():
 
 def test_csyer():
     w = _wcs.Wcsprm()
-    assert w.csyer.dtype == np.float
+    assert w.csyer.dtype == float
     assert np.all(np.isnan(w.csyer))
     w.csyer[0] = 0
     assert np.isnan(w.csyer[1])
@@ -264,8 +268,11 @@ def test_ctype_repr():
 def test_ctype_index_error():
     w = _wcs.Wcsprm()
     assert list(w.ctype) == ['', '']
-    with pytest.raises(IndexError):
-        w.ctype[2] = 'FOO'
+    for idx in (2, -3):
+        with pytest.raises(IndexError):
+            w.ctype[idx]
+        with pytest.raises(IndexError):
+            w.ctype[idx] = 'FOO'
 
 
 def test_ctype_invalid_error():
@@ -328,14 +335,18 @@ def test_unit():
 
 def test_unit2():
     w = wcs.WCS()
-    myunit = u.Unit("FOOBAR", parse_strict="warn")
+    with pytest.warns(UnitsWarning):
+        myunit = u.Unit("FOOBAR", parse_strict="warn")
     w.wcs.cunit[0] = myunit
 
 
 def test_unit3():
     w = wcs.WCS()
-    with pytest.raises(IndexError):
-        w.wcs.cunit[2] = u.m
+    for idx in (2, -3):
+        with pytest.raises(IndexError):
+            w.wcs.cunit[idx]
+        with pytest.raises(IndexError):
+            w.wcs.cunit[idx] = u.m
     with pytest.raises(ValueError):
         w.wcs.cunit = [u.m, u.m, u.m]
 
@@ -391,25 +402,43 @@ def test_equinox():
 
 def test_fix():
     w = _wcs.Wcsprm()
-    assert w.fix() == {
+    fix_ref = {
         'cdfix': 'No change',
         'cylfix': 'No change',
+        'obsfix': 'No change',
         'datfix': 'No change',
         'spcfix': 'No change',
         'unitfix': 'No change',
-        'celfix': 'No change'}
+        'celfix': 'No change',
+        'obsfix': 'No change'}
+    version = wcs._wcs.__version__
+    if LooseVersion(version) <= '5':
+        del fix_ref['obsfix']
+    if LooseVersion(version) >= '7.1':
+        w.dateref = '1858-11-17'
+    assert w.fix() == fix_ref
 
 
 def test_fix2():
     w = _wcs.Wcsprm()
     w.dateobs = '31/12/99'
-    assert w.fix() == {
+    fix_ref = {
         'cdfix': 'No change',
         'cylfix': 'No change',
-        'datfix': "Changed '31/12/99' to '1999-12-31'",
+        'obsfix': 'No change',
+        'datfix': "Set MJD-OBS to 51543.000000 from DATE-OBS.\nChanged DATE-OBS from '31/12/99' to '1999-12-31'",  # noqa
         'spcfix': 'No change',
         'unitfix': 'No change',
         'celfix': 'No change'}
+    version = wcs._wcs.__version__
+    if LooseVersion(version) <= "5":
+        del fix_ref['obsfix']
+        fix_ref['datfix'] = "Changed '31/12/99' to '1999-12-31'"
+
+    if LooseVersion(version) >= '7.1':
+        fix_ref['datfix'] = "Set DATE-REF to '1858-11-17' from MJD-REF.\n" + fix_ref['datfix']
+
+    assert w.fix() == fix_ref
     assert w.dateobs == '1999-12-31'
     assert w.mjdobs == 51543.0
 
@@ -417,13 +446,23 @@ def test_fix2():
 def test_fix3():
     w = _wcs.Wcsprm()
     w.dateobs = '31/12/F9'
-    assert w.fix() == {
+    fix_ref = {
         'cdfix': 'No change',
         'cylfix': 'No change',
-        'datfix': "Invalid parameter value: invalid date '31/12/F9'",
+        'obsfix': 'No change',
+        'datfix': "Invalid DATE-OBS format '31/12/F9'",
         'spcfix': 'No change',
         'unitfix': 'No change',
         'celfix': 'No change'}
+    version = wcs._wcs.__version__
+    if LooseVersion(version) <= "5":
+        del fix_ref['obsfix']
+        fix_ref['datfix'] = "Invalid parameter value: invalid date '31/12/F9'"
+
+    if LooseVersion(version) >= '7.1':
+        fix_ref['datfix'] = "Set DATE-REF to '1858-11-17' from MJD-REF.\n" + fix_ref['datfix']
+
+    assert w.fix() == fix_ref
     assert w.dateobs == '31/12/F9'
     assert np.isnan(w.mjdobs)
 
@@ -578,8 +617,8 @@ def test_naxis_set():
 def test_obsgeo():
     w = _wcs.Wcsprm()
     assert np.all(np.isnan(w.obsgeo))
-    w.obsgeo = [1, 2, 3]
-    assert_array_equal(w.obsgeo, [1, 2, 3])
+    w.obsgeo = [1, 2, 3, 4, 5, 6]
+    assert_array_equal(w.obsgeo, [1, 2, 3, 4, 5, 6])
     del w.obsgeo
     assert np.all(np.isnan(w.obsgeo))
 
@@ -683,7 +722,7 @@ def test_spcfix():
     # TODO: We need some data with broken spectral headers here to
     # really test
     header = get_pkg_data_contents(
-        'spectra/orion-velo-1.hdr', encoding='binary')
+        'data/spectra/orion-velo-1.hdr', encoding='binary')
     w = _wcs.Wcsprm(header)
     assert w.spcfix() == -1
 
@@ -707,7 +746,7 @@ def test_specsys():
 
 
 def test_sptr():
-    #TODO: Write me
+    # TODO: Write me
     pass
 
 
@@ -753,6 +792,7 @@ def test_velangl():
     del w.velangl
     assert np.isnan(w.velangl)
 
+
 def test_velosys():
     w = _wcs.Wcsprm()
     assert np.isnan(w.velosys)
@@ -765,7 +805,7 @@ def test_velosys():
 def test_velref():
     w = _wcs.Wcsprm()
     assert w.velref == 0.0
-    w.velref = 42.0
+    w.velref = 42
     assert w.velref == 42.0
     del w.velref
     assert w.velref == 0.0
@@ -808,37 +848,27 @@ def test_detailed_err():
 
 
 def test_header_parse():
-    from ...io import fits
+    from astropy.io import fits
     with get_pkg_data_fileobj(
             'data/header_newlines.fits', encoding='binary') as test_file:
         hdulist = fits.open(test_file)
-        w = wcs.WCS(hdulist[0].header)
+        with pytest.warns(FITSFixedWarning):
+            w = wcs.WCS(hdulist[0].header)
     assert w.wcs.ctype[0] == 'RA---TAN-SIP'
 
 
 def test_locale():
-    orig_locale = locale.getlocale(locale.LC_NUMERIC)[0]
-
     try:
-        # str('fr_FR') because otherwise it will be a unicode string, which
-        # breaks setlocale on Python 2
-        locale.setlocale(locale.LC_NUMERIC, str('fr_FR'))
+        with _set_locale('fr_FR'):
+            header = get_pkg_data_contents('data/locale.hdr',
+                                           encoding='binary')
+            with pytest.warns(FITSFixedWarning):
+                w = _wcs.Wcsprm(header)
+                assert re.search("[0-9]+,[0-9]*", w.to_header()) is None
     except locale.Error:
         pytest.xfail(
             "Can't set to 'fr_FR' locale, perhaps because it is not installed "
             "on this system")
-    try:
-        header = get_pkg_data_contents('data/locale.hdr', encoding='binary')
-        w = _wcs.Wcsprm(header)
-        assert re.search("[0-9]+,[0-9]*", w.to_header()) is None
-    finally:
-        if orig_locale is None:
-            # reset to the default setting
-            locale.resetlocale(locale.LC_NUMERIC)
-        else:
-            # restore to whatever the previous value had been set to for
-            # whatever reason
-            locale.setlocale(locale.LC_NUMERIC, orig_locale)
 
 
 @raises(UnicodeEncodeError)
@@ -852,7 +882,7 @@ def test_sub_segfault():
     header = fits.Header.fromtextfile(
         get_pkg_data_filename('data/sub-segfault.hdr'))
     w = wcs.WCS(header)
-    sub = w.sub([wcs.WCSSUB_CELESTIAL])
+    w.sub([wcs.WCSSUB_CELESTIAL])
     gc.collect()
 
 
@@ -866,7 +896,7 @@ def test_wcs_sub_error_message():
     w = _wcs.Wcsprm()
     with pytest.raises(TypeError) as e:
         w.sub('latitude')
-    assert str(e).endswith("axes must None, a sequence or an integer")
+    assert e.match("axes must None, a sequence or an integer$")
 
 
 def test_wcs_sub():
@@ -894,11 +924,12 @@ def test_compare():
     w = _wcs.Wcsprm(header)
     w2 = _wcs.Wcsprm(header)
 
-    w.cdelt[0] = np.float32(0.00416666666666666666666666)
-    w2.cdelt[0] = np.float64(0.00416666666666666666666666)
+    with pytest.warns(RuntimeWarning):
+        w.cdelt[0] = np.float32(0.00416666666666666666666666)
+        w2.cdelt[0] = np.float64(0.00416666666666666666666666)
 
-    assert not w.compare(w2)
-    assert w.compare(w2, tolerance=1e-6)
+        assert not w.compare(w2)
+        assert w.compare(w2, tolerance=1e-6)
 
 
 def test_radesys_defaults():
@@ -1005,13 +1036,13 @@ def test_iteration():
          [0.00664326, -0.5],
          [-0.58995335, -0.25],
          [0.00664326, -0.25],
-         [-0.58995335,  0.],
-         [0.00664326,  0.],
-         [-0.58995335,  0.25],
-         [0.00664326,  0.25],
-         [-0.58995335,  0.5],
-         [0.00664326,  0.5]],
-        np.float
+         [-0.58995335, 0.],
+         [0.00664326, 0.],
+         [-0.58995335, 0.25],
+         [0.00664326, 0.25],
+         [-0.58995335, 0.5],
+         [0.00664326, 0.5]],
+        float
     )
 
     w = wcs.WCS()
@@ -1031,7 +1062,7 @@ def test_iteration():
          [7.49105110e+01, 1.12348499e+02],
          [1.64400000e+02, 1.49848498e+02],
          [7.49105110e+01, 1.49848498e+02]],
-        np.float)
+        float)
 
     assert_array_almost_equal(x, expected)
 
@@ -1044,24 +1075,97 @@ def test_iteration():
 
 def test_invalid_args():
     with pytest.raises(TypeError):
-        w = _wcs.Wcsprm(keysel='A')
+        _wcs.Wcsprm(keysel='A')
 
     with pytest.raises(ValueError):
-        w = _wcs.Wcsprm(keysel=2)
+        _wcs.Wcsprm(keysel=2)
 
     with pytest.raises(ValueError):
-        w = _wcs.Wcsprm(colsel=2)
+        _wcs.Wcsprm(colsel=2)
 
     with pytest.raises(ValueError):
-        w = _wcs.Wcsprm(naxis=64)
+        _wcs.Wcsprm(naxis=64)
 
     header = get_pkg_data_contents(
-        'spectra/orion-velo-1.hdr', encoding='binary')
+        'data/spectra/orion-velo-1.hdr', encoding='binary')
     with pytest.raises(ValueError):
-        w = _wcs.Wcsprm(header, relax='FOO')
+        _wcs.Wcsprm(header, relax='FOO')
 
     with pytest.raises(ValueError):
-        w = _wcs.Wcsprm(header, naxis=3)
+        _wcs.Wcsprm(header, naxis=3)
 
     with pytest.raises(KeyError):
-        w = _wcs.Wcsprm(header, key='A')
+        _wcs.Wcsprm(header, key='A')
+
+
+# Test keywords in the Time standard
+
+
+def test_datebeg():
+    w = _wcs.Wcsprm()
+    assert w.datebeg == ''
+    w.datebeg = '2001-02-11'
+    assert w.datebeg == '2001-02-11'
+    w.datebeg = '31/12/99'
+    fix_ref = {
+        'cdfix': 'No change',
+        'cylfix': 'No change',
+        'obsfix': 'No change',
+        'datfix': "Invalid DATE-BEG format '31/12/99'",
+        'spcfix': 'No change',
+        'unitfix': 'No change',
+        'celfix': 'No change'}
+
+    if LooseVersion(wcs._wcs.__version__) >= '7.1':
+        fix_ref['datfix'] = "Set DATE-REF to '1858-11-17' from MJD-REF.\n" + fix_ref['datfix']
+
+    assert w.fix() == fix_ref
+
+
+char_keys = ['timesys', 'trefpos', 'trefdir', 'plephem', 'timeunit',
+             'dateref', 'dateavg', 'dateend']
+
+
+@pytest.mark.parametrize('key', char_keys)
+def test_char_keys(key):
+    w = _wcs.Wcsprm()
+    assert getattr(w, key) == ''
+    setattr(w, key, "foo")
+    assert getattr(w, key) == 'foo'
+    with pytest.raises(TypeError):
+        setattr(w, key, 42)
+
+
+num_keys = ['mjdobs', 'mjdbeg', 'mjdend', 'jepoch',
+            'bepoch', 'tstart', 'tstop', 'xposure', 'timsyer',
+            'timrder', 'timedel', 'timepixr', 'timeoffs',
+            'telapse', 'xposure']
+
+
+@pytest.mark.parametrize('key', num_keys)
+def test_num_keys(key):
+    w = _wcs.Wcsprm()
+    assert np.isnan(getattr(w, key))
+    setattr(w, key, 42.0)
+    assert getattr(w, key) == 42.0
+    delattr(w, key)
+    assert np.isnan(getattr(w, key))
+    with pytest.raises(TypeError):
+        setattr(w, key, "foo")
+
+
+@pytest.mark.parametrize('key', ['czphs', 'cperi', 'mjdref'])
+def test_array_keys(key):
+    w = _wcs.Wcsprm()
+    attr = getattr(w, key)
+    if key == 'mjdref' and LooseVersion(_wcs.__version__) >= '7.1':
+        assert np.allclose(attr, [0, 0])
+    else:
+        assert np.all(np.isnan(attr))
+    assert attr.dtype == float
+    setattr(w, key, [1., 2.])
+    assert_array_equal(getattr(w, key), [1., 2.])
+    with pytest.raises(ValueError):
+        setattr(w, key, ["foo", "bar"])
+    with pytest.raises(ValueError):
+        setattr(w, key, "foo")

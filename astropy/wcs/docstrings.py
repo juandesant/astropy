@@ -1,5 +1,4 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 # It gets to be really tedious to type long docstrings in ANSI C
 # syntax (since multi-line string literals are not valid).
@@ -7,7 +6,60 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 # which are then converted by setup.py into docstrings.h, which is
 # included by pywcs.c
 
-from . import _docutil as __
+__all__ = ['TWO_OR_MORE_ARGS', 'RETURNS', 'ORIGIN', 'RA_DEC_ORDER']
+
+
+def _fix(content, indent=0):
+    lines = content.split('\n')
+    indent = '\n' + ' ' * indent
+    return indent.join(lines)
+
+
+def TWO_OR_MORE_ARGS(naxis, indent=0):
+    return _fix(
+"""args : flexible
+    There are two accepted forms for the positional arguments:
+
+        - 2 arguments: An *N* x *{}* array of coordinates, and an
+          *origin*.
+
+        - more than 2 arguments: An array for each axis, followed by
+          an *origin*.  These arrays must be broadcastable to one
+          another.
+
+    Here, *origin* is the coordinate in the upper left corner of the
+    image.  In FITS and Fortran standards, this is 1.  In Numpy and C
+    standards this is 0.
+""".format(naxis), indent)
+
+
+def RETURNS(out_type, indent=0):
+    return _fix("""result : array
+    Returns the {}.  If the input was a single array and
+    origin, a single array is returned, otherwise a tuple of arrays is
+    returned.""".format(out_type), indent)
+
+
+def ORIGIN(indent=0):
+    return _fix(
+"""
+origin : int
+    Specifies the origin of pixel values.  The Fortran and FITS
+    standards use an origin of 1.  Numpy and C use array indexing with
+    origin at 0.
+""", indent)
+
+
+def RA_DEC_ORDER(indent=0):
+    return _fix(
+"""
+ra_dec_order : bool, optional
+    When `True` will ensure that world coordinates are always given
+    and returned in as (*ra*, *dec*) pairs, regardless of the order of
+    the axes specified by the in the ``CTYPE`` keywords.  Default is
+    `False`.
+""", indent)
+
 
 a = """
 ``double array[a_order+1][a_order+1]`` Focal plane transformation
@@ -46,7 +98,7 @@ Parameters
 pixcrd : double array[ncoord][nelem]
     Array of pixel coordinates.
 
-{0}
+{}
 
 Returns
 -------
@@ -78,7 +130,7 @@ InvalidTransformError
 
 InvalidTransformError
     Ill-conditioned coordinate transformation parameters.
-""".format(__.ORIGIN())
+""".format(ORIGIN())
 
 alt = """
 ``str`` Character code for alternate coordinate descriptions.
@@ -1065,7 +1117,7 @@ pixcrd : double array[naxis].
     Pixel coordinates.  The element indicated by *mixpix* is given and
     the remaining elements will be written in-place.
 
-{0}
+{}
 
 Returns
 -------
@@ -1151,7 +1203,7 @@ Because of its generality, `~astropy.wcs.Wcsprm.mix` is very
 compute-intensive.  For compute-limited applications, more efficient
 special-case solvers could be written for simple projections, for
 example non-oblique cylindrical projections.
-""".format(__.ORIGIN())
+""".format(ORIGIN())
 
 mjdavg = """
 ``double`` Modified Julian Date corresponding to ``DATE-AVG``.
@@ -1249,7 +1301,7 @@ Parameters
 pixcrd : double array[ncoord][nelem]
     Array of pixel coordinates.
 
-{0}
+{}
 
 Returns
 -------
@@ -1312,7 +1364,7 @@ See also
 --------
 astropy.wcs.Wcsprm.lat, astropy.wcs.Wcsprm.lng
     Definition of the latitude and longitude axes
-""".format(__.ORIGIN())
+""".format(ORIGIN())
 
 p4_pix2foc = """
 p4_pix2foc(*pixcrd, origin*) -> double array[ncoord][nelem]
@@ -1325,7 +1377,7 @@ Parameters
 pixcrd : double array[ncoord][nelem].
     Array of pixel coordinates.
 
-{0}
+{}
 
 Returns
 -------
@@ -1339,7 +1391,7 @@ MemoryError
 
 ValueError
     Invalid coordinate transformation parameters.
-""".format(__.ORIGIN())
+""".format(ORIGIN())
 
 pc = """
 ``double array[naxis][naxis]`` The ``PCi_ja`` (pixel coordinate)
@@ -1393,7 +1445,7 @@ Parameters
 pixcrd : double array[ncoord][nelem]
     Array of pixel coordinates.
 
-{0}
+{}
 
 Returns
 -------
@@ -1407,7 +1459,7 @@ MemoryError
 
 ValueError
     Invalid coordinate transformation parameters.
-""".format(__.ORIGIN())
+""".format(ORIGIN())
 
 piximg_matrix = """
 ``double array[2][2]`` (read-only) Matrix containing the product of
@@ -1467,7 +1519,7 @@ Parameters
 world : double array[ncoord][nelem]
     Array of world coordinates, in decimal degrees.
 
-{0}
+{}
 
 Returns
 -------
@@ -1525,7 +1577,7 @@ See also
 --------
 astropy.wcs.Wcsprm.lat, astropy.wcs.Wcsprm.lng
     Definition of the latitude and longitude axes
-""".format(__.ORIGIN())
+""".format(ORIGIN())
 
 sense = """
 ``int array[M]`` +1 if monotonically increasing, -1 if decreasing.
@@ -1694,7 +1746,7 @@ Parameters
 foccrd : double array[ncoord][nelem]
     Array of focal plane coordinates.
 
-{0}
+{}
 
 Returns
 -------
@@ -1708,7 +1760,7 @@ MemoryError
 
 ValueError
     Invalid coordinate transformation parameters.
-""".format(__.ORIGIN())
+""".format(ORIGIN())
 
 sip_pix2foc = """
 sip_pix2foc(*pixcrd, origin*) -> double array[ncoord][nelem]
@@ -1721,7 +1773,7 @@ Parameters
 pixcrd : double array[ncoord][nelem]
     Array of pixel coordinates.
 
-{0}
+{}
 
 Returns
 -------
@@ -1735,7 +1787,7 @@ MemoryError
 
 ValueError
     Invalid coordinate transformation parameters.
-""".format(__.ORIGIN())
+""".format(ORIGIN())
 
 spcfix = """
 spcfix() -> int
@@ -2275,4 +2327,227 @@ InvalidTabularParameters = """
 InvalidTabularParametersError()
 
 The given tabular parameters are invalid.
+"""
+
+mjdbeg = """
+``double`` Modified Julian Date corresponding to ``DATE-BEG``.
+
+``(MJD = JD - 2400000.5)``.
+
+An undefined value is represented by NaN.
+
+See also
+--------
+astropy.wcs.Wcsprm.mjdbeg
+"""
+
+mjdend = """
+``double`` Modified Julian Date corresponding to ``DATE-END``.
+
+``(MJD = JD - 2400000.5)``.
+
+An undefined value is represented by NaN.
+
+See also
+--------
+astropy.wcs.Wcsprm.mjdend
+"""
+
+mjdref = """
+``double`` Modified Julian Date corresponding to ``DATE-REF``.
+
+``(MJD = JD - 2400000.5)``.
+
+An undefined value is represented by NaN.
+
+See also
+--------
+astropy.wcs.Wcsprm.dateref
+"""
+
+bepoch = """
+``double`` Equivalent to ``DATE-OBS``.
+
+Expressed as a Besselian epoch.
+
+See also
+--------
+astropy.wcs.Wcsprm.dateobs
+"""
+
+jepoch = """
+``double`` Equivalent to ``DATE-OBS``.
+
+Expressed as a Julian epoch.
+
+See also
+--------
+astropy.wcs.Wcsprm.dateobs
+"""
+
+datebeg = """
+``string`` Date at the start of the observation.
+
+In ISO format, ``yyyy-mm-ddThh:mm:ss``.
+
+See also
+--------
+astropy.wcs.Wcsprm.datebeg
+"""
+
+dateend = """
+``string`` Date at the end of the observation.
+
+In ISO format, ``yyyy-mm-ddThh:mm:ss``.
+
+See also
+--------
+astropy.wcs.Wcsprm.dateend
+"""
+
+dateref = """
+``string`` Date of a reference epoch relative to which
+other time measurements refer.
+
+See also
+--------
+astropy.wcs.Wcsprm.dateref
+"""
+
+timesys = """
+``string`` Time scale (UTC, TAI, etc.) in which all other time-related
+auxiliary header values are recorded. Also defines the time scale for
+an image axis with CTYPEia set to 'TIME'.
+
+See also
+--------
+astropy.wcs.Wcsprm.timesys
+"""
+
+trefpos = """
+``string`` Location in space where the recorded time is valid.
+
+See also
+--------
+astropy.wcs.Wcsprm.trefpos
+"""
+
+trefdir = """
+``string`` Reference direction used in calculating a pathlength delay.
+
+See also
+--------
+astropy.wcs.Wcsprm.trefdir
+"""
+
+timeunit = """
+``string`` Time units in which the following header values are expressed:
+``TSTART``, ``TSTOP``, ``TIMEOFFS``, ``TIMSYER``, ``TIMRDER``, ``TIMEDEL``.
+
+It also provides the default value for ``CUNITia`` for time axes.
+
+See also
+--------
+astropy.wcs.Wcsprm.trefdir
+"""
+
+plephem = """
+``string`` The Solar System ephemeris used for calculating a pathlength delay.
+
+See also
+--------
+astropy.wcs.Wcsprm.plephem
+"""
+
+tstart = """
+``double`` equivalent to DATE-BEG expressed as a time in units of TIMEUNIT relative to DATEREF+TIMEOFFS.
+
+See also
+--------
+astropy.wcs.Wcsprm.tstop
+"""
+
+tstop = """
+``double`` equivalent to DATE-END expressed as a time in units of TIMEUNIT relative to DATEREF+TIMEOFFS.
+
+See also
+--------
+astropy.wcs.Wcsprm.tstart
+"""
+
+telapse = """
+``double`` equivalent to the elapsed time between DATE-BEG and DATE-END, in units of TIMEUNIT.
+
+See also
+--------
+astropy.wcs.Wcsprm.tstart
+"""
+
+timeoffs = """
+``double`` Time offset, which may be used, for example, to provide a uniform clock correction
+           for times referenced to DATEREF.
+
+See also
+--------
+astropy.wcs.Wcsprm.timeoffs
+"""
+
+timsyer = """
+``double`` the absolute error of the time values, in units of TIMEUNIT.
+
+See also
+--------
+astropy.wcs.Wcsprm.timrder
+"""
+
+timrder = """
+``double`` the accuracy of time stamps relative to each other, in units of TIMEUNIT.
+
+See also
+--------
+astropy.wcs.Wcsprm.timsyer
+"""
+
+timedel = """
+``double`` the resolution of the time stamps.
+
+See also
+--------
+astropy.wcs.Wcsprm.timedel
+"""
+
+timepixr = """
+``double`` relative position of the time stamps in binned time intervals, a value between 0.0 and 1.0.
+
+See also
+--------
+astropy.wcs.Wcsprm.timepixr
+"""
+
+obsorbit = """
+``string`` URI, URL, or name of an orbit ephemeris file giving spacecraft coordinates relating to TREFPOS.
+
+See also
+--------
+astropy.wcs.Wcsprm.trefpos
+
+"""
+xposure = """
+``double`` effective exposure time in units of TIMEUNIT.
+
+See also
+--------
+astropy.wcs.Wcsprm.timeunit
+"""
+
+czphs = """
+``double array[naxis]`` The time at the zero point of a phase axis, ``CSPHSia``.
+
+An undefined value is represented by NaN.
+"""
+
+cperi = """
+``double array[naxis]`` period of a phase axis, CPERIia.
+
+An undefined value is represented by NaN.
 """

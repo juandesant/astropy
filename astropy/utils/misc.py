@@ -5,10 +5,6 @@ A "grab bag" of relatively small general-purpose utilities that don't have
 a clear module/package to live in.
 """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-
-
 import abc
 import contextlib
 import difflib
@@ -21,19 +17,21 @@ import traceback
 import unicodedata
 import locale
 import threading
+import re
 
+from itertools import zip_longest
 from contextlib import contextmanager
 from collections import defaultdict, OrderedDict
 
-from ..extern import six
-from ..extern.six.moves import urllib
+from astropy.utils.decorators import deprecated
 
 
 __all__ = ['isiterable', 'silence', 'format_exception', 'NumpyRNGContext',
            'find_api_page', 'is_path_hidden', 'walk_skip_hidden',
-           'JsonCustomEncoder', 'indent', 'InheritDocstrings',
-           'OrderedDescriptor', 'OrderedDescriptorContainer', 'set_locale',
-           'ShapedLikeNDArray']
+           'JsonCustomEncoder', 'indent',
+           'OrderedDescriptor', 'OrderedDescriptorContainer',
+           'ShapedLikeNDArray', 'check_broadcast', 'IncompatibleShapeError',
+           'dtype_bytes_or_chars', 'unbroadcast']
 
 
 def isiterable(obj):
@@ -57,7 +55,7 @@ def indent(s, shift=1, width=4):
     return indented
 
 
-class _DummyFile(object):
+class _DummyFile:
     """A noop writeable object."""
 
     def write(self, s):
@@ -95,11 +93,10 @@ def format_exception(msg, *args, **kwargs):
 
     .. note::
         This uses `sys.exc_info` to gather up the information needed to fill
-        in the formatting arguments. Python 2.x and 3.x have slightly
-        different behavior regarding `sys.exc_info` (the latter will not
-        carry it outside a handled exception), so it's not wise to use this
+        in the formatting arguments. Since `sys.exc_info` is not carried
+        outside a handled exception, it's not wise to use this
         outside of an ``except`` clause - if it is, this will substitute
-        '<unkown>' for the 4 formatting arguments.
+        '<unkonwn>' for the 4 formatting arguments.
     """
 
     tb = traceback.extract_tb(sys.exc_info()[2], limit=1)
@@ -112,7 +109,7 @@ def format_exception(msg, *args, **kwargs):
                       text=text, **kwargs)
 
 
-class NumpyRNGContext(object):
+class NumpyRNGContext:
     """
     A context manager (for use with the ``with`` statement) that will seed the
     numpy random number generator (RNG) to a specific value, and then restore
@@ -143,6 +140,7 @@ class NumpyRNGContext(object):
 
 
     """
+
     def __init__(self, seed):
         self.seed = seed
 
@@ -199,10 +197,10 @@ def find_api_page(obj, version=None, openinbrowser=True, timeout=None):
 
     """
     import webbrowser
-
+    import urllib.request
     from zlib import decompress
 
-    if (not isinstance(obj, six.string_types) and
+    if (not isinstance(obj, str) and
             hasattr(obj, '__module__') and
             hasattr(obj, '__name__')):
         obj = obj.__module__ + '.' + obj.__name__
@@ -210,7 +208,7 @@ def find_api_page(obj, version=None, openinbrowser=True, timeout=None):
         obj = obj.__name__
 
     if version is None:
-        from .. import version
+        from astropy import version
 
         if version.release:
             version = 'v' + version.version
@@ -227,12 +225,17 @@ def find_api_page(obj, version=None, openinbrowser=True, timeout=None):
     elif version == 'dev' or version == 'latest':
         baseurl = 'http://devdocs.astropy.org/'
     else:
-        baseurl = 'http://docs.astropy.org/en/{vers}/'.format(vers=version)
+        baseurl = f'https://docs.astropy.org/en/{version}/'
+
+    # Custom request headers; see
+    # https://github.com/astropy/astropy/issues/8990
+    req = urllib.request.Request(
+        baseurl + 'objects.inv', headers={'User-Agent': f'Astropy/{version}'})
 
     if timeout is None:
-        uf = urllib.request.urlopen(baseurl + 'objects.inv')
+        uf = urllib.request.urlopen(req)
     else:
-        uf = urllib.request.urlopen(baseurl + 'objects.inv', timeout=timeout)
+        uf = urllib.request.urlopen(req, timeout=timeout)
 
     try:
         oiread = uf.read()
@@ -247,9 +250,9 @@ def find_api_page(obj, version=None, openinbrowser=True, timeout=None):
             headerlines.append(oiread[(oldidx+1):idx].decode('utf-8'))
 
         # intersphinx version line, project name, and project version
-        ivers, proj, vers, compr  = headerlines
+        ivers, proj, vers, compr = headerlines
         if 'The remainder of this file is compressed using zlib' not in compr:
-            raise ValueError('The file downloaded from {0} does not seem to be'
+            raise ValueError('The file downloaded from {} does not seem to be'
                              'the usual Sphinx objects.inv format.  Maybe it '
                              'has changed?'.format(baseurl + 'objects.inv'))
 
@@ -273,7 +276,7 @@ def find_api_page(obj, version=None, openinbrowser=True, timeout=None):
             break
 
     if resurl is None:
-        raise ValueError('Could not find the docs for the object {obj}'.format(obj=obj))
+        raise ValueError(f'Could not find the docs for the object {obj}')
     elif openinbrowser:
         webbrowser.open(resurl)
 
@@ -288,8 +291,8 @@ def signal_number_to_name(signum):
     # Since these numbers and names are platform specific, we use the
     # builtin signal module and build a reverse mapping.
 
-    signal_to_name_map = dict(
-        (k, v) for v, k in signal.__dict__.iteritems() if v.startswith('SIG'))
+    signal_to_name_map = dict((k, v) for v, k in signal.__dict__.items()
+                              if v.startswith('SIG'))
 
     return signal_to_name_map.get(signum, 'UNKNOWN')
 
@@ -301,15 +304,14 @@ if sys.platform == 'win32':
         """
         Returns True if the given filepath has the hidden attribute on
         MS-Windows.  Based on a post here:
-        http://stackoverflow.com/questions/284115/cross-platform-hidden-file-detection
+        https://stackoverflow.com/questions/284115/cross-platform-hidden-file-detection
         """
         if isinstance(filepath, bytes):
             filepath = filepath.decode(sys.getfilesystemencoding())
         try:
             attrs = ctypes.windll.kernel32.GetFileAttributesW(filepath)
-            assert attrs != -1
-            result = bool(attrs & 2)
-        except (AttributeError, AssertionError):
+            result = bool(attrs & 2) and attrs != -1
+        except AttributeError:
             result = False
         return result
 else:
@@ -370,7 +372,9 @@ class JsonCustomEncoder(json.JSONEncoder):
         * Numpy array or number
         * Complex number
         * Set
-        * Bytes (Python 3)
+        * Bytes
+        * astropy.UnitBase
+        * astropy.Quantity
 
     Examples
     --------
@@ -381,16 +385,26 @@ class JsonCustomEncoder(json.JSONEncoder):
     '[0, 1, 2]'
 
     """
+
     def default(self, obj):
+        from astropy import units as u
         import numpy as np
-        if isinstance(obj, (np.ndarray, np.number)):
+        if isinstance(obj, u.Quantity):
+            return dict(value=obj.value, unit=obj.unit.to_string())
+        if isinstance(obj, (np.number, np.ndarray)):
             return obj.tolist()
-        elif isinstance(obj, (complex, np.complex)):
+        elif isinstance(obj, complex):
             return [obj.real, obj.imag]
         elif isinstance(obj, set):
             return list(obj)
         elif isinstance(obj, bytes):  # pragma: py3
             return obj.decode()
+        elif isinstance(obj, (u.UnitBase, u.FunctionUnitBase)):
+            if obj == u.dimensionless_unscaled:
+                obj = 'dimensionless_unit'
+            else:
+                return obj.to_string()
+
         return json.JSONEncoder.default(self, obj)
 
 
@@ -437,7 +451,7 @@ def did_you_mean(s, candidates, n=3, cutoff=0.8, fix=None):
         Returns the string "Did you mean X, Y, or Z?", or the empty
         string if no alternatives were found.
     """
-    if isinstance(s, six.text_type):
+    if isinstance(s, str):
         s = strip_accents(s)
     s_lower = s.lower()
 
@@ -478,11 +492,12 @@ def did_you_mean(s, candidates, n=3, cutoff=0.8, fix=None):
         else:
             matches = (', '.join(matches[:-1]) + ' or ' +
                        matches[-1])
-        return 'Did you mean {0}?'.format(matches)
+        return f'Did you mean {matches}?'
 
     return ''
 
 
+@deprecated('4.0', alternative='Sphinx>=1.7 automatically inherits docstring')
 class InheritDocstrings(type):
     """
     This metaclass makes methods of a class automatically have their
@@ -497,16 +512,18 @@ class InheritDocstrings(type):
 
     For example::
 
-        >>> from astropy.utils.misc import InheritDocstrings
-        >>> from astropy.extern import six
-        >>> @six.add_metaclass(InheritDocstrings)
-        ... class A(object):
-        ...     def wiggle(self):
-        ...         "Wiggle the thingamajig"
-        ...         pass
-        >>> class B(A):
-        ...     def wiggle(self):
-        ...         pass
+        >>> import warnings
+        >>> with warnings.catch_warnings():
+        ...     # Ignore deprecation warning
+        ...     warnings.simplefilter('ignore')
+        ...     from astropy.utils.misc import InheritDocstrings
+        ...     class A(metaclass=InheritDocstrings):
+        ...         def wiggle(self):
+        ...             "Wiggle the thingamajig"
+        ...             pass
+        ...     class B(A):
+        ...         def wiggle(self):
+        ...             pass
         >>> B.wiggle.__doc__
         u'Wiggle the thingamajig'
     """
@@ -518,21 +535,20 @@ class InheritDocstrings(type):
                  and len(key) > 4) or
                 not key.startswith('_'))
 
-        for key, val in six.iteritems(dct):
-            if (inspect.isfunction(val) and
-                is_public_member(key) and
-                val.__doc__ is None):
+        for key, val in dct.items():
+            if ((inspect.isfunction(val) or inspect.isdatadescriptor(val)) and
+                    is_public_member(key) and
+                    val.__doc__ is None):
                 for base in cls.__mro__[1:]:
                     super_method = getattr(base, key, None)
                     if super_method is not None:
                         val.__doc__ = super_method.__doc__
                         break
 
-        super(InheritDocstrings, cls).__init__(name, bases, dct)
+        super().__init__(name, bases, dct)
 
 
-@six.add_metaclass(abc.ABCMeta)
-class OrderedDescriptor(object):
+class OrderedDescriptor(metaclass=abc.ABCMeta):
     """
     Base class for descriptors whose order in the class body should be
     preserved.  Intended for use in concert with the
@@ -570,15 +586,17 @@ class OrderedDescriptor(object):
     # thread-safe though.
     _nextid = 1
 
-    _class_attribute_ = abc.abstractproperty()
-    """
-    Subclasses should define this attribute to the name of an attribute on
-    classes containing this subclass.  That attribute will contain the mapping
-    of all instances of that `OrderedDescriptor` subclass defined in the class
-    body.  If the same descriptor needs to be used with different classes,
-    each with different names of this attribute, multiple subclasses will be
-    needed.
-    """
+    @property
+    @abc.abstractmethod
+    def _class_attribute_(self):
+        """
+        Subclasses should define this attribute to the name of an attribute on
+        classes containing this subclass.  That attribute will contain the mapping
+        of all instances of that `OrderedDescriptor` subclass defined in the class
+        body.  If the same descriptor needs to be used with different classes,
+        each with different names of this attribute, multiple subclasses will be
+        needed.
+        """
 
     _name_attribute_ = None
     """
@@ -593,7 +611,7 @@ class OrderedDescriptor(object):
         # between themselves
         self.__order = OrderedDescriptor._nextid
         OrderedDescriptor._nextid += 1
-        super(OrderedDescriptor, self).__init__()
+        super().__init__()
 
     def __lt__(self, other):
         """
@@ -607,7 +625,7 @@ class OrderedDescriptor(object):
                 return self.__order < other.__order
             except AttributeError:
                 raise RuntimeError(
-                    'Could not determine ordering for {0} and {1}; at least '
+                    'Could not determine ordering for {} and {}; at least '
                     'one of them is not calling super().__init__ in its '
                     '__init__.'.format(self, other))
         else:
@@ -645,7 +663,6 @@ class OrderedDescriptorContainer(type):
     Examples
     --------
 
-    >>> from astropy.extern import six
     >>> from astropy.utils import OrderedDescriptor, OrderedDescriptorContainer
     >>> class TypedAttribute(OrderedDescriptor):
     ...     \"\"\"
@@ -661,7 +678,7 @@ class OrderedDescriptorContainer(type):
     ...
     ...     def __init__(self, type):
     ...         # Make sure not to forget to call the super __init__
-    ...         super(TypedAttribute, self).__init__()
+    ...         super().__init__()
     ...         self.type = type
     ...
     ...     def __get__(self, obj, objtype=None):
@@ -696,8 +713,7 @@ class OrderedDescriptorContainer(type):
 
     Now let's create an example class that uses this ``TypedAttribute``::
 
-        >>> @six.add_metaclass(OrderedDescriptorContainer)
-        ... class Point2D(object):
+        >>> class Point2D(metaclass=OrderedDescriptorContainer):
         ...     x = TypedAttribute((float, int))
         ...     y = TypedAttribute((float, int))
         ...
@@ -816,10 +832,31 @@ class OrderedDescriptorContainer(type):
                                                         members)
 
 
+def get_parameters(members):
+    """
+    Looks for ordered descriptors in a class definition and
+    copies such definitions in two new class attributes,
+    one being a dictionary of these objects keyed by their
+    attribute names, and the other a simple list of those names.
+
+    """
+    pdict = OrderedDict()
+    for name, obj in members.items():
+        if (not isinstance(obj, OrderedDescriptor)):
+            continue
+        if obj._name_attribute_ is not None:
+            setattr(obj, '_name', name)
+        pdict[name] = obj
+
+    # members['_parameter_vals_'] = pdict
+    members['_parameters_'] = pdict
+
+
 LOCALE_LOCK = threading.Lock()
 
+
 @contextmanager
-def set_locale(name):
+def _set_locale(name):
     """
     Context manager to temporarily set the locale to ``name``.
 
@@ -827,10 +864,10 @@ def set_locale(name):
     function will use "." as the decimal point to enable consistent
     numerical string parsing.
 
-    Note that one cannot nest multiple set_locale() context manager
+    Note that one cannot nest multiple _set_locale() context manager
     statements as this causes a threading lock.
 
-    This code taken from http://stackoverflow.com/questions/18593661/.
+    This code taken from https://stackoverflow.com/questions/18593661/how-do-i-strftime-a-date-object-in-a-different-locale.
 
     Parameters
     ==========
@@ -852,8 +889,13 @@ def set_locale(name):
                 locale.setlocale(locale.LC_ALL, saved)
 
 
-@six.add_metaclass(abc.ABCMeta)
-class ShapedLikeNDArray(object):
+set_locale = deprecated('4.0')(_set_locale)
+set_locale.__doc__ = """Deprecated version of :func:`_set_locale` above.
+See https://github.com/astropy/astropy/issues/9196
+"""
+
+
+class ShapedLikeNDArray(metaclass=abc.ABCMeta):
     """Mixin class to provide shape-changing methods.
 
     The class proper is assumed to have some underlying data, which are arrays
@@ -873,9 +915,17 @@ class ShapedLikeNDArray(object):
 
     """
 
-    @abc.abstractproperty
+    # Note to developers: if new methods are added here, be sure to check that
+    # they work properly with the classes that use this, such as Time and
+    # BaseRepresentation, i.e., look at their ``_apply`` methods and add
+    # relevant tests.  This is particularly important for methods that imply
+    # copies rather than views of data (see the special-case treatment of
+    # 'flatten' in Time).
+
+    @property
+    @abc.abstractmethod
     def shape(self):
-        """The shape of the instance and underlying arrays."""
+        """The shape of the underlying data."""
 
     @abc.abstractmethod
     def _apply(method, *args, **kwargs):
@@ -915,11 +965,46 @@ class ShapedLikeNDArray(object):
     def isscalar(self):
         return self.shape == ()
 
-    def __getitem__(self, item):
+    def __len__(self):
         if self.isscalar:
-            raise TypeError('scalar {0!r} object is not subscriptable.'.format(
-                self.__class__.__name__))
-        return self._apply('__getitem__', item)
+            raise TypeError("Scalar {!r} object has no len()"
+                            .format(self.__class__.__name__))
+        return self.shape[0]
+
+    def __bool__(self):
+        """Any instance should evaluate to True, except when it is empty."""
+        return self.size > 0
+
+    def __getitem__(self, item):
+        try:
+            return self._apply('__getitem__', item)
+        except IndexError:
+            if self.isscalar:
+                raise TypeError('scalar {!r} object is not subscriptable.'
+                                .format(self.__class__.__name__))
+            else:
+                raise
+
+    def __iter__(self):
+        if self.isscalar:
+            raise TypeError('scalar {!r} object is not iterable.'
+                            .format(self.__class__.__name__))
+
+        # We cannot just write a generator here, since then the above error
+        # would only be raised once we try to use the iterator, rather than
+        # upon its definition using iter(self).
+        def self_iter():
+            for idx in range(len(self)):
+                yield self[idx]
+
+        return self_iter()
+
+    def copy(self, *args, **kwargs):
+        """Return an instance containing copies of the internal data.
+
+        Parameters are as for :meth:`~numpy.ndarray.copy`.
+        """
+        return self._apply('copy', *args, **kwargs)
 
     def reshape(self, *args, **kwargs):
         """Returns an instance containing the same data with a new shape.
@@ -1002,3 +1087,114 @@ class ShapedLikeNDArray(object):
         obviously, no output array can be given.
         """
         return self._apply('take', indices, axis=axis, mode=mode)
+
+
+class IncompatibleShapeError(ValueError):
+    def __init__(self, shape_a, shape_a_idx, shape_b, shape_b_idx):
+        super().__init__(shape_a, shape_a_idx, shape_b, shape_b_idx)
+
+
+def check_broadcast(*shapes):
+    """
+    Determines whether two or more Numpy arrays can be broadcast with each
+    other based on their shape tuple alone.
+
+    Parameters
+    ----------
+    *shapes : tuple
+        All shapes to include in the comparison.  If only one shape is given it
+        is passed through unmodified.  If no shapes are given returns an empty
+        `tuple`.
+
+    Returns
+    -------
+    broadcast : `tuple`
+        If all shapes are mutually broadcastable, returns a tuple of the full
+        broadcast shape.
+    """
+
+    if len(shapes) == 0:
+        return ()
+    elif len(shapes) == 1:
+        return shapes[0]
+
+    reversed_shapes = (reversed(shape) for shape in shapes)
+
+    full_shape = []
+
+    for dims in zip_longest(*reversed_shapes, fillvalue=1):
+        max_dim = 1
+        max_dim_idx = None
+        for idx, dim in enumerate(dims):
+            if dim == 1:
+                continue
+
+            if max_dim == 1:
+                # The first dimension of size greater than 1
+                max_dim = dim
+                max_dim_idx = idx
+            elif dim != max_dim:
+                raise IncompatibleShapeError(
+                    shapes[max_dim_idx], max_dim_idx, shapes[idx], idx)
+
+        full_shape.append(max_dim)
+
+    return tuple(full_shape[::-1])
+
+
+def dtype_bytes_or_chars(dtype):
+    """
+    Parse the number out of a dtype.str value like '<U5' or '<f8'.
+
+    See #5819 for discussion on the need for this function for getting
+    the number of characters corresponding to a string dtype.
+
+    Parameters
+    ----------
+    dtype : numpy dtype object
+        Input dtype
+
+    Returns
+    -------
+    bytes_or_chars : int or None
+        Bits (for numeric types) or characters (for string types)
+    """
+    match = re.search(r'(\d+)$', dtype.str)
+    out = int(match.group(1)) if match else None
+    return out
+
+
+def unbroadcast(array):
+    """
+    Given an array, return a new array that is the smallest subset of the
+    original array that can be re-broadcasted back to the original array.
+
+    See https://stackoverflow.com/questions/40845769/un-broadcasting-numpy-arrays
+    for more details.
+    """
+
+    if array.ndim == 0:
+        return array
+
+    array = array[tuple((slice(0, 1) if stride == 0 else slice(None))
+                        for stride in array.strides)]
+
+    # Remove leading ones, which are not needed in numpy broadcasting.
+    first_not_unity = next((i for (i, s) in enumerate(array.shape) if s > 1),
+                           array.ndim)
+
+    return array.reshape(array.shape[first_not_unity:])
+
+
+def pizza():  # pragma: no cover
+    """
+    Open browser loaded with pizza options near you.
+
+    *Disclaimers: Payments not included. Astropy is not
+    responsible for any liability from using this function.*
+
+    .. note:: Accuracy depends on your browser settings.
+
+    """
+    import webbrowser
+    webbrowser.open('https://www.google.com/search?q=pizza+near+me')

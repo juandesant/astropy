@@ -8,35 +8,32 @@ This module is (currently) not intended to be part of the public API, but
 is instead primarily for internal use in `coordinates`
 """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
 import numpy as np
 
-from ..time import Time
-from .. import units as u
+from astropy.time import Time
+from astropy import units as u
 from .matrix_utilities import rotation_matrix, matrix_product, matrix_transpose
 
 
-jd1950 = Time('B1950', scale='tai').jd
-jd2000 = Time('J2000', scale='utc').jd
+jd1950 = Time('B1950').jd
+jd2000 = Time('J2000').jd
 _asecperrad = u.radian.to(u.arcsec)
 
 
 def eccentricity(jd):
     """
-    Computes the eccentricity of the Earth's orbit at the requested Julian
-    Date.
+    Eccentricity of the Earth's orbit at the requested Julian Date.
 
     Parameters
     ----------
-    jd : scalar or array-like
+    jd : scalar or array_like
         Julian date at which to compute the eccentricity
 
     returns
     -------
     eccentricity : scalar or array
-        The eccentricity in degrees (or array of eccentricities)
+        The eccentricity (or array of eccentricities)
 
     References
     ----------
@@ -57,7 +54,7 @@ def mean_lon_of_perigee(jd):
 
     Parameters
     ----------
-    jd : scalar or array-like
+    jd : scalar or array_like
         Julian date at which to compute the mean longitude of perigee
 
     returns
@@ -83,7 +80,7 @@ def obliquity(jd, algorithm=2006):
 
     Parameters
     ----------
-    jd : scalar or array-like
+    jd : scalar or array_like
         Julian date at which to compute the obliquity
     algorithm : int
         Year of algorithm based on IAU adoption. Can be 2006, 2000 or 1980. The
@@ -261,6 +258,7 @@ def _load_nutation_data(datastr, seriestype):
         for i, e in enumerate(l.split(' ')):
             lists[i].append(dtypes[i][1](e))
     return np.rec.fromarrays(lists, names=[e[0] for e in dtypes])
+
 
 _nut_data_00b = """
 #l lprime F D Omega longitude_sin longitude_sin*t longitude_cos obliquity_cos obliquity_cos*t,obliquity_sin

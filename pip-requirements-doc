@@ -1,7 +1,0 @@
--r pip-requirements
-matplotlib
-wcsaxes
-scipy
-pillow
-sphinx-gallery
-jplephem

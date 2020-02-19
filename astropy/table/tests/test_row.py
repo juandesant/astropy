@@ -1,16 +1,13 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-# TEST_UNICODE_LITERALS
-
 import sys
 
+import pytest
 import numpy as np
 
-from ...tests.helper import pytest, catch_warnings
-from ... import table
-from ...table import Row
-from ...utils.compat import NUMPY_LT_1_8
-from ...utils.exceptions import AstropyDeprecationWarning
+from astropy import table
+from astropy.table import Row
+from astropy import units as u
 from .conftest import MaskedTable
 
 
@@ -20,18 +17,10 @@ def test_masked_row_with_object_col():
     a column with object type.
     """
     t = table.Table([[1]], dtype=['O'], masked=True)
-    if NUMPY_LT_1_8:
-        with pytest.raises(ValueError):
-            t['col0'].mask = False
-            t[0].as_void()
-        with pytest.raises(ValueError):
-            t['col0'].mask = True
-            t[0].as_void()
-    else:
-        t['col0'].mask = False
-        assert t[0]['col0'] == 1
-        t['col0'].mask = True
-        assert t[0]['col0'] is np.ma.masked
+    t['col0'].mask = False
+    assert t[0]['col0'] == 1
+    t['col0'].mask = True
+    assert t[0]['col0'] is np.ma.masked
 
 
 @pytest.mark.usefixtures('table_types')
@@ -138,14 +127,14 @@ class TestRow():
         assert d.colnames == list(np_data.dtype.names)
 
         with pytest.raises(ValueError):
-            np_data = np.array(d, dtype=[(str('c'), 'i8'), (str('d'), 'i8')])
+            np_data = np.array(d, dtype=[('c', 'i8'), ('d', 'i8')])
 
     def test_format_row(self, table_types):
         """Test formatting row"""
         self._setup(table_types)
         table = self.t
         row = table[0]
-        assert repr(row).splitlines() == ['<{0} {1}{2}>'
+        assert repr(row).splitlines() == ['<{} {}{}>'
                                           .format(row.__class__.__name__,
                                                   'index=0',
                                                   ' masked=True' if table.masked else ''),
@@ -157,32 +146,24 @@ class TestRow():
                                          '--- ---',
                                          '  1   4']
 
-        assert row._repr_html_().splitlines() == ['&lt;{0} {1}{2}&gt;'
+        assert row._repr_html_().splitlines() == ['<i>{} {}{}</i>'
                                                   .format(row.__class__.__name__,
                                                           'index=0',
                                                           ' masked=True' if table.masked else ''),
-                                                  '<table id="table{0}">'.format(id(table)),
+                                                  '<table id="table{}">'.format(id(table)),
                                                   '<thead><tr><th>a</th><th>b</th></tr></thead>',
                                                   '<thead><tr><th>int64</th><th>int64</th></tr></thead>',
                                                   '<tr><td>1</td><td>4</td></tr>',
                                                   '</table>']
 
-    def test_data_and_as_void(self, table_types):
-        """Test the deprecated data property and as_void() method"""
+    def test_as_void(self, table_types):
+        """Test the as_void() method"""
         self._setup(table_types)
         table = self.t
         row = table[0]
 
-        # row.data is now deprecated because it is slow, generic and abusable
-        with catch_warnings(AstropyDeprecationWarning) as warning_lines:
-            row_data = row.data
-            assert isinstance(row_data, (np.void, np.ma.mvoid))
-
-            assert warning_lines[0].category == AstropyDeprecationWarning
-            assert ("The data function is deprecated" in str(warning_lines[0].message))
-
-        # If masked then with no masks, issue numpy/numpy#483 should come into play.
-        # Make sure as_void() code is working.
+        # If masked then with no masks, issue numpy/numpy#483 should come
+        # into play.  Make sure as_void() code is working.
         row_void = row.as_void()
         if table.masked:
             assert isinstance(row_void, np.ma.mvoid)
@@ -210,14 +191,8 @@ class TestRow():
         t = table_types.Table([[{'a': 1}, {'b': 2}]], names=('a',))
         assert t[0][0] == {'a': 1}
         assert t[0]['a'] == {'a': 1}
-        if NUMPY_LT_1_8 and t.masked:
-            # With numpy < 1.8 there is a bug setting mvoid with
-            # an object.
-            with pytest.raises(ValueError):
-                t[0].as_void()
-        else:
-            assert t[0].as_void()[0] == {'a': 1}
-            assert t[0].as_void()['a'] == {'a': 1}
+        assert t[0].as_void()[0] == {'a': 1}
+        assert t[0].as_void()['a'] == {'a': 1}
 
     def test_bounds_checking(self, table_types):
         """Row gives index error upon creation for out-of-bounds index"""
@@ -225,3 +200,155 @@ class TestRow():
         for ibad in (-5, -4, 3, 4):
             with pytest.raises(IndexError):
                 self.t[ibad]
+
+    def test_create_rows_from_list(self, table_types):
+        """https://github.com/astropy/astropy/issues/8976"""
+        orig_tab = table_types.Table([[1, 2, 3], [4, 5, 6]], names=('a', 'b'))
+        new_tab = type(orig_tab)(rows=[row for row in orig_tab],
+                                 names=orig_tab.dtype.names)
+        assert np.all(orig_tab == new_tab)
+
+    def test_row_keys_values(self, table_types):
+        self._setup(table_types)
+        row = self.t[0]
+        for row_key, col_key in zip(row.keys(), self.t.columns.keys()):
+            assert row_key == col_key
+
+        for row_value, col in zip(row.values(), self.t.columns.values()):
+            assert row_value == col[0]
+
+    def test_row_as_mapping(self, table_types):
+        self._setup(table_types)
+        row = self.t[0]
+        row_dict = dict(row)
+        for key, value in row_dict.items():
+            assert row[key] == value
+
+        def f(**kwargs):
+            return kwargs
+
+        row_splatted = f(**row)
+        for key, value in row_splatted.items():
+            assert row[key] == value
+
+    def test_row_as_sequence(self, table_types):
+        self._setup(table_types)
+        row = self.t[0]
+        row_tuple = tuple(row)
+        keys = tuple(row.keys())
+        for key, value in zip(keys, row_tuple):
+            assert row[key] == value
+
+        def f(*args):
+            return args
+
+        row_splatted = f(*row)
+        for key, value in zip(keys, row_splatted):
+            assert row[key] == value
+
+
+def test_row_tuple_column_slice():
+    """
+    Test getting and setting a row using a tuple or list of column names
+    """
+    t = table.QTable([[1, 2, 3] * u.m,
+                      [10., 20., 30.],
+                      [100., 200., 300.],
+                      ['x', 'y', 'z']], names=['a', 'b', 'c', 'd'])
+    # Get a row for index=1
+    r1 = t[1]
+    # Column slice with tuple of col names
+    r1_abc = r1['a', 'b', 'c']  # Row object for these cols
+    r1_abc_repr = ['<Row index=1>',
+                   '   a       b       c   ',
+                   '   m                   ',
+                   'float64 float64 float64',
+                   '------- ------- -------',
+                   '    2.0    20.0   200.0']
+    assert repr(r1_abc).splitlines() == r1_abc_repr
+
+    # Column slice with list of col names
+    r1_abc = r1[['a', 'b', 'c']]
+    assert repr(r1_abc).splitlines() == r1_abc_repr
+
+    # Make sure setting on a tuple or slice updates parent table and row
+    r1['c'] = 1000
+    r1['a', 'b'] = 1000 * u.cm, 100.
+    assert r1['a'] == 10 * u.m
+    assert r1['b'] == 100
+    assert t['a'][1] == 10 * u.m
+    assert t['b'][1] == 100.
+    assert t['c'][1] == 1000
+
+    # Same but using a list of column names instead of tuple
+    r1[['a', 'b']] = 2000 * u.cm, 200.
+    assert r1['a'] == 20 * u.m
+    assert r1['b'] == 200
+    assert t['a'][1] == 20 * u.m
+    assert t['b'][1] == 200.
+
+    # Set column slice of column slice
+    r1_abc['a', 'c'] = -1 * u.m, -10
+    assert t['a'][1] == -1 * u.m
+    assert t['b'][1] == 200.
+    assert t['c'][1] == -10.
+
+    # Bad column name
+    with pytest.raises(KeyError) as err:
+        t[1]['a', 'not_there']
+    assert "'not_there'" in str(err.value)
+
+    # Too many values
+    with pytest.raises(ValueError) as err:
+        t[1]['a', 'b'] = 1 * u.m, 2, 3
+    assert 'right hand side must be a sequence' in str(err.value)
+
+    # Something without a length
+    with pytest.raises(ValueError) as err:
+        t[1]['a', 'b'] = 1
+    assert 'right hand side must be a sequence' in str(err.value)
+
+
+def test_row_tuple_column_slice_transaction():
+    """
+    Test that setting a row that fails part way through does not
+    change the table at all.
+    """
+    t = table.QTable([[10., 20., 30.],
+                      [1, 2, 3] * u.m], names=['a', 'b'])
+    tc = t.copy()
+
+    # First one succeeds but second fails.
+    with pytest.raises(ValueError) as err:
+        t[1]['a', 'b'] = (-1, -1 * u.s)  # Bad unit
+    assert "'s' (time) and 'm' (length) are not convertible" in str(err.value)
+    assert t[1] == tc[1]
+
+
+def test_uint_indexing():
+    """
+    Test that accessing a row with an unsigned integer
+    works as with a signed integer.  Similarly tests
+    that printing such a row works.
+
+    This is non-trivial: adding a signed and unsigned
+    integer in numpy results in a float, which is an
+    invalid slice index.
+
+    Regression test for gh-7464.
+    """
+    t = table.Table([[1., 2., 3.]], names='a')
+    assert t['a'][1] == 2.
+    assert t['a'][np.int(1)] == 2.
+    assert t['a'][np.uint(1)] == 2.
+    assert t[np.uint(1)]['a'] == 2.
+
+    trepr = ['<Row index=1>',
+             '   a   ',
+             'float64',
+             '-------',
+             '    2.0']
+
+    assert repr(t[1]).splitlines() == trepr
+    assert repr(t[np.int(1)]).splitlines() == trepr
+    assert repr(t[np.uint(1)]).splitlines() == trepr

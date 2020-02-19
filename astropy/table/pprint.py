@@ -1,10 +1,4 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-from ..extern import six
-from ..extern.six import text_type
-from ..extern.six.moves import zip as izip
-from ..extern.six.moves import xrange
 
 import os
 import sys
@@ -12,25 +6,21 @@ import re
 
 import numpy as np
 
-from .. import log
-from ..utils.console import Getch, color_print, terminal_size, conf
-from ..utils.data_info import dtype_info_name
+from astropy import log
+from astropy.utils.console import Getch, color_print, terminal_size, conf
+from astropy.utils.data_info import dtype_info_name
 
 __all__ = []
 
 
 def default_format_func(format_, val):
     if isinstance(val, bytes):
-        return val.decode('utf-8')
+        return val.decode('utf-8', errors='replace')
     else:
-        return text_type(val)
+        return str(val)
 
 
-_format_funcs = {None: default_format_func}
-
-
-### The first three functions are helpers for _auto_format_func
-
+# The first three functions are helpers for _auto_format_func
 
 def _use_str_for_masked_values(format_func):
     """Wrap format function to trap masked values.
@@ -40,6 +30,7 @@ def _use_str_for_masked_values(format_func):
     """
     return lambda format_, val: (str(val) if val is np.ma.masked
                                  else format_func(format_, val))
+
 
 def _possible_string_format_functions(format_):
     """Iterate through possible string-derived format functions.
@@ -51,72 +42,101 @@ def _possible_string_format_functions(format_):
     yield lambda format_, val: format_.format(val)
     yield lambda format_, val: format_ % val
 
-def _auto_format_func(format_, val):
-    """Format ``val`` according to ``format_`` for a plain format specifier,
-    old- or new-style format strings, or using a user supplied function.
-    More importantly, determine and cache (in _format_funcs) a function
-    that will do this subsequently.  In this way this complicated logic is
-    only done for the first value.
 
-    Returns the formatted value.
+def get_auto_format_func(
+        col=None,
+        possible_string_format_functions=_possible_string_format_functions):
     """
-    if format_ in _format_funcs:
-        return _format_funcs[format_](format_, val)
+    Return a wrapped ``auto_format_func`` function which is used in
+    formatting table columns.  This is primarily an internal function but
+    gets used directly in other parts of astropy, e.g. `astropy.io.ascii`.
 
-    if six.callable(format_):
-        format_func = lambda format_, val: format_(val)
-        try:
-            out = format_func(format_, val)
-            if not isinstance(out, six.string_types):
-                raise ValueError('Format function for value {0} returned {1} '
-                                 'instead of string type'
-                                 .format(val, type(val)))
-        except Exception as err:
-            # For a masked element, the format function call likely failed
-            # to handle it.  Just return the string representation for now,
-            # and retry when a non-masked value comes along.
+    Parameters
+    ----------
+    col_name : object, optional
+        Hashable object to identify column like id or name. Default is None.
+
+    possible_string_format_functions : func, optional
+        Function that yields possible string formatting functions
+        (defaults to internal function to do this).
+
+    Returns
+    -------
+    Wrapped ``auto_format_func`` function
+    """
+
+    def _auto_format_func(format_, val):
+        """Format ``val`` according to ``format_`` for a plain format specifier,
+        old- or new-style format strings, or using a user supplied function.
+        More importantly, determine and cache (in _format_funcs) a function
+        that will do this subsequently.  In this way this complicated logic is
+        only done for the first value.
+
+        Returns the formatted value.
+        """
+        if format_ is None:
+            return default_format_func(format_, val)
+
+        if format_ in col.info._format_funcs:
+            return col.info._format_funcs[format_](format_, val)
+
+        if callable(format_):
+            format_func = lambda format_, val: format_(val)
+            try:
+                out = format_func(format_, val)
+                if not isinstance(out, str):
+                    raise ValueError('Format function for value {} returned {} '
+                                     'instead of string type'
+                                     .format(val, type(val)))
+            except Exception as err:
+                # For a masked element, the format function call likely failed
+                # to handle it.  Just return the string representation for now,
+                # and retry when a non-masked value comes along.
+                if val is np.ma.masked:
+                    return str(val)
+
+                raise ValueError('Format function for value {} failed: {}'
+                                 .format(val, err))
+            # If the user-supplied function handles formatting masked elements, use
+            # it directly.  Otherwise, wrap it in a function that traps them.
+            try:
+                format_func(format_, np.ma.masked)
+            except Exception:
+                format_func = _use_str_for_masked_values(format_func)
+        else:
+            # For a masked element, we cannot set string-based format functions yet,
+            # as all tests below will fail.  Just return the string representation
+            # of masked for now, and retry when a non-masked value comes along.
             if val is np.ma.masked:
                 return str(val)
 
-            raise ValueError('Format function for value {0} failed: {1}'
-                             .format(val, err))
-        # If the user-supplied function handles formatting masked elements, use
-        # it directly.  Otherwise, wrap it in a function that traps them.
-        try:
-            format_func(format_, np.ma.masked)
-        except:
-            format_func = _use_str_for_masked_values(format_func)
-    else:
-        # For a masked element, we cannot set string-based format functions yet,
-        # as all tests below will fail.  Just return the string representation
-        # of masked for now, and retry when a non-masked value comes along.
-        if val is np.ma.masked:
-            return str(val)
-
-        for format_func in _possible_string_format_functions(format_):
-            try:
-                # Does this string format method work?
-                out = format_func(format_, val)
-                # Require that the format statement actually did something.
-                assert out != format_
-            except:
-                continue
+            for format_func in possible_string_format_functions(format_):
+                try:
+                    # Does this string format method work?
+                    out = format_func(format_, val)
+                    # Require that the format statement actually did something.
+                    if out == format_:
+                        raise ValueError('the format passed in did nothing.')
+                except Exception:
+                    continue
+                else:
+                    break
             else:
-                break
-        else:
-            # None of the possible string functions passed muster.
-            raise ValueError('Unable to parse format string {0}'
-                             .format(format_))
+                # None of the possible string functions passed muster.
+                raise ValueError('unable to parse format string {} for its '
+                                 'column.'.format(format_))
 
-        # String-based format functions will fail on masked elements;
-        # wrap them in a function that traps them.
-        format_func = _use_str_for_masked_values(format_func)
+            # String-based format functions will fail on masked elements;
+            # wrap them in a function that traps them.
+            format_func = _use_str_for_masked_values(format_func)
 
-    _format_funcs[format_] = format_func
-    return out
+        col.info._format_funcs[format_] = format_func
+        return out
+
+    return _auto_format_func
 
 
-class TableFormatter(object):
+class TableFormatter:
     @staticmethod
     def _get_pprint_size(max_lines=None, max_width=None):
         """Get the output size (number of lines and character width) for Column and
@@ -180,7 +200,7 @@ class TableFormatter(object):
             Maximum lines of output (header + data rows)
 
         show_name : bool
-            Include column name (default=True)
+            Include column name. Default is True.
 
         show_unit : bool
             Include a header row for unit.  Default is to show a row
@@ -188,7 +208,7 @@ class TableFormatter(object):
             for the unit.
 
         show_dtype : bool
-            Include column dtype (default=False)
+            Include column dtype. Default is False.
 
         show_length : bool
             Include column length at end.  Default is to show this only
@@ -221,19 +241,20 @@ class TableFormatter(object):
                                                show_dtype=show_dtype,
                                                show_length=show_length,
                                                outs=outs)
+
         col_strs = list(col_strs_iter)
         if len(col_strs) > 0:
             col_width = max(len(x) for x in col_strs)
 
         if html:
-            from ..utils.xml.writer import xml_escape
+            from astropy.utils.xml.writer import xml_escape
             n_header = outs['n_header']
             for i, col_str in enumerate(col_strs):
                 # _pformat_col output has a header line '----' which is not needed here
                 if i == n_header - 1:
                     continue
                 td = 'th' if i < n_header else 'td'
-                val = '<{0}>{1}</{2}>'.format(td, xml_escape(col_str.strip()), td)
+                val = '<{}>{}</{}>'.format(td, xml_escape(col_str.strip()), td)
                 row = ('<tr>' + val + '</tr>')
                 if i < n_header:
                     row = ('<thead>' + row + '</thead>')
@@ -265,7 +286,7 @@ class TableFormatter(object):
                 match = re_fill_align.match(align)
                 if not match:
                     raise ValueError("column align must be one of '<', '^', '>', or '='")
-            elif isinstance(col.info.format, six.string_types):
+            elif isinstance(col.info.format, str):
                 # col.info.format need not match, in which case rjust gets used
                 match = re_fill_align.match(col.info.format)
 
@@ -288,7 +309,7 @@ class TableFormatter(object):
                 col_strs[i] = getattr(col_str, justify_method)(*justify_args)
 
         if outs['show_length']:
-            col_strs.append('Length = {0} rows'.format(len(col)))
+            col_strs.append('Length = {} rows'.format(len(col)))
 
         return col_strs, outs
 
@@ -302,7 +323,7 @@ class TableFormatter(object):
             Maximum lines of output (header + data rows)
 
         show_name : bool
-            Include column name (default=True)
+            Include column name. Default is True.
 
         show_unit : bool
             Include a header row for unit.  Default is to show a row
@@ -314,7 +335,7 @@ class TableFormatter(object):
             defined within the iterator.
 
         show_dtype : bool
-            Include column dtype (default=False)
+            Include column dtype. Default is False.
 
         show_length : bool
             Include column length at end.  Default is to show this only
@@ -334,16 +355,16 @@ class TableFormatter(object):
         if show_name:
             i_centers.append(n_header)
             # Get column name (or 'None' if not set)
-            col_name = six.text_type(col.info.name)
+            col_name = str(col.info.name)
             if multidims:
-                col_name += ' [{0}]'.format(
-                    ','.join(six.text_type(n) for n in multidims))
+                col_name += ' [{}]'.format(
+                    ','.join(str(n) for n in multidims))
             n_header += 1
             yield col_name
         if show_unit:
             i_centers.append(n_header)
             n_header += 1
-            yield six.text_type(col.info.unit or '')
+            yield str(col.info.unit or '')
         if show_dtype:
             i_centers.append(n_header)
             n_header += 1
@@ -351,7 +372,7 @@ class TableFormatter(object):
                 dtype = dtype_info_name(col.dtype)
             except AttributeError:
                 dtype = 'object'
-            yield six.text_type(dtype)
+            yield str(dtype)
         if show_unit or show_name or show_dtype:
             i_dashes = n_header
             n_header += 1
@@ -361,36 +382,78 @@ class TableFormatter(object):
         n_print2 = max_lines // 2
         n_rows = len(col)
 
-        col_format = col.info.format or getattr(col.info, 'default_format', None)
-        format_func = _format_funcs.get(col_format, _auto_format_func)
+        # This block of code is responsible for producing the function that
+        # will format values for this column.  The ``format_func`` function
+        # takes two args (col_format, val) and returns the string-formatted
+        # version.  Some points to understand:
+        #
+        # - col_format could itself be the formatting function, so it will
+        #    actually end up being called with itself as the first arg.  In
+        #    this case the function is expected to ignore its first arg.
+        #
+        # - auto_format_func is a function that gets called on the first
+        #    column value that is being formatted.  It then determines an
+        #    appropriate formatting function given the actual value to be
+        #    formatted.  This might be deterministic or it might involve
+        #    try/except.  The latter allows for different string formatting
+        #    options like %f or {:5.3f}.  When auto_format_func is called it:
+
+        #    1. Caches the function in the _format_funcs dict so for subsequent
+        #       values the right function is called right away.
+        #    2. Returns the formatted value.
+        #
+        # - possible_string_format_functions is a function that yields a
+        #    succession of functions that might successfully format the
+        #    value.  There is a default, but Mixin methods can override this.
+        #    See Quantity for an example.
+        #
+        # - get_auto_format_func() returns a wrapped version of auto_format_func
+        #    with the column id and possible_string_format_functions as
+        #    enclosed variables.
+        col_format = col.info.format or getattr(col.info, 'default_format',
+                                                None)
+        pssf = (getattr(col.info, 'possible_string_format_functions', None) or
+                _possible_string_format_functions)
+        auto_format_func = get_auto_format_func(col, pssf)
+        format_func = col.info._format_funcs.get(col_format, auto_format_func)
+
         if len(col) > max_lines:
             if show_length is None:
                 show_length = True
             i0 = n_print2 - (1 if show_length else 0)
             i1 = n_rows - n_print2 - max_lines % 2
-            ii = np.concatenate([np.arange(0, i0 + 1), np.arange(i1 + 1, len(col))])
+            indices = np.concatenate([np.arange(0, i0 + 1),
+                                      np.arange(i1 + 1, len(col))])
         else:
             i0 = -1
-            ii = np.arange(len(col))
+            indices = np.arange(len(col))
+
+        def format_col_str(idx):
+            if multidims:
+                # Prevents columns like Column(data=[[(1,)],[(2,)]], name='a')
+                # with shape (n,1,...,1) from being printed as if there was
+                # more than one element in a row
+                if trivial_multidims:
+                    return format_func(col_format, col[(idx,) + multidim0])
+                else:
+                    left = format_func(col_format, col[(idx,) + multidim0])
+                    right = format_func(col_format, col[(idx,) + multidim1])
+                    return f'{left} .. {right}'
+            else:
+                return format_func(col_format, col[idx])
 
         # Add formatted values if within bounds allowed by max_lines
-        for i in ii:
-            if i == i0:
+        for idx in indices:
+            if idx == i0:
                 yield '...'
             else:
-                if multidims:
-                    # Prevents columns like Column(data=[[(1,)],[(2,)]], name='a')
-                    # with shape (n,1,...,1) from being printed as if there was
-                    # more than one element in a row
-                    if trivial_multidims:
-                        col_str = format_func(col_format, col[(i,) + multidim0])
-                    else:
-                        col_str = (format_func(col_format, col[(i,) + multidim0]) +
-                                  ' .. ' +
-                                  format_func(col_format, col[(i,) + multidim1]))
-                else:
-                    col_str = format_func(col_format, col[i])
-                yield col_str
+                try:
+                    yield format_col_str(idx)
+                except ValueError:
+                    raise ValueError(
+                        'Unable to parse format string "{}" for entry "{}" '
+                        'in column "{}"'.format(col_format, col[idx],
+                                                 col.info.name))
 
         outs['show_length'] = show_length
         outs['n_header'] = n_header
@@ -412,7 +475,7 @@ class TableFormatter(object):
             Maximum character width of output
 
         show_name : bool
-            Include a header row for column names (default=True)
+            Include a header row for column names. Default is True.
 
         show_unit : bool
             Include a header row for unit.  Default is to show a row
@@ -420,10 +483,10 @@ class TableFormatter(object):
             for the unit.
 
         show_dtype : bool
-            Include a header row for column dtypes (default=False)
+            Include a header row for column dtypes. Default is False.
 
         html : bool
-            Format the output as an HTML table (default=False)
+            Format the output as an HTML table. Default is False.
 
         tableid : str or None
             An ID tag for the table; only used if html is set.  Default is
@@ -456,23 +519,23 @@ class TableFormatter(object):
         cols = []
 
         if show_unit is None:
-            show_unit = any([col.info.unit for col in six.itervalues(table.columns)])
+            show_unit = any(col.info.unit for col in table.columns.values())
 
         # Coerce align into a correctly-sized list of alignments (if possible)
         n_cols = len(table.columns)
-        if align is None or isinstance(align, six.string_types):
+        if align is None or isinstance(align, str):
             align = [align] * n_cols
 
         elif isinstance(align, (list, tuple)):
             if len(align) != n_cols:
-                raise ValueError('got {0} alignment values instead of '
-                                 'the number of columns ({1})'
+                raise ValueError('got {} alignment values instead of '
+                                 'the number of columns ({})'
                                  .format(len(align), n_cols))
         else:
-            raise TypeError('align keyword must be str or list or tuple (got {0})'
+            raise TypeError('align keyword must be str or list or tuple (got {})'
                             .format(type(align)))
 
-        for align_, col in izip(align, table.columns.values()):
+        for align_, col in zip(align, table.columns.values()):
             lines, outs = self._pformat_col(col, max_lines, show_name=show_name,
                                             show_unit=show_unit, show_dtype=show_dtype,
                                             align=align_)
@@ -505,7 +568,7 @@ class TableFormatter(object):
         # row-oriented list.
         rows = []
         if html:
-            from ..utils.xml.writer import xml_escape
+            from astropy.utils.xml.writer import xml_escape
 
             if tableid is None:
                 tableid = 'table{id}'.format(id=id(table))
@@ -516,14 +579,14 @@ class TableFormatter(object):
                 rows.append('<table id="{tid}" class="{tcls}">'.format(
                     tid=tableid, tcls=tableclass))
             else:
-                rows.append('<table id="{tid}">'.format(tid=tableid))
+                rows.append(f'<table id="{tableid}">')
 
             for i in range(n_rows):
                 # _pformat_col output has a header line '----' which is not needed here
                 if i == n_header - 1:
                     continue
                 td = 'th' if i < n_header else 'td'
-                vals = ('<{0}>{1}</{2}>'.format(td, xml_escape(col[i].strip()), td)
+                vals = ('<{}>{}</{}>'.format(td, xml_escape(col[i].strip()), td)
                         for col in cols)
                 row = ('<tr>' + ''.join(vals) + '</tr>')
                 if i < n_header:
@@ -550,7 +613,7 @@ class TableFormatter(object):
             Maximum character width of output
 
         show_name : bool
-            Include a header row for column names (default=True)
+            Include a header row for column names. Default is True.
 
         show_unit : bool
             Include a header row for unit.  Default is to show a row
@@ -558,7 +621,7 @@ class TableFormatter(object):
             for the unit.
 
         show_dtype : bool
-            Include a header row for column dtypes (default=False)
+            Include a header row for column dtypes. Default is False.
         """
         allowed_keys = 'f br<>qhpn'
 
@@ -597,12 +660,12 @@ class TableFormatter(object):
             if showlines:  # Don't always show the table (e.g. after help)
                 try:
                     os.system('cls' if os.name == 'nt' else 'clear')
-                except:
+                except Exception:
                     pass  # No worries if clear screen call fails
                 lines = tabcol[i0:i1].pformat(**kwargs)
                 colors = ('red' if i < n_header else 'default'
-                          for i in xrange(len(lines)))
-                for color, line in izip(colors, lines):
+                          for i in range(len(lines)))
+                for color, line in zip(colors, lines):
                     color_print(line, color)
             showlines = True
             print()
@@ -611,7 +674,7 @@ class TableFormatter(object):
             while True:
                 try:
                     key = inkey().lower()
-                except:
+                except Exception:
                     print("\n")
                     log.error('Console does not support getting a character'
                               ' as required by more().  Use pprint() instead.')

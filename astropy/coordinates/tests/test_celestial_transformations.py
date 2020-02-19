@@ -1,24 +1,25 @@
 # -*- coding: utf-8 -*-
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-
+import pytest
 import numpy as np
 
-from ... import units as u
-from ..distances import Distance
-from ..builtin_frames import (ICRS, FK5, FK4, FK4NoETerms, Galactic,
-                              Supergalactic, Galactocentric, HCRS, GCRS)
-from .. import SkyCoord
-from ...tests.helper import (pytest, quantity_allclose as allclose,
-                             assert_quantity_allclose as assert_allclose)
-from .. import EarthLocation, CartesianRepresentation
-from ...time import Time
+from astropy import units as u
+from astropy.coordinates import galactocentric_frame_defaults
+from astropy.coordinates.distances import Distance
+from astropy.coordinates.builtin_frames import (
+    ICRS, FK5, FK4, FK4NoETerms, Galactic,
+    Supergalactic, Galactocentric, HCRS, GCRS, LSR)
+from astropy.coordinates import SkyCoord
+from astropy.tests.helper import assert_quantity_allclose as assert_allclose
+from astropy.coordinates import EarthLocation, CartesianRepresentation
+from astropy.time import Time
+from astropy.units import allclose
 
 # used below in the next parametrized test
 m31_sys = [ICRS, FK5, FK4, Galactic]
-m31_coo = [(10.6847929, 41.2690650), (10.6847929, 41.2690650), (10.0004738, 40.9952444), (121.1744050, -21.5729360)]
+m31_coo = [(10.6847929, 41.2690650), (10.6847929, 41.2690650),
+           (10.0004738, 40.9952444), (121.1744050, -21.5729360)]
 m31_dist = Distance(770, u.kpc)
 convert_precision = 1 * u.arcsec
 roundtrip_precision = 1e-4 * u.degree
@@ -40,7 +41,7 @@ def test_m31_coord_transforms(fromsys, tosys, fromcoo, tocoo):
     coo1 = fromsys(ra=fromcoo[0]*u.deg, dec=fromcoo[1]*u.deg, distance=m31_dist)
     coo2 = coo1.transform_to(tosys)
     if tosys is FK4:
-        coo2_prec = coo2.transform_to(FK4(equinox=Time('B1950', scale='utc')))
+        coo2_prec = coo2.transform_to(FK4(equinox=Time('B1950')))
         assert (coo2_prec.spherical.lon - tocoo[0]*u.deg) < convert_precision  # <1 arcsec
         assert (coo2_prec.spherical.lat - tocoo[1]*u.deg) < convert_precision
     else:
@@ -62,10 +63,10 @@ def test_precession():
     """
     Ensures that FK4 and FK5 coordinates precess their equinoxes
     """
-    j2000 = Time('J2000', scale='utc')
-    b1950 = Time('B1950', scale='utc')
-    j1975 = Time('J1975', scale='utc')
-    b1975 = Time('B1975', scale='utc')
+    j2000 = Time('J2000')
+    b1950 = Time('B1950')
+    j1975 = Time('J1975')
+    b1975 = Time('B1975')
 
     fk4 = FK4(ra=1*u.radian, dec=0.5*u.radian)
     assert fk4.equinox.byear == b1950.byear
@@ -103,7 +104,8 @@ def test_galactocentric():
                       distance=1.*u.kpc)
 
     g_xyz = icrs_coord.transform_to(Galactic).cartesian.xyz
-    gc_xyz = icrs_coord.transform_to(Galactocentric(z_sun=0*u.kpc)).cartesian.xyz
+    with galactocentric_frame_defaults.set('pre-v4.0'):
+        gc_xyz = icrs_coord.transform_to(Galactocentric(z_sun=0*u.kpc)).cartesian.xyz
     diff = np.abs(g_xyz - gc_xyz)
 
     assert allclose(diff[0], 8.3*u.kpc, atol=1E-5*u.kpc)
@@ -112,7 +114,8 @@ def test_galactocentric():
     # generate some test coordinates
     g = Galactic(l=[0, 0, 45, 315]*u.deg, b=[-45, 45, 0, 0]*u.deg,
                  distance=[np.sqrt(2)]*4*u.kpc)
-    xyz = g.transform_to(Galactocentric(galcen_distance=1.*u.kpc, z_sun=0.*u.pc)).cartesian.xyz
+    with galactocentric_frame_defaults.set('pre-v4.0'):
+        xyz = g.transform_to(Galactocentric(galcen_distance=1.*u.kpc, z_sun=0.*u.pc)).cartesian.xyz
     true_xyz = np.array([[0, 0, -1.], [0, 0, 1], [0, 1, 0], [0, -1, 0]]).T*u.kpc
     assert allclose(xyz.to(u.kpc), true_xyz.to(u.kpc), atol=1E-5*u.kpc)
 
@@ -123,29 +126,30 @@ def test_galactocentric():
     y = np.linspace(-10., 10., 100) * u.kpc
     z = np.zeros_like(x)
 
-    g1 = Galactocentric(x=x, y=y, z=z)
-    g2 = Galactocentric(x=x.reshape(100, 1, 1), y=y.reshape(100, 1, 1),
-                        z=z.reshape(100, 1, 1))
-
-    g1t = g1.transform_to(Galactic)
-    g2t = g2.transform_to(Galactic)
-
-    assert_allclose(g1t.cartesian.xyz, g2t.cartesian.xyz[:, :, 0, 0])
-
     # from Galactic to Galactocentric
     l = np.linspace(15, 30., 100) * u.deg
     b = np.linspace(-10., 10., 100) * u.deg
     d = np.ones_like(l.value) * u.kpc
 
-    g1 = Galactic(l=l, b=b, distance=d)
-    g2 = Galactic(l=l.reshape(100, 1, 1), b=b.reshape(100, 1, 1),
-                  distance=d.reshape(100, 1, 1))
+    with galactocentric_frame_defaults.set('latest'):
+        g1 = Galactocentric(x=x, y=y, z=z)
+        g2 = Galactocentric(x=x.reshape(100, 1, 1), y=y.reshape(100, 1, 1),
+                            z=z.reshape(100, 1, 1))
 
-    g1t = g1.transform_to(Galactocentric)
-    g2t = g2.transform_to(Galactocentric)
+        g1t = g1.transform_to(Galactic)
+        g2t = g2.transform_to(Galactic)
 
-    np.testing.assert_almost_equal(g1t.cartesian.xyz.value,
-                                   g2t.cartesian.xyz.value[:, :, 0, 0])
+        assert_allclose(g1t.cartesian.xyz, g2t.cartesian.xyz[:, :, 0, 0])
+
+        g1 = Galactic(l=l, b=b, distance=d)
+        g2 = Galactic(l=l.reshape(100, 1, 1), b=b.reshape(100, 1, 1),
+                      distance=d.reshape(100, 1, 1))
+
+        g1t = g1.transform_to(Galactocentric)
+        g2t = g2.transform_to(Galactocentric)
+
+        np.testing.assert_almost_equal(g1t.cartesian.xyz.value,
+                                       g2t.cartesian.xyz.value[:, :, 0, 0])
 
 
 def test_supergalactic():
@@ -184,6 +188,7 @@ class TestHCRS():
     `tarr` as defined below, the ICRS Solar positions were predicted using, e.g.
     coord.ICRS(coord.get_body_barycentric(tarr, 'sun')).
     """
+
     def setup(self):
         self.t1 = Time("2013-02-02T23:00")
         self.t2 = Time("2013-08-02T23:00")
@@ -200,13 +205,8 @@ class TestHCRS():
         # corresponding HCRS positions
         self.sun_hcrs_t1 = HCRS(CartesianRepresentation([0.0, 0.0, 0.0] * u.km),
                                 obstime=self.t1)
-        self.sun_hcrs_tarr1 = HCRS(CartesianRepresentation([0.0, 0.0, 0.0] * u.km),
-                                   obstime=self.tarr)
         twod_rep = CartesianRepresentation([[0.0, 0.0], [0.0, 0.0], [0.0, 0.0]] * u.km)
-        self.sun_hcrs_tarr1 = HCRS(CartesianRepresentation([0.0, 0.0, 0.0] * u.km),
-                                   obstime=self.tarr)
-        self.sun_hcrs_tarr2 = HCRS(twod_rep,
-                                   obstime=self.tarr)
+        self.sun_hcrs_tarr = HCRS(twod_rep, obstime=self.tarr)
         self.tolerance = 5*u.km
 
     def test_from_hcrs(self):
@@ -215,13 +215,8 @@ class TestHCRS():
         separation = transformed.separation_3d(self.sun_icrs_scalar)
         assert_allclose(separation, 0*u.km, atol=self.tolerance)
 
-        # test scalar position and non-scalar time
-        transformed = self.sun_hcrs_tarr1.transform_to(ICRS())
-        separation = transformed.separation_3d(self.sun_icrs_arr)
-        assert_allclose(separation, 0*u.km, atol=self.tolerance)
-
         # test non-scalar positions and times
-        transformed = self.sun_hcrs_tarr2.transform_to(ICRS())
+        transformed = self.sun_hcrs_tarr.transform_to(ICRS())
         separation = transformed.separation_3d(self.sun_icrs_arr)
         assert_allclose(separation, 0*u.km, atol=self.tolerance)
 
@@ -232,7 +227,7 @@ class TestHCRS():
         assert_allclose(separation, 0*u.km, atol=self.tolerance)
         # nonscalar positions
         transformed = self.sun_icrs_arr.transform_to(HCRS(obstime=self.tarr))
-        separation = transformed.separation_3d(self.sun_hcrs_tarr1)
+        separation = transformed.separation_3d(self.sun_hcrs_tarr)
         assert_allclose(separation, 0*u.km, atol=self.tolerance)
 
 
@@ -242,11 +237,13 @@ class TestHelioBaryCentric():
 
     Uses the WHT observing site (information grabbed from data/sites.json).
     """
+
     def setup(self):
         wht = EarthLocation(342.12*u.deg, 28.758333333333333*u.deg, 2327*u.m)
         self.obstime = Time("2013-02-02T23:00")
         self.wht_itrs = wht.get_itrs(obstime=self.obstime)
 
+    @pytest.mark.remote_data
     def test_heliocentric(self):
         gcrs = self.wht_itrs.transform_to(GCRS(obstime=self.obstime))
         helio = gcrs.transform_to(HCRS(obstime=self.obstime))
@@ -259,6 +256,7 @@ class TestHelioBaryCentric():
         assert np.sqrt(((helio.cartesian.xyz -
                          helio_slalib)**2).sum()) < 14. * u.km
 
+    @pytest.mark.remote_data
     def test_barycentric(self):
         gcrs = self.wht_itrs.transform_to(GCRS(obstime=self.obstime))
         bary = gcrs.transform_to(ICRS())
@@ -269,3 +267,51 @@ class TestHelioBaryCentric():
         bary_slalib = [-0.6869012079, 0.6472893646, 0.2805661191] * u.au
         assert np.sqrt(((bary.cartesian.xyz -
                          bary_slalib)**2).sum()) < 14. * u.km
+
+
+def test_lsr_sanity():
+
+    # random numbers, but zero velocity in ICRS frame
+    icrs = ICRS(ra=15.1241*u.deg, dec=17.5143*u.deg, distance=150.12*u.pc,
+                pm_ra_cosdec=0*u.mas/u.yr, pm_dec=0*u.mas/u.yr,
+                radial_velocity=0*u.km/u.s)
+    lsr = icrs.transform_to(LSR)
+
+    lsr_diff = lsr.data.differentials['s']
+    cart_lsr_vel = lsr_diff.represent_as(CartesianRepresentation, base=lsr.data)
+    lsr_vel = ICRS(cart_lsr_vel)
+    gal_lsr = lsr_vel.transform_to(Galactic).cartesian.xyz
+    assert allclose(gal_lsr.to(u.km/u.s, u.dimensionless_angles()),
+                    lsr.v_bary.d_xyz)
+
+    # moving with LSR velocity
+    lsr = LSR(ra=15.1241*u.deg, dec=17.5143*u.deg, distance=150.12*u.pc,
+              pm_ra_cosdec=0*u.mas/u.yr, pm_dec=0*u.mas/u.yr,
+              radial_velocity=0*u.km/u.s)
+    icrs = lsr.transform_to(ICRS)
+
+    icrs_diff = icrs.data.differentials['s']
+    cart_vel = icrs_diff.represent_as(CartesianRepresentation, base=icrs.data)
+    vel = ICRS(cart_vel)
+    gal_icrs = vel.transform_to(Galactic).cartesian.xyz
+    assert allclose(gal_icrs.to(u.km/u.s, u.dimensionless_angles()),
+                    -lsr.v_bary.d_xyz)
+
+
+def test_hcrs_icrs_differentials():
+    # Regression to ensure that we can transform velocities from HCRS to LSR.
+    # Numbers taken from the original issue, gh-6835.
+    hcrs = HCRS(ra=8.67*u.deg, dec=53.09*u.deg, distance=117*u.pc,
+                pm_ra_cosdec=4.8*u.mas/u.yr, pm_dec=-15.16*u.mas/u.yr,
+                radial_velocity=23.42*u.km/u.s)
+    icrs = hcrs.transform_to(ICRS)
+
+    # The position and velocity should not change much
+    assert allclose(hcrs.cartesian.xyz, icrs.cartesian.xyz, rtol=1e-8)
+    assert allclose(hcrs.velocity.d_xyz, icrs.velocity.d_xyz, rtol=1e-2)
+
+    hcrs2 = icrs.transform_to(HCRS)
+
+    # The values should round trip
+    assert allclose(hcrs.cartesian.xyz, hcrs2.cartesian.xyz, rtol=1e-12)
+    assert allclose(hcrs.velocity.d_xyz, hcrs2.velocity.d_xyz, rtol=1e-12)

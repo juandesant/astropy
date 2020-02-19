@@ -1,23 +1,18 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-
-from ..extern import six
-from ..extern.six.moves import map
 
 import sys
-from math import sqrt, pi, exp, log, floor
+from math import acos, sin, cos, sqrt, pi, exp, log, floor
 from abc import ABCMeta, abstractmethod
+from inspect import signature
 
 import numpy as np
 
 from . import scalar_inv_efuncs
 
-from .. import constants as const
-from .. import units as u
-from ..utils import isiterable, deprecated
-from ..utils.compat.funcsigs import signature
-from ..utils.state import ScienceState
+from astropy import constants as const
+from astropy import units as u
+from astropy.utils import isiterable
+from astropy.utils.state import ScienceState
 
 from . import parameters
 
@@ -29,10 +24,10 @@ from . import parameters
 # and Linder 2003, PRL 90, 91301
 
 __all__ = ["FLRW", "LambdaCDM", "FlatLambdaCDM", "wCDM", "FlatwCDM",
-           "Flatw0waCDM", "w0waCDM", "wpwaCDM", "w0wzCDM", "WMAP5", "WMAP7",
-           "WMAP9", "Planck13", "Planck15", "default_cosmology"]
+           "Flatw0waCDM", "w0waCDM", "wpwaCDM", "w0wzCDM",
+           "default_cosmology"] + parameters.available
 
-__doctest_requires__ = {'*': ['scipy.integrate']}
+__doctest_requires__ = {'*': ['scipy']}
 
 # Notes about speeding up integrals:
 # ---------------------------------
@@ -87,13 +82,12 @@ class CosmologyError(Exception):
     pass
 
 
-class Cosmology(object):
+class Cosmology:
     """ Placeholder for when a more general Cosmology class is
     implemented. """
 
 
-@six.add_metaclass(ABCMeta)
-class FLRW(Cosmology):
+class FLRW(Cosmology, metaclass=ABCMeta):
     """ A class describing an isotropic and homogeneous
     (Friedmann-Lemaitre-Robertson-Walker) cosmology.
 
@@ -118,7 +112,7 @@ class FLRW(Cosmology):
 
     Tcmb0 : float or scalar `~astropy.units.Quantity`, optional
         Temperature of the CMB z=0. If a float, must be in [K].
-        Default: 2.725 [K]. Setting this to zero will turn off both photons
+        Default: 0 [K]. Setting this to zero will turn off both photons
         and neutrinos (even massive ones).
 
     Neff : float, optional
@@ -146,7 +140,8 @@ class FLRW(Cosmology):
     of the parameters.  That is, all of the attributes above are
     read only.
     """
-    def __init__(self, H0, Om0, Ode0, Tcmb0=2.725, Neff=3.04,
+
+    def __init__(self, H0, Om0, Ode0, Tcmb0=0, Neff=3.04,
                  m_nu=u.Quantity(0.0, u.eV), Ob0=None, name=None):
 
         # all densities are in units of the critical density
@@ -173,12 +168,12 @@ class FLRW(Cosmology):
         self.name = name
 
         # Tcmb may have units
-        self._Tcmb0 = u.Quantity(Tcmb0, unit=u.K, dtype=np.float)
+        self._Tcmb0 = u.Quantity(Tcmb0, unit=u.K)
         if not self._Tcmb0.isscalar:
             raise ValueError("Tcmb0 is a non-scalar quantity")
 
         # Hubble parameter at z=0, km/s/Mpc
-        self._H0 = u.Quantity(H0, unit=u.km / u.s / u.Mpc, dtype=np.float)
+        self._H0 = u.Quantity(H0, unit=u.km / u.s / u.Mpc)
         if not self._H0.isscalar:
             raise ValueError("H0 is a non-scalar quantity")
 
@@ -298,9 +293,9 @@ class FLRW(Cosmology):
     def _namelead(self):
         """ Helper function for constructing __repr__"""
         if self.name is None:
-            return "{0}(".format(self.__class__.__name__)
+            return f"{self.__class__.__name__}("
         else:
-            return "{0}(name=\"{1}\", ".format(self.__class__.__name__,
+            return "{}(name=\"{}\", ".format(self.__class__.__name__,
                                                self.name)
 
     def __repr__(self):
@@ -374,16 +369,14 @@ class FLRW(Cosmology):
             return None
         if not self._massivenu:
             # Only massless
-            return u.Quantity(np.zeros(self._nmasslessnu), u.eV,
-                              dtype=np.float)
+            return u.Quantity(np.zeros(self._nmasslessnu), u.eV)
         if self._nmasslessnu == 0:
             # Only massive
-            return u.Quantity(self._massivenu_mass, u.eV,
-                              dtype=np.float)
+            return u.Quantity(self._massivenu_mass, u.eV)
         # A mix -- the most complicated case
         numass = np.append(np.zeros(self._nmasslessnu),
                            self._massivenu_mass.value)
-        return u.Quantity(numass, u.eV, dtype=np.float)
+        return u.Quantity(numass, u.eV)
 
     @property
     def h(self):
@@ -462,16 +455,16 @@ class FLRW(Cosmology):
             except AttributeError:
                 # We didn't find a property -- complain usefully
                 errstr = "Object did not have property corresponding "\
-                         "to constructor argument '%s'; perhaps it is a "\
+                         "to constructor argument '{}'; perhaps it is a "\
                          "user provided subclass that does not do so"
-                raise AttributeError(errstr % arg)
+                raise AttributeError(errstr.format(arg))
 
         # Now substitute in new arguments
         for newarg in kwargs:
             if newarg not in argdict:
-                errstr = "User provided argument '%s' not found in "\
+                errstr = "User provided argument '{}' not found in "\
                          "constructor for this object"
-                raise AttributeError(errstr % newarg)
+                raise AttributeError(errstr.format(newarg))
             argdict[newarg] = kwargs[newarg]
 
         return self.__class__(**argdict)
@@ -482,7 +475,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -507,7 +500,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -531,7 +524,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -557,7 +550,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -570,6 +563,7 @@ class FLRW(Cosmology):
         ------
         ValueError
           If Ob0 is None.
+
         Notes
         -----
         This does not include neutrinos, even if non-relativistic
@@ -589,7 +583,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -602,7 +596,7 @@ class FLRW(Cosmology):
             z = np.asarray(z)
             # Common enough case to be worth checking explicitly
             if self._Ok0 == 0:
-                return np.zeros(np.asanyarray(z).shape, dtype=np.float)
+                return np.zeros(np.asanyarray(z).shape)
         else:
             if self._Ok0 == 0:
                 return 0.0
@@ -614,7 +608,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -628,7 +622,7 @@ class FLRW(Cosmology):
             z = np.asarray(z)
             # Common case worth checking
             if self._Ode0 == 0:
-                return np.zeros(np.asanyarray(z).shape, dtype=np.float)
+                return np.zeros(np.asanyarray(z).shape)
         else:
             if self._Ode0 == 0:
                 return 0.0
@@ -640,7 +634,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -655,12 +649,11 @@ class FLRW(Cosmology):
         return self._Ogamma0 * (1. + z) ** 4 * self.inv_efunc(z) ** 2
 
     def Onu(self, z):
-        """ Return the density parameter for massless neutrinos at
-        redshift ``z``.
+        """ Return the density parameter for neutrinos at redshift ``z``.
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -676,7 +669,7 @@ class FLRW(Cosmology):
         if isiterable(z):
             z = np.asarray(z)
             if self._Onu0 == 0:
-                return np.zeros(np.asanyarray(z).shape, dtype=np.float)
+                return np.zeros(np.asanyarray(z).shape)
         else:
             if self._Onu0 == 0:
                 return 0.0
@@ -688,7 +681,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -706,7 +699,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -775,8 +768,7 @@ class FLRW(Cosmology):
             if np.isscalar(z):
                 return prefac * self._Neff
             else:
-                return prefac * self._Neff *\
-                    np.ones(np.asanyarray(z).shape, dtype=np.float)
+                return prefac * self._Neff * np.ones(np.asanyarray(z).shape)
 
         # These are purely fitting constants -- see the Komatsu paper
         p = 1.83
@@ -801,11 +793,11 @@ class FLRW(Cosmology):
         return 1.0 + self.w(z)
 
     def de_density_scale(self, z):
-        """ Evaluates the redshift dependence of the dark energy density.
+        r""" Evaluates the redshift dependence of the dark energy density.
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -815,13 +807,13 @@ class FLRW(Cosmology):
 
         Notes
         -----
-        The scaling factor, I, is defined by :math:`\\rho(z) = \\rho_0 I`,
+        The scaling factor, I, is defined by :math:`\rho(z) = \rho_0 I`,
         and is given by
 
         .. math::
 
-            I = \\exp \\left( 3 \int_{a}^1 \\frac{ da^{\\prime} }{ a^{\\prime} }
-            \\left[ 1 + w\\left( a^{\\prime} \\right) \\right] \\right)
+            I = \exp \left( 3 \int_{a}^1 \frac{ da^{\prime} }{ a^{\prime} }
+            \left[ 1 + w\left( a^{\prime} \right) \right] \right)
 
         It will generally helpful for subclasses to overload this method if
         the integral can be done analytically for the particular dark
@@ -855,7 +847,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -889,7 +881,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -932,38 +924,12 @@ class FLRW(Cosmology):
         args = self._inv_efunc_scalar_args
         return self._inv_efunc_scalar(z, *args) / (1.0 + z)
 
-    @deprecated(since=1.1, alternative='lookback_time_integrand')
-    def _tfunc(self, z):
-        """ Integrand of the lookback time.
-
-        Parameters
-        ----------
-        z : float or array-like
-          Input redshift.
-
-        Returns
-        -------
-        I : float or array
-          The integrand for the lookback time
-
-        References
-        ----------
-        Eqn 30 from Hogg 1999.
-        """
-
-        if isiterable(z):
-            zp1 = 1.0 + np.asarray(z)
-        else:
-            zp1 = 1. + z
-
-        return self.inv_efunc(z) / zp1
-
     def lookback_time_integrand(self, z):
         """ Integrand of the lookback time.
 
         Parameters
         ----------
-        z : float or array-like
+        z : float or array_like
           Input redshift.
 
         Returns
@@ -1004,31 +970,6 @@ class FLRW(Cosmology):
         args = self._inv_efunc_scalar_args
         return (1.0 + z) ** 2 * self._inv_efunc_scalar(z, *args)
 
-    @deprecated(since=1.1, alternative='abs_distance_integrand')
-    def _xfunc(self, z):
-        """ Integrand of the absorption distance.
-
-        Parameters
-        ----------
-        z : float or array
-          Input redshift.
-
-        Returns
-        -------
-        X : float or array
-          The integrand for the absorption distance
-
-        References
-        ----------
-        See Hogg 1999 section 11.
-        """
-
-        if isiterable(z):
-            zp1 = 1.0 + np.asarray(z)
-        else:
-            zp1 = 1. + z
-        return zp1 ** 2 * self.inv_efunc(z)
-
     def abs_distance_integrand(self, z):
         """ Integrand of the absorption distance.
 
@@ -1058,7 +999,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -1076,7 +1017,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -1098,7 +1039,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar
 
         Returns
@@ -1110,7 +1051,42 @@ class FLRW(Cosmology):
         --------
         z_at_value : Find the redshift corresponding to a lookback time.
         """
+        return self._lookback_time(z)
 
+    def _lookback_time(self, z):
+        """ Lookback time in Gyr to redshift ``z``.
+
+        The lookback time is the difference between the age of the
+        Universe now and the age at redshift ``z``.
+
+        Parameters
+        ----------
+        z : array_like
+          Input redshifts.  Must be 1D or scalar
+
+        Returns
+        -------
+        t : `~astropy.units.Quantity`
+          Lookback time in Gyr to each input redshift.
+        """
+        return self._integral_lookback_time(z)
+
+    def _integral_lookback_time(self, z):
+        """ Lookback time in Gyr to redshift ``z``.
+
+        The lookback time is the difference between the age of the
+        Universe now and the age at redshift ``z``.
+
+        Parameters
+        ----------
+        z : array_like
+          Input redshifts.  Must be 1D or scalar
+
+        Returns
+        -------
+        t : `~astropy.units.Quantity`
+          Lookback time in Gyr to each input redshift.
+        """
         from scipy.integrate import quad
         f = lambda red: quad(self._lookback_time_integrand_scalar, 0, red)[0]
         return self._hubble_time * vectorize_if_needed(f, z)
@@ -1124,7 +1100,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar
 
         Returns
@@ -1139,7 +1115,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1151,7 +1127,44 @@ class FLRW(Cosmology):
         --------
         z_at_value : Find the redshift corresponding to an age.
         """
+        return self._age(z)
 
+    def _age(self, z):
+        """ Age of the universe in Gyr at redshift ``z``.
+
+        This internal function exists to be re-defined for optimizations.
+
+        Parameters
+        ----------
+        z : array_like
+          Input redshifts.  Must be 1D or scalar.
+
+        Returns
+        -------
+        t : `~astropy.units.Quantity`
+          The age of the universe in Gyr at each input redshift.
+        """
+        return self._integral_age(z)
+
+    def _integral_age(self, z):
+        """ Age of the universe in Gyr at redshift ``z``.
+
+        Calculated using explicit integration.
+
+        Parameters
+        ----------
+        z : array_like
+          Input redshifts.  Must be 1D or scalar.
+
+        Returns
+        -------
+        t : `~astropy.units.Quantity`
+          The age of the universe in Gyr at each input redshift.
+
+        See Also
+        --------
+        z_at_value : Find the redshift corresponding to an age.
+        """
         from scipy.integrate import quad
         f = lambda red: quad(self._lookback_time_integrand_scalar,
                              red, np.inf)[0]
@@ -1162,7 +1175,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -1183,7 +1196,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1204,7 +1217,27 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z1, z2 : array-like, shape (N,)
+        z1, z2 : array_like, shape (N,)
+          Input redshifts.  Must be 1D or scalar.
+
+        Returns
+        -------
+        d : `~astropy.units.Quantity`
+          Comoving distance in Mpc between each input redshift.
+        """
+        return self._integral_comoving_distance_z1z2(z1, z2)
+
+    def _integral_comoving_distance_z1z2(self, z1, z2):
+        """ Comoving line-of-sight distance in Mpc between objects at
+        redshifts z1 and z2.
+
+        The comoving distance along the line-of-sight between two
+        objects remains constant with time for objects in the Hubble
+        flow.
+
+        Parameters
+        ----------
+        z1, z2 : array_like, shape (N,)
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1228,7 +1261,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1255,7 +1288,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z1, z2 : array-like, shape (N,)
+        z1, z2 : array_like, shape (N,)
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1293,7 +1326,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1316,7 +1349,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1344,7 +1377,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z1, z2 : array-like, shape (N,)
+        z1, z2 : array_like, shape (N,)
           Input redshifts. z2 must be large than z1.
 
         Returns
@@ -1368,7 +1401,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1394,7 +1427,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1424,7 +1457,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1460,7 +1493,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -1469,10 +1502,8 @@ class FLRW(Cosmology):
           Differential comoving volume per redshift per steradian at
           each input redshift."""
         dh = self._hubble_distance
-        da = self.angular_diameter_distance(z)
-        zp1 = 1.0 + z
-        return dh * ((zp1 * da) ** 2.0) / u.Quantity(self.efunc(z),
-                                                          u.steradian)
+        dm = self.comoving_transverse_distance(z)
+        return dh * (dm ** 2.0) / u.Quantity(self.efunc(z), u.steradian)
 
     def kpc_comoving_per_arcmin(self, z):
         """ Separation in transverse comoving kpc corresponding to an
@@ -1480,7 +1511,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1498,7 +1529,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1516,7 +1547,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1534,7 +1565,7 @@ class FLRW(Cosmology):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.  Must be 1D or scalar.
 
         Returns
@@ -1568,7 +1599,7 @@ class LambdaCDM(FLRW):
 
     Tcmb0 : float or scalar `~astropy.units.Quantity`, optional
         Temperature of the CMB z=0. If a float, must be in [K].
-        Default: 2.725 [K]. Setting this to zero will turn off both photons
+        Default: 0 [K]. Setting this to zero will turn off both photons
         and neutrinos (even massive ones).
 
     Neff : float, optional
@@ -1601,7 +1632,7 @@ class LambdaCDM(FLRW):
     >>> dc = cosmo.comoving_distance(z)
     """
 
-    def __init__(self, H0, Om0, Ode0, Tcmb0=2.725, Neff=3.04,
+    def __init__(self, H0, Om0, Ode0, Tcmb0=0, Neff=3.04,
                  m_nu=u.Quantity(0.0, u.eV), Ob0=None, name=None):
 
         FLRW.__init__(self, H0, Om0, Ode0, Tcmb0, Neff, m_nu, name=name,
@@ -1612,6 +1643,11 @@ class LambdaCDM(FLRW):
         if self._Tcmb0.value == 0:
             self._inv_efunc_scalar = scalar_inv_efuncs.lcdm_inv_efunc_norel
             self._inv_efunc_scalar_args = (self._Om0, self._Ode0, self._Ok0)
+            if self._Ok0 == 0:
+                self._optimize_flat_norad()
+            else:
+                self._comoving_distance_z1z2 = \
+                    self._elliptic_comoving_distance_z1z2
         elif not self._massivenu:
             self._inv_efunc_scalar = scalar_inv_efuncs.lcdm_inv_efunc_nomnu
             self._inv_efunc_scalar_args = (self._Om0, self._Ode0, self._Ok0,
@@ -1623,12 +1659,35 @@ class LambdaCDM(FLRW):
                                            self._nmasslessnu,
                                            self._nu_y_list)
 
+    def _optimize_flat_norad(self):
+        """Set optimizations for flat LCDM cosmologies with no radiation.
+        """
+        # Call out the Om0=0 (de Sitter) and Om0=1 (Einstein-de Sitter)
+        # The dS case is required because the hypergeometric case
+        #    for Omega_M=0 would lead to an infinity in its argument.
+        # The EdS case is three times faster than the hypergeometric.
+        if self._Om0 == 0:
+            self._comoving_distance_z1z2 = \
+                self._dS_comoving_distance_z1z2
+            self._age = self._dS_age
+            self._lookback_time = self._dS_lookback_time
+        elif self._Om0 == 1:
+            self._comoving_distance_z1z2 = \
+                self._EdS_comoving_distance_z1z2
+            self._age = self._EdS_age
+            self._lookback_time = self._EdS_lookback_time
+        else:
+            self._comoving_distance_z1z2 = \
+                self._hypergeometric_comoving_distance_z1z2
+            self._age = self._flat_age
+            self._lookback_time = self._flat_lookback_time
+
     def w(self, z):
         """Returns dark energy equation of state at redshift ``z``.
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -1648,14 +1707,14 @@ class LambdaCDM(FLRW):
         if np.isscalar(z):
             return -1.0
         else:
-            return -1.0 * np.ones(np.asanyarray(z).shape, dtype=np.float)
+            return -1.0 * np.ones(np.asanyarray(z).shape)
 
     def de_density_scale(self, z):
         """ Evaluates the redshift dependence of the dark energy density.
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -1672,14 +1731,335 @@ class LambdaCDM(FLRW):
         if np.isscalar(z):
             return 1.
         else:
-            return np.ones(np.asanyarray(z).shape, dtype=np.float)
+            return np.ones(np.asanyarray(z).shape)
+
+    def _elliptic_comoving_distance_z1z2(self, z1, z2):
+        """ Comoving transverse distance in Mpc between two redshifts.
+
+        This value is the transverse comoving distance at redshift ``z``
+        corresponding to an angular separation of 1 radian. This is
+        the same as the comoving distance if omega_k is zero.
+
+        For Omega_rad = 0 the comoving distance can be directly calculated
+        as an elliptic integral.
+        Equation here taken from Kantowski, Kao, and Thomas, arXiv:0002334
+
+        Not valid or appropriate for flat cosmologies (Ok0=0).
+
+        Parameters
+        ----------
+        z1, z2 : array_like
+          Input redshifts.
+
+        Returns
+        -------
+        d : `~astropy.units.Quantity`
+          Comoving distance in Mpc between each input redshift.
+        """
+        from scipy.special import ellipkinc
+        if isiterable(z1):
+            z1 = np.asarray(z1)
+        if isiterable(z2):
+            z2 = np.asarray(z2)
+        if isiterable(z1) and isiterable(z2):
+            if z1.shape != z2.shape:
+                msg = "z1 and z2 have different shapes"
+                raise ValueError(msg)
+
+        # The analytic solution is not valid for any of Om0, Ode0, Ok0 == 0.
+        # Use the explicit integral solution for these cases.
+        if self._Om0 == 0 or self._Ode0 == 0 or self._Ok0 == 0:
+            return self._integral_comoving_distance_z1z2(z1, z2)
+
+        b = -(27. / 2) * self._Om0**2 * self._Ode0 / self._Ok0**3
+        kappa = b / abs(b)
+        if (b < 0) or (2 < b):
+            def phi_z(Om0, Ok0, kappa, y1, A, z):
+                return np.arccos(((1 + z) * Om0 / abs(Ok0) + kappa * y1 - A) /
+                                 ((1 + z) * Om0 / abs(Ok0) + kappa * y1 + A))
+
+            v_k = pow(kappa * (b - 1) + sqrt(b * (b - 2)), 1. / 3)
+            y1 = (-1 + kappa * (v_k + 1 / v_k)) / 3
+            A = sqrt(y1 * (3 * y1 + 2))
+            g = 1 / sqrt(A)
+            k2 = (2 * A + kappa * (1 + 3 * y1)) / (4 * A)
+
+            phi_z1 = phi_z(self._Om0, self._Ok0, kappa, y1, A, z1)
+            phi_z2 = phi_z(self._Om0, self._Ok0, kappa, y1, A, z2)
+        # Get lower-right 0<b<2 solution in Om0, Ode0 plane.
+        # Fot the upper-left 0<b<2 solution the Big Bang didn't happen.
+        elif (0 < b) and (b < 2) and self._Om0 > self._Ode0:
+            def phi_z(Om0, Ok0, y1, y2, z):
+                return np.arcsin(np.sqrt((y1 - y2) /
+                                         ((1 + z) * Om0 / abs(Ok0) + y1)))
+
+            yb = cos(acos(1 - b) / 3)
+            yc = sqrt(3) * sin(acos(1 - b) / 3)
+            y1 = (1. / 3) * (-1 + yb + yc)
+            y2 = (1. / 3) * (-1 - 2 * yb)
+            y3 = (1. / 3) * (-1 + yb - yc)
+            g = 2 / sqrt(y1 - y2)
+            k2 = (y1 - y3) / (y1 - y2)
+            phi_z1 = phi_z(self._Om0, self._Ok0, y1, y2, z1)
+            phi_z2 = phi_z(self._Om0, self._Ok0, y1, y2, z2)
+        else:
+            return self._integral_comoving_distance_z1z2(z1, z2)
+
+        prefactor = self._hubble_distance / sqrt(abs(self._Ok0))
+        return prefactor * g * (ellipkinc(phi_z1, k2) - ellipkinc(phi_z2, k2))
+
+    def _dS_comoving_distance_z1z2(self, z1, z2):
+        """ Comoving line-of-sight distance in Mpc between objects at redshifts
+        z1 and z2 in a flat, Omega_Lambda=1 cosmology (de Sitter).
+
+        The comoving distance along the line-of-sight between two
+        objects remains constant with time for objects in the Hubble
+        flow.
+
+        The de Sitter case has an analytic solution.
+
+        Parameters
+        ----------
+        z1, z2 : array_like, shape (N,)
+          Input redshifts.  Must be 1D or scalar.
+
+        Returns
+        -------
+        d : `~astropy.units.Quantity`
+          Comoving distance in Mpc between each input redshift.
+        """
+        if isiterable(z1):
+            z1 = np.asarray(z1)
+            z2 = np.asarray(z2)
+            if z1.shape != z2.shape:
+                msg = "z1 and z2 have different shapes"
+                raise ValueError(msg)
+
+        return self._hubble_distance * (z2 - z1)
+
+    def _EdS_comoving_distance_z1z2(self, z1, z2):
+        """ Comoving line-of-sight distance in Mpc between objects at redshifts
+        z1 and z2 in a flat, Omega_M=1 cosmology (Einstein - de Sitter).
+
+        The comoving distance along the line-of-sight between two
+        objects remains constant with time for objects in the Hubble
+        flow.
+
+        For OM=1, Omega_rad=0 the comoving distance has an analytic solution.
+
+        Parameters
+        ----------
+        z1, z2 : array_like, shape (N,)
+          Input redshifts.  Must be 1D or scalar.
+
+        Returns
+        -------
+        d : `~astropy.units.Quantity`
+          Comoving distance in Mpc between each input redshift.
+        """
+        if isiterable(z1):
+            z1 = np.asarray(z1)
+            z2 = np.asarray(z2)
+            if z1.shape != z2.shape:
+                msg = "z1 and z2 have different shapes"
+                raise ValueError(msg)
+
+        prefactor = 2 * self._hubble_distance
+        return prefactor * ((1+z1)**(-1./2) - (1+z2)**(-1./2))
+
+    def _hypergeometric_comoving_distance_z1z2(self, z1, z2):
+        """ Comoving line-of-sight distance in Mpc between objects at
+        redshifts z1 and z2.
+
+        The comoving distance along the line-of-sight between two
+        objects remains constant with time for objects in the Hubble
+        flow.
+
+        For Omega_radiation = 0 the comoving distance can be directly calculated
+        as a hypergeometric function.
+
+        Equation here taken from Baes, Camps, Van De Putte, 2017, MNRAS, 468, 927.
+
+        Parameters
+        ----------
+        z1, z2 : array_like
+          Input redshifts.
+
+        Returns
+        -------
+        d : `~astropy.units.Quantity`
+          Comoving distance in Mpc between each input redshift.
+        """
+        if isiterable(z1):
+            z1 = np.asarray(z1)
+            z2 = np.asarray(z2)
+            if z1.shape != z2.shape:
+                msg = "z1 and z2 have different shapes"
+                raise ValueError(msg)
+
+        s = ((1 - self._Om0) / self._Om0) ** (1./3)
+        # Use np.sqrt here to handle negative s (Om0>1).
+        prefactor = self._hubble_distance / np.sqrt(s * self._Om0)
+        return prefactor * (self._T_hypergeometric(s / (1 + z1)) -
+                            self._T_hypergeometric(s / (1 + z2)))
+
+    def _T_hypergeometric(self, x):
+        """ Compute T_hypergeometric(x) using Gauss Hypergeometric function 2F1
+
+        T(x) = 2 \\sqrt(x) _{2}F_{1} \\left(\\frac{1}{6}, \\frac{1}{2}; \\frac{7}{6}; -x^3)
+
+        Note:
+        The scipy.special.hyp2f1 code already implements the hypergeometric
+        transformation suggested by Baes, Camps, Van De Putte, 2017, MNRAS, 468, 927.
+        for use in actual numerical evaulations.
+
+        """
+        from scipy.special import hyp2f1
+        return 2 * np.sqrt(x) * hyp2f1(1./6, 1./2, 7./6, -x**3)
+
+    def _dS_age(self, z):
+        """ Age of the universe in Gyr at redshift ``z``.
+
+        The age of a de Sitter Universe is infinite.
+
+        Parameters
+        ----------
+        z : array_like
+          Input redshifts.
+
+        Returns
+        -------
+        t : `~astropy.units.Quantity`
+          The age of the universe in Gyr at each input redshift.
+        """
+        return self._hubble_time * inf_like(z)
+
+    def _EdS_age(self, z):
+        """ Age of the universe in Gyr at redshift ``z``.
+
+        For Omega_radiation = 0 (T_CMB = 0; massless neutrinos)
+        the age can be directly calculated as an elliptic integral.
+        See, e.g., Thomas and Kantowski, arXiv:0003463
+
+        Parameters
+        ----------
+        z : array_like
+          Input redshifts.
+
+        Returns
+        -------
+        t : `~astropy.units.Quantity`
+          The age of the universe in Gyr at each input redshift.
+        """
+        if isiterable(z):
+            z = np.asarray(z)
+
+        return (2./3) * self._hubble_time * (1+z)**(-3./2)
+
+    def _flat_age(self, z):
+        """ Age of the universe in Gyr at redshift ``z``.
+
+        For Omega_radiation = 0 (T_CMB = 0; massless neutrinos)
+        the age can be directly calculated as an elliptic integral.
+        See, e.g., Thomas and Kantowski, arXiv:0003463
+
+        Parameters
+        ----------
+        z : array_like
+          Input redshifts.
+
+        Returns
+        -------
+        t : `~astropy.units.Quantity`
+          The age of the universe in Gyr at each input redshift.
+        """
+        if isiterable(z):
+            z = np.asarray(z)
+
+        # Use np.sqrt, np.arcsinh instead of math.sqrt, math.asinh
+        # to handle properly the complex numbers for 1 - Om0 < 0
+        prefactor = (2./3) * self._hubble_time / \
+            np.lib.scimath.sqrt(1 - self._Om0)
+        arg = np.arcsinh(np.lib.scimath.sqrt((1 / self._Om0 - 1 + 0j) /
+                                             (1 + z)**3))
+        return (prefactor * arg).real
+
+    def _EdS_lookback_time(self, z):
+        """ Lookback time in Gyr to redshift ``z``.
+
+        The lookback time is the difference between the age of the
+        Universe now and the age at redshift ``z``.
+
+        For Omega_radiation = 0 (T_CMB = 0; massless neutrinos)
+        the age can be directly calculated as an elliptic integral.
+        The lookback time is here calculated based on the age(0) - age(z)
+
+        Parameters
+        ----------
+        z : array_like
+          Input redshifts.  Must be 1D or scalar
+
+        Returns
+        -------
+        t : `~astropy.units.Quantity`
+          Lookback time in Gyr to each input redshift.
+        """
+        return self._EdS_age(0) - self._EdS_age(z)
+
+    def _dS_lookback_time(self, z):
+        """ Lookback time in Gyr to redshift ``z``.
+
+        The lookback time is the difference between the age of the
+        Universe now and the age at redshift ``z``.
+
+        For Omega_radiation = 0 (T_CMB = 0; massless neutrinos)
+        the age can be directly calculated.
+        a = exp(H * t)   where t=0 at z=0
+        t = (1/H) (ln 1 - ln a) = (1/H) (0 - ln (1/(1+z))) = (1/H) ln(1+z)
+
+        Parameters
+        ----------
+        z : array_like
+          Input redshifts.
+
+        Returns
+        -------
+        t : `~astropy.units.Quantity`
+          Lookback time in Gyr to each input redshift.
+        """
+        if isiterable(z):
+            z = np.asarray(z)
+
+        return self._hubble_time * np.log(1+z)
+
+    def _flat_lookback_time(self, z):
+        """ Lookback time in Gyr to redshift ``z``.
+
+        The lookback time is the difference between the age of the
+        Universe now and the age at redshift ``z``.
+
+        For Omega_radiation = 0 (T_CMB = 0; massless neutrinos)
+        the age can be directly calculated.
+        The lookback time is here calculated based on the age(0) - age(z)
+
+        Parameters
+        ----------
+        z : array_like
+          Input redshifts.  Must be 1D or scalar
+
+        Returns
+        -------
+        t : `~astropy.units.Quantity`
+          Lookback time in Gyr to each input redshift.
+        """
+        return self._flat_age(0) - self._flat_age(z)
 
     def efunc(self, z):
         """ Function used to calculate H(z), the Hubble parameter.
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -1711,7 +2091,7 @@ class LambdaCDM(FLRW):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -1753,7 +2133,7 @@ class FlatLambdaCDM(LambdaCDM):
 
     Tcmb0 : float or scalar `~astropy.units.Quantity`, optional
         Temperature of the CMB z=0. If a float, must be in [K].
-        Default: 2.725 [K]. Setting this to zero will turn off both photons
+        Default: 0 [K]. Setting this to zero will turn off both photons
         and neutrinos (even massive ones).
 
     Neff : float, optional
@@ -1786,7 +2166,7 @@ class FlatLambdaCDM(LambdaCDM):
     >>> dc = cosmo.comoving_distance(z)
     """
 
-    def __init__(self, H0, Om0, Tcmb0=2.725, Neff=3.04,
+    def __init__(self, H0, Om0, Tcmb0=0, Neff=3.04,
                  m_nu=u.Quantity(0.0, u.eV), Ob0=None, name=None):
 
         LambdaCDM.__init__(self, H0, Om0, 0.0, Tcmb0, Neff, m_nu, name=name,
@@ -1800,6 +2180,10 @@ class FlatLambdaCDM(LambdaCDM):
         if self._Tcmb0.value == 0:
             self._inv_efunc_scalar = scalar_inv_efuncs.flcdm_inv_efunc_norel
             self._inv_efunc_scalar_args = (self._Om0, self._Ode0)
+            # Repeat the optimization reassignments here because the init
+            # of the LambaCDM above didn't actually create a flat cosmology.
+            # That was done through the explicit tweak setting self._Ok0.
+            self._optimize_flat_norad()
         elif not self._massivenu:
             self._inv_efunc_scalar = scalar_inv_efuncs.flcdm_inv_efunc_nomnu
             self._inv_efunc_scalar_args = (self._Om0, self._Ode0,
@@ -1816,7 +2200,7 @@ class FlatLambdaCDM(LambdaCDM):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -1848,7 +2232,7 @@ class FlatLambdaCDM(LambdaCDM):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -1906,7 +2290,7 @@ class wCDM(FLRW):
 
     Tcmb0 : float or scalar `~astropy.units.Quantity`, optional
         Temperature of the CMB z=0. If a float, must be in [K].
-        Default: 2.725 [K]. Setting this to zero will turn off both photons
+        Default: 0 [K]. Setting this to zero will turn off both photons
         and neutrinos (even massive ones).
 
     Neff : float, optional
@@ -1939,7 +2323,7 @@ class wCDM(FLRW):
     >>> dc = cosmo.comoving_distance(z)
     """
 
-    def __init__(self, H0, Om0, Ode0, w0=-1., Tcmb0=2.725,
+    def __init__(self, H0, Om0, Ode0, w0=-1., Tcmb0=0,
                  Neff=3.04, m_nu=u.Quantity(0.0, u.eV), Ob0=None, name=None):
 
         FLRW.__init__(self, H0, Om0, Ode0, Tcmb0, Neff, m_nu, name=name,
@@ -1974,7 +2358,7 @@ class wCDM(FLRW):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -1994,14 +2378,14 @@ class wCDM(FLRW):
         if np.isscalar(z):
             return self._w0
         else:
-            return self._w0 * np.ones(np.asanyarray(z).shape, dtype=np.float)
+            return self._w0 * np.ones(np.asanyarray(z).shape)
 
     def de_density_scale(self, z):
         """ Evaluates the redshift dependence of the dark energy density.
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -2025,7 +2409,7 @@ class wCDM(FLRW):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -2055,7 +2439,7 @@ class wCDM(FLRW):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -2111,7 +2495,7 @@ class FlatwCDM(wCDM):
 
     Tcmb0 : float or scalar `~astropy.units.Quantity`, optional
         Temperature of the CMB z=0. If a float, must be in [K].
-        Default: 2.725 [K]. Setting this to zero will turn off both photons
+        Default: 0 [K]. Setting this to zero will turn off both photons
         and neutrinos (even massive ones).
 
     Neff : float, optional
@@ -2144,7 +2528,7 @@ class FlatwCDM(wCDM):
     >>> dc = cosmo.comoving_distance(z)
     """
 
-    def __init__(self, H0, Om0, w0=-1., Tcmb0=2.725,
+    def __init__(self, H0, Om0, w0=-1., Tcmb0=0,
                  Neff=3.04, m_nu=u.Quantity(0.0, u.eV), Ob0=None, name=None):
 
         wCDM.__init__(self, H0, Om0, 0.0, w0, Tcmb0, Neff, m_nu,
@@ -2176,7 +2560,7 @@ class FlatwCDM(wCDM):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -2206,7 +2590,7 @@ class FlatwCDM(wCDM):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -2237,6 +2621,7 @@ class FlatwCDM(wCDM):
         return retstr.format(self._namelead(), self._H0, self._Om0, self._w0,
                              self._Tcmb0, self._Neff, self.m_nu,
                              _float_or_none(self._Ob0))
+
 
 class w0waCDM(FLRW):
     """FLRW cosmology with a CPL dark energy equation of state and curvature.
@@ -2269,7 +2654,7 @@ class w0waCDM(FLRW):
 
     Tcmb0 : float or scalar `~astropy.units.Quantity`, optional
         Temperature of the CMB z=0. If a float, must be in [K].
-        Default: 2.725 [K]. Setting this to zero will turn off both photons
+        Default: 0 [K]. Setting this to zero will turn off both photons
         and neutrinos (even massive ones).
 
     Neff : float, optional
@@ -2302,7 +2687,7 @@ class w0waCDM(FLRW):
     >>> dc = cosmo.comoving_distance(z)
     """
 
-    def __init__(self, H0, Om0, Ode0, w0=-1., wa=0., Tcmb0=2.725,
+    def __init__(self, H0, Om0, Ode0, w0=-1., wa=0., Tcmb0=0,
                  Neff=3.04, m_nu=u.Quantity(0.0, u.eV), Ob0=None, name=None):
 
         FLRW.__init__(self, H0, Om0, Ode0, Tcmb0, Neff, m_nu, name=name,
@@ -2344,7 +2729,7 @@ class w0waCDM(FLRW):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -2367,11 +2752,11 @@ class w0waCDM(FLRW):
         return self._w0 + self._wa * z / (1.0 + z)
 
     def de_density_scale(self, z):
-        """ Evaluates the redshift dependence of the dark energy density.
+        r""" Evaluates the redshift dependence of the dark energy density.
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -2386,8 +2771,8 @@ class w0waCDM(FLRW):
 
         .. math::
 
-          I = \\left(1 + z\\right)^{3 \\left(1 + w_0 + w_a\\right)}
-          \exp \\left(-3 w_a \\frac{z}{1+z}\\right)
+          I = \left(1 + z\right)^{3 \left(1 + w_0 + w_a\right)}
+          \exp \left(-3 w_a \frac{z}{1+z}\right)
 
         """
         if isiterable(z):
@@ -2435,7 +2820,7 @@ class Flatw0waCDM(w0waCDM):
 
     Tcmb0 : float or scalar `~astropy.units.Quantity`, optional
         Temperature of the CMB z=0. If a float, must be in [K].
-        Default: 2.725 [K]. Setting this to zero will turn off both photons
+        Default: 0 [K]. Setting this to zero will turn off both photons
         and neutrinos (even massive ones).
 
     Neff : float, optional
@@ -2468,7 +2853,7 @@ class Flatw0waCDM(w0waCDM):
     >>> dc = cosmo.comoving_distance(z)
     """
 
-    def __init__(self, H0, Om0, w0=-1., wa=0., Tcmb0=2.725,
+    def __init__(self, H0, Om0, w0=-1., wa=0., Tcmb0=0,
                  Neff=3.04, m_nu=u.Quantity(0.0, u.eV), Ob0=None, name=None):
 
         w0waCDM.__init__(self, H0, Om0, 0.0, w0=w0, wa=wa, Tcmb0=Tcmb0,
@@ -2543,7 +2928,7 @@ class wpwaCDM(FLRW):
 
     Tcmb0 : float or scalar `~astropy.units.Quantity`, optional
         Temperature of the CMB z=0. If a float, must be in [K].
-        Default: 2.725 [K]. Setting this to zero will turn off both photons
+        Default: 0 [K]. Setting this to zero will turn off both photons
         and neutrinos (even massive ones).
 
     Neff : float, optional
@@ -2577,7 +2962,7 @@ class wpwaCDM(FLRW):
     """
 
     def __init__(self, H0, Om0, Ode0, wp=-1., wa=0., zp=0,
-                 Tcmb0=2.725, Neff=3.04, m_nu=u.Quantity(0.0, u.eV),
+                 Tcmb0=0, Neff=3.04, m_nu=u.Quantity(0.0, u.eV),
                  Ob0=None, name=None):
 
         FLRW.__init__(self, H0, Om0, Ode0, Tcmb0, Neff, m_nu, name=name,
@@ -2626,7 +3011,7 @@ class wpwaCDM(FLRW):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -2651,11 +3036,11 @@ class wpwaCDM(FLRW):
         return self._wp + self._wa * (apiv - 1.0 / (1. + z))
 
     def de_density_scale(self, z):
-        """ Evaluates the redshift dependence of the dark energy density.
+        r""" Evaluates the redshift dependence of the dark energy density.
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -2670,10 +3055,10 @@ class wpwaCDM(FLRW):
 
         .. math::
 
-          a_p = \\frac{1}{1 + z_p}
+          a_p = \frac{1}{1 + z_p}
 
-          I = \\left(1 + z\\right)^{3 \\left(1 + w_p + a_p w_a\\right)}
-          \exp \\left(-3 w_a \\frac{z}{1+z}\\right)
+          I = \left(1 + z\right)^{3 \left(1 + w_p + a_p w_a\right)}
+          \exp \left(-3 w_a \frac{z}{1+z}\right)
         """
 
         if isiterable(z):
@@ -2726,7 +3111,7 @@ class w0wzCDM(FLRW):
 
     Tcmb0 : float or scalar `~astropy.units.Quantity`, optional
         Temperature of the CMB z=0. If a float, must be in [K].
-        Default: 2.725 [K]. Setting this to zero will turn off both photons
+        Default: 0 [K]. Setting this to zero will turn off both photons
         and neutrinos (even massive ones).
 
     Neff : float, optional
@@ -2759,7 +3144,7 @@ class w0wzCDM(FLRW):
     >>> dc = cosmo.comoving_distance(z)
     """
 
-    def __init__(self, H0, Om0, Ode0, w0=-1., wz=0., Tcmb0=2.725,
+    def __init__(self, H0, Om0, Ode0, w0=-1., wz=0., Tcmb0=0,
                  Neff=3.04, m_nu=u.Quantity(0.0, u.eV), Ob0=None,
                  name=None):
 
@@ -2802,7 +3187,7 @@ class w0wzCDM(FLRW):
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -2825,11 +3210,11 @@ class w0wzCDM(FLRW):
         return self._w0 + self._wz * z
 
     def de_density_scale(self, z):
-        """ Evaluates the redshift dependence of the dark energy density.
+        r""" Evaluates the redshift dependence of the dark energy density.
 
         Parameters
         ----------
-        z : array-like
+        z : array_like
           Input redshifts.
 
         Returns
@@ -2844,8 +3229,8 @@ class w0wzCDM(FLRW):
 
         .. math::
 
-          I = \\left(1 + z\\right)^{3 \\left(1 + w_0 - w_z\\right)}
-          \exp \\left(-3 w_z z\\right)
+          I = \left(1 + z\right)^{3 \left(1 + w_0 - w_z\right)}
+          \exp \left(-3 w_z z\right)
         """
 
         if isiterable(z):
@@ -2879,6 +3264,27 @@ def vectorize_if_needed(func, *x):
         return func(*x)
 
 
+def inf_like(x):
+    """Return the shape of x with value infinity and dtype='float'.
+
+    Preserves 'shape' for both array and scalar inputs.
+    But always returns a float array, even if x is of integer type.
+
+    >>> inf_like(0.)  # float scalar
+    inf
+    >>> inf_like(1)  # integer scalar should give float output
+    inf
+    >>> inf_like([0., 1., 2., 3.])  # float list
+    array([inf, inf, inf, inf])
+    >>> inf_like([0, 1, 2, 3])  # integer list should give float output
+    array([inf, inf, inf, inf])
+    """
+    if np.isscalar(x):
+        return np.inf
+    else:
+        return np.full_like(x, np.inf, dtype='float')
+
+
 # Pre-defined cosmologies. This loops over the parameter sets in the
 # parameters module and creates a LambdaCDM or FlatLambdaCDM instance
 # with the same name as the parameter set in the current module's namespace.
@@ -2893,15 +3299,15 @@ for key in parameters.available:
                               m_nu=u.Quantity(par['m_nu'], u.eV),
                               name=key,
                               Ob0=par['Ob0'])
-        docstr = "%s instance of FlatLambdaCDM cosmology\n\n(from %s)"
-        cosmo.__doc__ = docstr % (key, par['reference'])
+        docstr = "{} instance of FlatLambdaCDM cosmology\n\n(from {})"
+        cosmo.__doc__ = docstr.format(key, par['reference'])
     else:
         cosmo = LambdaCDM(par['H0'], par['Om0'], par['Ode0'],
                           Tcmb0=par['Tcmb0'], Neff=par['Neff'],
                           m_nu=u.Quantity(par['m_nu'], u.eV), name=key,
                           Ob0=par['Ob0'])
-        docstr = "%s instance of LambdaCDM cosmology\n\n(from %s)"
-        cosmo.__doc__ = docstr % (key, par['reference'])
+        docstr = "{} instance of LambdaCDM cosmology\n\n(from {})"
+        cosmo.__doc__ = docstr.format(key, par['reference'])
     setattr(sys.modules[__name__], key, cosmo)
 
 # don't leave these variables floating around in the namespace
@@ -2919,13 +3325,15 @@ class default_cosmology(ScienceState):
         >>> from astropy.cosmology import default_cosmology, WMAP7
         >>> with default_cosmology.set(WMAP7):
         ...     # WMAP7 cosmology in effect
+        ...     pass
 
     Or, you may use a string::
 
         >>> with default_cosmology.set('WMAP7'):
         ...     # WMAP7 cosmology in effect
+        ...     pass
     """
-    _value = 'WMAP9'
+    _value = 'Planck15'
 
     @staticmethod
     def get_cosmology_from_string(arg):
@@ -2937,7 +3345,7 @@ class default_cosmology(ScienceState):
             try:
                 cosmo = getattr(sys.modules[__name__], arg)
             except AttributeError:
-                s = "Unknown cosmology '%s'. Valid cosmologies:\n%s" % (
+                s = "Unknown cosmology '{}'. Valid cosmologies:\n{}".format(
                     arg, parameters.available)
                 raise ValueError(s)
         return cosmo
@@ -2945,8 +3353,8 @@ class default_cosmology(ScienceState):
     @classmethod
     def validate(cls, value):
         if value is None:
-            value = 'WMAP9'
-        if isinstance(value, six.string_types):
+            value = 'Planck15'
+        if isinstance(value, str):
             return cls.get_cosmology_from_string(value)
         elif isinstance(value, Cosmology):
             return value

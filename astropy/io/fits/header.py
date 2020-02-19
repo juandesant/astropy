@@ -1,23 +1,20 @@
 # Licensed under a 3-clause BSD style license - see PYFITS.rst
 
-from __future__ import division
-
 import collections
 import copy
 import itertools
 import re
 import warnings
 
-from .card import Card, CardList, _pad, KEYWORD_LENGTH
+from .card import Card, _pad, KEYWORD_LENGTH, UNDEFINED
 from .file import _File
 from .util import (encode_ascii, decode_ascii, fileobj_closed,
-                   fileobj_is_binary)
+                   fileobj_is_binary, path_like)
+from ._utils import parse_header
 
-from ...extern import six
-from ...extern.six import string_types, itervalues, iteritems, next
-from ...extern.six.moves import zip, range, zip_longest
-from ...utils import deprecated, isiterable
-from ...utils.exceptions import AstropyUserWarning, AstropyDeprecationWarning
+from astropy.utils import isiterable
+from astropy.utils.exceptions import AstropyUserWarning
+from astropy.utils.decorators import deprecated_renamed_argument
 
 
 BLOCK_SIZE = 2880  # the FITS block size
@@ -34,14 +31,15 @@ HEADER_END_RE = re.compile(encode_ascii(
 
 # According to the FITS standard the only characters that may appear in a
 # header record are the restricted ASCII chars from 0x20 through 0x7E.
-VALID_HEADER_CHARS = set(chr(x) for x in range(0x20, 0x7F))
+VALID_HEADER_CHARS = set(map(chr, range(0x20, 0x7F)))
 END_CARD = 'END' + ' ' * 77
 
 
-__doctest_skip__ = ['Header', 'Header.*']
+__doctest_skip__ = ['Header', 'Header.comments', 'Header.fromtextfile',
+                    'Header.totextfile', 'Header.set', 'Header.update']
 
 
-class Header(object):
+class Header:
     """
     FITS header class.  This class exposes both a dict-like interface and a
     list-like interface to FITS headers.
@@ -77,7 +75,7 @@ class Header(object):
     See the Astropy documentation for more details on working with headers.
     """
 
-    def __init__(self, cards=[], txtfile=None):
+    def __init__(self, cards=[], copy=False):
         """
         Construct a `Header` from an iterable and/or text file.
 
@@ -87,27 +85,25 @@ class Header(object):
             The cards to initialize the header with. Also allowed are other
             `Header` (or `dict`-like) objects.
 
-        txtfile : file path, file object or file-like object, optional
-            Input ASCII header parameters file **(Deprecated)**
-            Use the Header.fromfile classmethod instead.
-        """
+            .. versionchanged:: 1.2
+                Allowed ``cards`` to be a `dict`-like object.
 
+        copy : bool, optional
+
+            If ``True`` copies the ``cards`` if they were another `Header`
+            instance.
+            Default is ``False``.
+
+            .. versionadded:: 1.3
+        """
         self.clear()
 
-        if txtfile:
-            warnings.warn(
-                'The txtfile argument is deprecated.  Use Header.fromfile to '
-                'create a new Header object from a text file.',
-                AstropyDeprecationWarning)
-            # get the cards from the input ASCII file
-            self.update(self.fromfile(txtfile))
-            self._modified = False
-            return
-
         if isinstance(cards, Header):
+            if copy:
+                cards = cards.copy()
             cards = cards.cards
         elif isinstance(cards, dict):
-            cards = six.iteritems(cards)
+            cards = cards.items()
 
         for card in cards:
             self.append(card, end=True)
@@ -136,11 +132,11 @@ class Header(object):
 
     def __getitem__(self, key):
         if isinstance(key, slice):
-            return Header([copy.copy(c) for c in self._cards[key]])
+            return self.__class__([copy.copy(c) for c in self._cards[key]])
         elif self._haswildcard(key):
-            return Header([copy.copy(self._cards[idx])
-                           for idx in self._wildcardmatch(key)])
-        elif (isinstance(key, string_types) and
+            return self.__class__([copy.copy(self._cards[idx])
+                                   for idx in self._wildcardmatch(key)])
+        elif (isinstance(key, str) and
               key.upper() in Card._commentary_keywords):
             key = key.upper()
             # Special case for commentary cards
@@ -154,7 +150,11 @@ class Header(object):
             # This is RVKC; if only the top-level keyword was specified return
             # the raw value, not the parsed out float value
             return card.rawvalue
-        return card.value
+
+        value = card.value
+        if value == UNDEFINED:
+            return None
+        return value
 
     def __setitem__(self, key, value):
         if self._set_slice(key, value, self):
@@ -169,11 +169,11 @@ class Header(object):
             if len(value) == 1:
                 value, comment = value[0], None
                 if value is None:
-                    value = ''
+                    value = UNDEFINED
             elif len(value) == 2:
                 value, comment = value
                 if value is None:
-                    value = ''
+                    value = UNDEFINED
                 if comment is None:
                     comment = ''
         else:
@@ -184,6 +184,8 @@ class Header(object):
             card = self._cards[key]
         elif isinstance(key, tuple):
             card = self._cards[self._cardindex(key)]
+        if value is None:
+            value = UNDEFINED
         if card:
             card.value = value
             if comment is not None:
@@ -214,7 +216,7 @@ class Header(object):
             for idx in reversed(indices):
                 del self[idx]
             return
-        elif isinstance(key, string_types):
+        elif isinstance(key, str):
             # delete ALL cards with the same keyword name
             key = Card.normalize_keyword(key)
             indices = self._keyword_indices
@@ -225,7 +227,7 @@ class Header(object):
                 # if keyword is not present raise KeyError.
                 # To delete keyword without caring if they were present,
                 # Header.remove(Keyword) can be used with optional argument ignore_missing as True
-                raise KeyError("Keyword '%s' not found." % key)
+                raise KeyError(f"Keyword '{key}' not found.")
 
             for idx in reversed(indices[key]):
                 # Have to copy the indices list since it will be modified below
@@ -236,6 +238,7 @@ class Header(object):
         card = self._cards[idx]
         keyword = card.keyword
         del self._cards[idx]
+        keyword = Card.normalize_keyword(keyword)
         indices = self._keyword_indices[keyword]
         indices.remove(idx)
         if not indices:
@@ -247,7 +250,6 @@ class Header(object):
             indices.remove(idx)
             if not indices:
                 del self._rvkc_indices[card.rawkeyword]
-
 
         # We also need to update all other indices
         self._updateindices(idx, increment=False)
@@ -275,6 +277,9 @@ class Header(object):
     def __iadd__(self, other):
         self.extend(other)
         return self
+
+    def _ipython_key_completions_(self):
+        return self.__iter__()
 
     @property
     def cards(self):
@@ -331,13 +336,45 @@ class Header(object):
 
         Parameters
         ----------
-        data : str
-           String containing the entire header.
+        data : str or bytes
+           String or bytes containing the entire header.  In the case of bytes
+           they will be decoded using latin-1 (only plain ASCII characters are
+           allowed in FITS headers but latin-1 allows us to retain any invalid
+           bytes that might appear in malformatted FITS files).
 
         sep : str, optional
             The string separating cards from each other, such as a newline.  By
             default there is no card separator (as is the case in a raw FITS
-            file).
+            file).  In general this is only used in cases where a header was
+            printed as text (e.g. with newlines after each card) and you want
+            to create a new `Header` from it by copy/pasting.
+
+        Examples
+        --------
+
+        >>> from astropy.io.fits import Header
+        >>> hdr = Header({'SIMPLE': True})
+        >>> Header.fromstring(hdr.tostring()) == hdr
+        True
+
+        If you want to create a `Header` from printed text it's not necessary
+        to have the exact binary structure as it would appear in a FITS file,
+        with the full 80 byte card length.  Rather, each "card" can end in a
+        newline and does not have to be padded out to a full card length as
+        long as it "looks like" a FITS header:
+
+        >>> hdr = Header.fromstring(\"\"\"\\
+        ... SIMPLE  =                    T / conforms to FITS standard
+        ... BITPIX  =                    8 / array data type
+        ... NAXIS   =                    0 / number of array dimensions
+        ... EXTEND  =                    T
+        ... \"\"\", sep='\\n')
+        >>> hdr['SIMPLE']
+        True
+        >>> hdr['BITPIX']
+        8
+        >>> len(hdr)
+        4
 
         Returns
         -------
@@ -353,6 +390,23 @@ class Header(object):
         # contains non-valid characters (namely \n) the cards may be split
         # immediately at the separator
         require_full_cardlength = set(sep).issubset(VALID_HEADER_CHARS)
+
+        if isinstance(data, bytes):
+            # FITS supports only ASCII, but decode as latin1 and just take all
+            # bytes for now; if it results in mojibake due to e.g. UTF-8
+            # encoded data in a FITS header that's OK because it shouldn't be
+            # there in the first place--accepting it here still gives us the
+            # opportunity to display warnings later during validation
+            CONTINUE = b'CONTINUE'
+            END = b'END'
+            end_card = END_CARD.encode('ascii')
+            sep = sep.encode('latin1')
+            empty = b''
+        else:
+            CONTINUE = 'CONTINUE'
+            END = 'END'
+            end_card = END_CARD
+            empty = ''
 
         # Split the header into individual cards
         idx = 0
@@ -371,17 +425,17 @@ class Header(object):
             idx = end_idx + len(sep)
 
             if image:
-                if next_image[:8] == 'CONTINUE':
+                if next_image[:8] == CONTINUE:
                     image.append(next_image)
                     continue
-                cards.append(Card.fromstring(''.join(image)))
+                cards.append(Card.fromstring(empty.join(image)))
 
             if require_full_cardlength:
-                if next_image == END_CARD:
+                if next_image == end_card:
                     image = []
                     break
             else:
-                if next_image.split(sep)[0].rstrip() == 'END':
+                if next_image.split(sep)[0].rstrip() == END:
                     image = []
                     break
 
@@ -389,9 +443,9 @@ class Header(object):
 
         # Add the last image that was found before the end, if any
         if image:
-            cards.append(Card.fromstring(''.join(image)))
+            cards.append(Card.fromstring(empty.join(image)))
 
-        return cls(cards)
+        return cls._fromcards(cards)
 
     @classmethod
     def fromfile(cls, fileobj, sep='', endcard=True, padding=True):
@@ -414,7 +468,7 @@ class Header(object):
         endcard : bool, optional
             If True (the default) the header must end with an END card in order
             to be considered valid.  If an END card is not found an
-            `IOError` is raised.
+            `OSError` is raised.
 
         padding : bool, optional
             If True (the default) the header will be required to be padded out
@@ -428,11 +482,20 @@ class Header(object):
         """
 
         close_file = False
-        if isinstance(fileobj, string_types):
-            # Open in text mode by default to support newline handling; if a
-            # binary-mode file object is passed in, the user is on their own
-            # with respect to newline handling
-            fileobj = open(fileobj, 'r')
+
+        if isinstance(fileobj, path_like):
+            # If sep is non-empty we are trying to read a header printed to a
+            # text file, so open in text mode by default to support newline
+            # handling; if a binary-mode file object is passed in, the user is
+            # then on their own w.r.t. newline handling.
+            #
+            # Otherwise assume we are reading from an actual FITS file and open
+            # in binary mode.
+            if sep:
+                fileobj = open(fileobj, 'r', encoding='latin1')
+            else:
+                fileobj = open(fileobj, 'rb')
+
             close_file = True
 
         try:
@@ -452,6 +515,19 @@ class Header(object):
         finally:
             if close_file:
                 fileobj.close()
+
+    @classmethod
+    def _fromcards(cls, cards):
+        header = cls()
+        for idx, card in enumerate(cards):
+            header._cards.append(card)
+            keyword = Card.normalize_keyword(card.keyword)
+            header._keyword_indices[keyword].append(idx)
+            if card.field_specifier is not None:
+                header._rvkc_indices[card.rawkeyword].append(idx)
+
+        header._modified = False
+        return header
 
     @classmethod
     def _from_blocks(cls, block_iter, is_binary, sep, endcard, padding):
@@ -517,37 +593,11 @@ class Header(object):
         if not end_found and is_eof and endcard:
             # TODO: Pass this error to validation framework as an ERROR,
             # rather than raising an exception
-            raise IOError('Header missing END card.')
+            raise OSError('Header missing END card.')
 
         header_str = ''.join(read_blocks)
-
-        # Strip any zero-padding (see ticket #106)
-        if header_str and header_str[-1] == '\0':
-            if is_eof and header_str.strip('\0') == '':
-                # TODO: Pass this warning to validation framework
-                warnings.warn(
-                    'Unexpected extra padding at the end of the file.  This '
-                    'padding may not be preserved when saving changes.',
-                    AstropyUserWarning)
-                raise EOFError()
-            else:
-                # Replace the illegal null bytes with spaces as required by
-                # the FITS standard, and issue a nasty warning
-                # TODO: Pass this warning to validation framework
-                warnings.warn(
-                    'Header block contains null bytes instead of spaces for '
-                    'padding, and is not FITS-compliant. Nulls may be '
-                    'replaced with spaces upon writing.', AstropyUserWarning)
-                header_str.replace('\0', ' ')
-
-        if padding and (len(header_str) % actual_block_size) != 0:
-            # This error message ignores the length of the separator for
-            # now, but maybe it shouldn't?
-            actual_len = len(header_str) - actual_block_size + BLOCK_SIZE
-            # TODO: Pass this error to validation framework
-            raise ValueError(
-                'Header size is not multiple of {0}: {1}'.format(BLOCK_SIZE,
-                                                                 actual_len))
+        _check_padding(header_str, actual_block_size, is_eof,
+                       check_block_size=padding)
 
         return header_str, cls.fromstring(header_str, sep=sep)
 
@@ -576,15 +626,15 @@ class Header(object):
                     trailing = repr(trailing).lstrip('ub')
                     # TODO: Pass this warning up to the validation framework
                     warnings.warn(
-                        'Unexpected bytes trailing END keyword: {0}; these '
+                        'Unexpected bytes trailing END keyword: {}; these '
                         'bytes will be replaced with spaces on write.'.format(
-                        trailing), AstropyUserWarning)
+                            trailing), AstropyUserWarning)
                 else:
                     # TODO: Pass this warning up to the validation framework
                     warnings.warn(
                         'Missing padding to end of the FITS block after the '
                         'END keyword; additional spaces will be appended to '
-                        'the file upon writing to pad out to {0} '
+                        'the file upon writing to pad out to {} '
                         'bytes.'.format(BLOCK_SIZE), AstropyUserWarning)
 
                 # Sanitize out invalid END card now that the appropriate
@@ -641,8 +691,9 @@ class Header(object):
             s += ' ' * _pad_length(len(s))
         return s
 
+    @deprecated_renamed_argument('clobber', 'overwrite', '2.0')
     def tofile(self, fileobj, sep='', endcard=True, padding=True,
-               clobber=False):
+               overwrite=False):
         r"""
         Writes the header to file or file-like object.
 
@@ -669,30 +720,32 @@ class Header(object):
             If `True` (default) pads the string with spaces out to the next
             multiple of 2880 characters
 
-        clobber : bool, optional
-            If `True`, overwrites the output file if it already exists
+        overwrite : bool, optional
+            If ``True``, overwrite the output file if it exists. Raises an
+            ``OSError`` if ``False`` and the output file exists. Default is
+            ``False``.
+
+            .. versionchanged:: 1.3
+               ``overwrite`` replaces the deprecated ``clobber`` argument.
         """
 
         close_file = fileobj_closed(fileobj)
 
         if not isinstance(fileobj, _File):
-            fileobj = _File(fileobj, mode='ostream', clobber=clobber)
+            fileobj = _File(fileobj, mode='ostream', overwrite=overwrite)
 
         try:
             blocks = self.tostring(sep=sep, endcard=endcard, padding=padding)
             actual_block_size = _block_size(sep)
             if padding and len(blocks) % actual_block_size != 0:
-                raise IOError('Header size (%d) is not a multiple of block '
-                              'size (%d).' %
-                              (len(blocks) - actual_block_size + BLOCK_SIZE,
-                               BLOCK_SIZE))
+                raise OSError(
+                    'Header size ({}) is not a multiple of block '
+                    'size ({}).'.format(
+                        len(blocks) - actual_block_size + BLOCK_SIZE,
+                        BLOCK_SIZE))
 
             if not fileobj.simulateonly:
                 fileobj.flush()
-                try:
-                    offset = fileobj.tell()
-                except (AttributeError, IOError):
-                    offset = 0
                 fileobj.write(blocks.encode('ascii'))
                 fileobj.flush()
         finally:
@@ -702,24 +755,40 @@ class Header(object):
     @classmethod
     def fromtextfile(cls, fileobj, endcard=False):
         """
+        Read a header from a simple text file or file-like object.
+
         Equivalent to::
 
             >>> Header.fromfile(fileobj, sep='\\n', endcard=False,
             ...                 padding=False)
+
+        See Also
+        --------
+        fromfile
         """
 
         return cls.fromfile(fileobj, sep='\n', endcard=endcard, padding=False)
 
-    def totextfile(self, fileobj, endcard=False, clobber=False):
+    @deprecated_renamed_argument('clobber', 'overwrite', '2.0')
+    def totextfile(self, fileobj, endcard=False, overwrite=False):
         """
+        Write the header as text to a file or a file-like object.
+
         Equivalent to::
 
             >>> Header.tofile(fileobj, sep='\\n', endcard=False,
-            ...               padding=False, clobber=clobber)
+            ...               padding=False, overwrite=overwrite)
+
+        .. versionchanged:: 1.3
+           ``overwrite`` replaces the deprecated ``clobber`` argument.
+
+        See Also
+        --------
+        tofile
         """
 
         self.tofile(fileobj, sep='\n', endcard=endcard, padding=False,
-                    clobber=clobber)
+                    overwrite=overwrite)
 
     def clear(self):
         """
@@ -734,6 +803,10 @@ class Header(object):
         """
         Make a copy of the :class:`Header`.
 
+        .. versionchanged:: 1.3
+            `copy.copy` and `copy.deepcopy` on a `Header` will call this
+            method.
+
         Parameters
         ----------
         strip : bool, optional
@@ -747,10 +820,16 @@ class Header(object):
             A new :class:`Header` instance.
         """
 
-        tmp = Header([copy.copy(card) for card in self._cards])
+        tmp = self.__class__((copy.copy(card) for card in self._cards))
         if strip:
             tmp._strip()
         return tmp
+
+    def __copy__(self):
+        return self.copy()
+
+    def __deepcopy__(self, *args, **kwargs):
+        return self.copy()
 
     @classmethod
     def fromkeys(cls, iterable, value=None):
@@ -817,7 +896,7 @@ class Header(object):
         created in the specified position, or appended to the end of the header
         if no position is specified.
 
-        This method is similar to :meth:`Header.update` prior to PyFITS 3.1.
+        This method is similar to :meth:`Header.update` prior to Astropy v0.1.
 
         .. note::
             It should be noted that ``header.set(keyword, value)`` and
@@ -900,35 +979,23 @@ class Header(object):
     def items(self):
         """Like :meth:`dict.items`."""
 
-        return list(iteritems(self))
-
-    def iteritems(self):
-        """Like :meth:`dict.iteritems`."""
-
         for card in self._cards:
             yield (card.keyword, card.value)
 
-    def iterkeys(self):
+    def keys(self):
         """
-        Like :meth:`dict.iterkeys`--iterating directly over the `Header`
+        Like :meth:`dict.keys`--iterating directly over the `Header`
         instance has the same behavior.
         """
 
-        return self.__iter__()
+        for card in self._cards:
+            yield card.keyword
 
-    def itervalues(self):
-        """Like :meth:`dict.itervalues`."""
+    def values(self):
+        """Like :meth:`dict.values`."""
 
-        for _, v in iteritems(self):
-            yield v
-
-    def keys(self):
-        """
-        Return a list of keywords in the header in the order they
-        appear--like :meth:`dict.keys` but ordered.
-        """
-
-        return [keyword for keyword in self]
+        for card in self._cards:
+            yield card.value
 
     def pop(self, *args):
         """
@@ -938,7 +1005,7 @@ class Header(object):
 
         if len(args) > 2:
             raise TypeError('Header.pop expected at most 2 arguments, got '
-                            '%d' % len(args))
+                            '{}'.format(len(args)))
 
         if len(args) == 0:
             key = -1
@@ -959,7 +1026,7 @@ class Header(object):
         """Similar to :meth:`dict.popitem`."""
 
         try:
-            k, v = next(iteritems(self))
+            k, v = next(self.items())
         except StopIteration:
             raise KeyError('Header is empty')
         del self[k]
@@ -999,13 +1066,10 @@ class Header(object):
 
         .. warning::
             As this method works similarly to `dict.update` it is very
-            different from the ``Header.update()`` method in PyFITS versions
-            prior to 3.1.0.  However, support for the old API is also
-            maintained for backwards compatibility.  If update() is called with
-            at least two positional arguments then it can be assumed that the
-            old API is being used.  Use of the old API should be considered
-            **deprecated**.  Most uses of the old API can be replaced as
-            follows:
+            different from the ``Header.update()`` method in Astropy v0.1.
+            Use of the old API was
+            **deprecated** for a long time and is now removed. Most uses of the
+            old API can be replaced as follows:
 
             * Replace ::
 
@@ -1044,137 +1108,51 @@ class Header(object):
             interface similar to the old ``Header.update()`` and may help make
             transition a little easier.
 
-            For reference, the old documentation for the old
-            ``Header.update()`` is provided below:
-
-        Update one header card.
-
-        If the keyword already exists, it's value and/or comment will be
-        updated.  If it does not exist, a new card will be created and it will
-        be placed before or after the specified location.  If no ``before`` or
-        ``after`` is specified, it will be appended at the end.
-
-        Parameters
-        ----------
-        key : str
-            keyword
-
-        value : str
-            value to be used for updating
-
-        comment : str, optional
-            to be used for updating, default=None.
-
-        before : str, int, optional
-            name of the keyword, or index of the `Card` before which
-            the new card will be placed.  The argument ``before`` takes
-            precedence over ``after`` if both specified.
-
-        after : str, int, optional
-            name of the keyword, or index of the `Card` after which
-            the new card will be placed.
-
-        savecomment : bool, optional
-            When `True`, preserve the current comment for an existing
-            keyword.  The argument ``savecomment`` takes precedence over
-            ``comment`` if both specified.  If ``comment`` is not
-            specified then the current comment will automatically be
-            preserved.
-
         """
 
-        legacy_args = ['key', 'value', 'comment', 'before', 'after',
-                       'savecomment']
-
-        # This if statement covers all the cases in which this could be a
-        # legacy update(); note that it means it's impossible to do a
-        # dict-style update where *all* the keywords happen to legacy
-        # arguments, but realistically speaking that use case will not come up
-
-        # The fact that Python is "flexible" in allowing positional args to be
-        # passed in as keyword args makes this a little more complicated than
-        # it otherwise would be :/
-        issubset = set(kwargs).issubset(set(legacy_args))
-        if (len(args) >= 2 or
-            (len(args) == 1 and 'value' in kwargs and issubset) or
-            (len(args) == 0 and 'key' in kwargs and 'value' in kwargs and
-             issubset)):
-            # This must be a legacy update()
-            warnings.warn(
-                "The use of header.update() to add new keywords to a header "
-                "is deprecated.  Instead, use either header.set() or simply "
-                "`header[keyword] = value` or "
-                "`header[keyword] = (value, comment)`.  header.set() is only "
-                "necessary to use if you also want to use the before/after "
-                "keyword arguments.", AstropyDeprecationWarning)
-
-            for k, v in zip(legacy_args, args):
-                if k in kwargs:
-                    raise TypeError(
-                        '%s.update() got multiple values for keyword '
-                        'argument %r' % (self.__class__.__name__, k))
-                kwargs[k] = v
-
-            keyword = kwargs.get('key')
-            value = kwargs.get('value')
-            comment = kwargs.get('comment')
-            before = kwargs.get('before')
-            after = kwargs.get('after')
-            savecomment = kwargs.get('savecomment')
-
-            # Handle the savecomment argument which is not currently used by
-            # Header.set()
-            if keyword in self and savecomment:
-                comment = None
-
-            self.set(keyword, value, comment, before, after)
+        if args:
+            other = args[0]
         else:
-            # The rest of this should work similarly to dict.update()
-            if args:
-                other = args[0]
-            else:
-                other = None
+            other = None
 
-            def update_from_dict(k, v):
-                if not isinstance(v, tuple):
-                    card = Card(k, v)
-                elif 0 < len(v) <= 2:
-                    card = Card(*((k,) + v))
+        def update_from_dict(k, v):
+            if not isinstance(v, tuple):
+                card = Card(k, v)
+            elif 0 < len(v) <= 2:
+                card = Card(*((k,) + v))
+            else:
+                raise ValueError(
+                    'Header update value for key %r is invalid; the '
+                    'value must be either a scalar, a 1-tuple '
+                    'containing the scalar value, or a 2-tuple '
+                    'containing the value and a comment string.' % k)
+            self._update(card)
+
+        if other is None:
+            pass
+        elif isinstance(other, Header):
+            for card in other.cards:
+                self._update(card)
+        elif hasattr(other, 'items'):
+            for k, v in other.items():
+                update_from_dict(k, v)
+        elif hasattr(other, 'keys'):
+            for k in other.keys():
+                update_from_dict(k, other[k])
+        else:
+            for idx, card in enumerate(other):
+                if isinstance(card, Card):
+                    self._update(card)
+                elif isinstance(card, tuple) and (1 < len(card) <= 3):
+                    self._update(Card(*card))
                 else:
                     raise ValueError(
-                        'Header update value for key %r is invalid; the '
-                        'value must be either a scalar, a 1-tuple '
-                        'containing the scalar value, or a 2-tuple '
-                        'containing the value and a comment string.' % k)
-                self._update(card)
-
-            if other is None:
-                pass
-            elif hasattr(other, 'iteritems'):
-                for k, v in iteritems(other):
-                    update_from_dict(k, v)
-            elif hasattr(other, 'keys'):
-                for k in other.keys():
-                    update_from_dict(k, other[k])
-            else:
-                for idx, card in enumerate(other):
-                    if isinstance(card, Card):
-                        self._update(card)
-                    elif isinstance(card, tuple) and (1 < len(card) <= 3):
-                        self._update(Card(*card))
-                    else:
-                        raise ValueError(
-                            'Header update sequence item #%d is invalid; '
-                            'the item must either be a 2-tuple containing '
-                            'a keyword and value, or a 3-tuple containing '
-                            'a keyword, value, and comment string.' % idx)
-            if kwargs:
-                self.update(kwargs)
-
-    def values(self):
-        """Returns a list of the values of all cards in the header."""
-
-        return [v for _, v in iteritems(self)]
+                        'Header update sequence item #{} is invalid; '
+                        'the item must either be a 2-tuple containing '
+                        'a keyword and value, or a 3-tuple containing '
+                        'a keyword, value, and comment string.'.format(idx))
+        if kwargs:
+            self.update(kwargs)
 
     def append(self, card=None, useblanks=True, bottom=False, end=False):
         """
@@ -1211,7 +1189,7 @@ class Header(object):
 
         """
 
-        if isinstance(card, string_types):
+        if isinstance(card, str):
             card = Card(card)
         elif isinstance(card, tuple):
             card = Card(*card)
@@ -1220,7 +1198,7 @@ class Header(object):
         elif not isinstance(card, Card):
             raise ValueError(
                 'The value appended to a Header must be either a keyword or '
-                '(keyword, value, [comment]) tuple; got: %r' % card)
+                '(keyword, value, [comment]) tuple; got: {!r}'.format(card))
 
         if not end and card.is_blank:
             # Blank cards should always just be appended to the end
@@ -1291,7 +1269,7 @@ class Header(object):
 
         update : bool, optional
             If `True`, update the current header with the values and comments
-            from duplicate keywords in the input header.  This supercedes the
+            from duplicate keywords in the input header.  This supersedes the
             ``unique`` argument.  Commentary keywords are treated the same as
             if ``unique=True``.
 
@@ -1304,7 +1282,7 @@ class Header(object):
             'SIMPLE' keyword.  This behavior is otherwise dumb as to whether or
             not the resulting header is a valid primary or extension header.
             This is mostly provided to support backwards compatibility with the
-            old :meth:`Header.fromTxtFile` method, and only applies if
+            old ``Header.fromTxtFile`` method, and only applies if
             ``update=True``.
 
         useblanks, bottom, end : bool, optional
@@ -1312,12 +1290,12 @@ class Header(object):
             new cards to the header.
         """
 
-        temp = Header(cards)
+        temp = self.__class__(cards)
         if strip:
             temp._strip()
 
         if len(self):
-            first = self.cards[0].keyword
+            first = self._cards[0].keyword
         else:
             first = None
 
@@ -1383,7 +1361,7 @@ class Header(object):
         # We have to look before we leap, since otherwise _keyword_indices,
         # being a defaultdict, will create an entry for the nonexistent keyword
         if keyword not in self._keyword_indices:
-            raise KeyError("Keyword %r not found." % keyword)
+            raise KeyError(f"Keyword {keyword!r} not found.")
 
         return len(self._keyword_indices[keyword])
 
@@ -1423,7 +1401,8 @@ class Header(object):
             if self._cards[idx].keyword.upper() == norm_keyword:
                 return idx
         else:
-            raise ValueError('The keyword %r is not in the header.' % keyword)
+            raise ValueError('The keyword {!r} is not in the '
+                             ' header.'.format(keyword))
 
     def insert(self, key, card, useblanks=True, after=False):
         """
@@ -1474,14 +1453,14 @@ class Header(object):
             self.append(card, end=True)
             return
 
-        if isinstance(card, string_types):
+        if isinstance(card, str):
             card = Card(card)
         elif isinstance(card, tuple):
             card = Card(*card)
         elif not isinstance(card, Card):
             raise ValueError(
                 'The value inserted into a Header must be either a keyword or '
-                '(keyword, value, [comment]) tuple; got: %r' % card)
+                '(keyword, value, [comment]) tuple; got: {!r}'.format(card))
 
         self._cards.insert(idx, card)
 
@@ -1497,14 +1476,15 @@ class Header(object):
         # All the keyword indices above the insertion point must be updated
         self._updateindices(idx)
 
+        keyword = Card.normalize_keyword(keyword)
         self._keyword_indices[keyword].append(idx)
         count = len(self._keyword_indices[keyword])
         if count > 1:
             # There were already keywords with this same name
             if keyword not in Card._commentary_keywords:
                 warnings.warn(
-                    'A %r keyword already exists in this header.  Inserting '
-                    'duplicate keyword.' % keyword, AstropyUserWarning)
+                    'A {!r} keyword already exists in this header.  Inserting '
+                    'duplicate keyword.'.format(keyword), AstropyUserWarning)
             self._keyword_indices[keyword].sort()
 
         if card.field_specifier is not None:
@@ -1544,8 +1524,7 @@ class Header(object):
                 while keyword in self._keyword_indices:
                     del self[self._keyword_indices[keyword][0]]
         elif not ignore_missing:
-            raise KeyError("Keyword '%s' not found." % keyword)
-
+            raise KeyError(f"Keyword '{keyword}' not found.")
 
     def rename_keyword(self, oldkeyword, newkeyword, force=False):
         """
@@ -1578,11 +1557,11 @@ class Header(object):
                 raise ValueError('Regular and commentary keys can not be '
                                  'renamed to each other.')
         elif not force and newkeyword in self:
-            raise ValueError('Intended keyword %s already exists in header.'
-                             % newkeyword)
+            raise ValueError('Intended keyword {} already exists in header.'
+                             .format(newkeyword))
 
         idx = self.index(oldkeyword)
-        card = self.cards[idx]
+        card = self._cards[idx]
         del self[idx]
         self.insert(idx, (newkeyword, card.value, card.comment))
 
@@ -1689,7 +1668,7 @@ class Header(object):
         # This used to just set key = (key, 0) and then go on to act as if the
         # user passed in a tuple, but it's much more common to just be given a
         # string as the key, so optimize more for that case
-        if isinstance(key, string_types):
+        if isinstance(key, str):
             keyword = key
             n = 0
         elif isinstance(key, int):
@@ -1702,7 +1681,7 @@ class Header(object):
         elif isinstance(key, slice):
             return key
         elif isinstance(key, tuple):
-            if (len(key) != 2 or not isinstance(key[0], string_types) or
+            if (len(key) != 2 or not isinstance(key[0], str) or
                     not isinstance(key[1], int)):
                 raise ValueError(
                     'Tuple indices must be 2-tuples consisting of a '
@@ -1720,19 +1699,19 @@ class Header(object):
 
         if keyword and not indices:
             if len(keyword) > KEYWORD_LENGTH or '.' in keyword:
-                raise KeyError("Keyword %r not found." % keyword)
+                raise KeyError(f"Keyword {keyword!r} not found.")
             else:
                 # Maybe it's a RVKC?
                 indices = self._rvkc_indices.get(keyword, None)
 
         if not indices:
-            raise KeyError("Keyword %r not found." % keyword)
+            raise KeyError(f"Keyword {keyword!r} not found.")
 
         try:
             return indices[n]
         except IndexError:
-            raise IndexError('There are only %d %r cards in the header.' %
-                             (len(indices), keyword))
+            raise IndexError('There are only {} {!r} cards in the '
+                             'header.'.format(len(indices), keyword))
 
     def _keyword_from_index(self, idx):
         """
@@ -1746,9 +1725,10 @@ class Header(object):
         """
 
         if idx < 0:
-            idx += len(self._cards) - 1
+            idx += len(self._cards)
 
         keyword = self._cards[idx].keyword
+        keyword = Card.normalize_keyword(keyword)
         repeat = self._keyword_indices[keyword].index(idx)
         return keyword, repeat
 
@@ -1816,7 +1796,6 @@ class Header(object):
         For all cards with index above idx, increment or decrement its index
         value in the keyword_indices dict.
         """
-
         if idx > len(self._cards):
             # Save us some effort
             return
@@ -1824,7 +1803,7 @@ class Header(object):
         increment = 1 if increment else -1
 
         for index_sets in (self._keyword_indices, self._rvkc_indices):
-            for indices in itervalues(index_sets):
+            for indices in index_sets.values():
                 for jdx, keyword_index in enumerate(indices):
                     if keyword_index >= idx:
                         indices[jdx] += increment
@@ -1847,7 +1826,7 @@ class Header(object):
     def _haswildcard(self, keyword):
         """Return `True` if the input keyword contains a wildcard pattern."""
 
-        return (isinstance(keyword, string_types) and
+        return (isinstance(keyword, str) and
                 (keyword.endswith('...') or '*' in keyword or '?' in keyword))
 
     def _wildcardmatch(self, pattern):
@@ -1878,7 +1857,7 @@ class Header(object):
             else:
                 indices = self._wildcardmatch(key)
 
-            if isinstance(value, string_types) or not isiterable(value):
+            if isinstance(value, str) or not isiterable(value):
                 value = itertools.repeat(value, len(indices))
 
             for idx, val in zip(indices, value):
@@ -1978,150 +1957,132 @@ class Header(object):
         else:
             self[key] = value
 
-    # Some fixes for compatibility with the Python 3 dict interface, where
-    # iteritems -> items, etc.
-    if six.PY3:
-        keys = iterkeys
-        values = itervalues
-        items = iteritems
-        del iterkeys
-        del itervalues
-        del iteritems
 
-    # The following properties/methods are for legacy API backwards
-    # compatibility
+collections.abc.MutableSequence.register(Header)
+collections.abc.MutableMapping.register(Header)
 
-    @property
-    @deprecated('0.1', alternative='the `.cards` attribute')
-    def ascard(self):
-        """
-        Returns a ``CardList`` object wrapping this Header; provided for
-        backwards compatibility for the old API (where Headers had an
-        underlying ``CardList``).
-        """
 
-        return CardList(self)
+class _DelayedHeader:
+    """
+    Descriptor used to create the Header object from the header string that
+    was stored in HDU._header_str when parsing the file.
+    """
 
-    @deprecated('0.1', alternative=':meth:`Header.rename_keyword`')
-    def rename_key(self, oldkey, newkey, force=False):
-        self.rename_keyword(oldkey, newkey, force)
-
-    @deprecated('0.1', alternative="``header['HISTORY']``")
-    def get_history(self):
-        """
-        Get all history cards as a list of string texts.
-        """
-
-        if 'HISTORY' in self:
-            return self['HISTORY']
-        else:
-            return []
-
-    @deprecated('0.1', alternative="``header['COMMENT']``")
-    def get_comment(self):
-        """
-        Get all comment cards as a list of string texts.
-        """
-
-        if 'COMMENT' in self:
-            return self['COMMENT']
-        else:
-            return []
-
-    @deprecated('0.1', alternative=':meth:`Header.totextfile`')
-    def toTxtFile(self, fileobj, clobber=False):
-        """
-        Output the header parameters to a file in ASCII format.
-
-        Parameters
-        ----------
-        fileobj : file path, file object or file-like object
-            Output header parameters file.
-
-        clobber : bool
-            When `True`, overwrite the output file if it exists.
-        """
-
-        self.tofile(fileobj, sep='\n', endcard=False, padding=False,
-                    clobber=clobber)
-
-    @deprecated('0.1',
-                message='This is equivalent to '
-                        '``self.extend(Header.fromtextfile(fileobj), '
-                        'update=True, update_first=True)``.  Note that there '
-                        'there is no direct equivalent to the '
-                        '``replace=True`` option since '
-                        ':meth:`Header.fromtextfile` returns a new '
-                        ':class:`Header` instance.')
-    def fromTxtFile(self, fileobj, replace=False):
-        """
-        Input the header parameters from an ASCII file.
-
-        The input header cards will be used to update the current
-        header.  Therefore, when an input card key matches a card key
-        that already exists in the header, that card will be updated
-        in place.  Any input cards that do not already exist in the
-        header will be added.  Cards will not be deleted from the
-        header.
-
-        Parameters
-        ----------
-        fileobj : file path, file object or file-like object
-            Input header parameters file.
-
-        replace : bool, optional
-            When `True`, indicates that the entire header should be
-            replaced with the contents of the ASCII file instead of
-            just updating the current header.
-        """
-
-        input_header = Header.fromfile(fileobj, sep='\n', endcard=False,
-                                       padding=False)
-
-        if replace:
-            self.clear()
-        prev_key = 0
-
-        for card in input_header.cards:
-            card.verify('silentfix')
-
-            if card.keyword == 'SIMPLE':
-                if self.get('XTENSION'):
-                    del self.ascard['XTENSION']
-
-                self.set(card.keyword, card.value, card.comment, before=0)
-                prev_key = 0
-            elif card.keyword == 'XTENSION':
-                if self.get('SIMPLE'):
-                    del self.ascard['SIMPLE']
-
-                self.set(card.keyword, card.value, card.comment, before=0)
-                prev_key = 0
-            elif card.keyword in Card._commentary_keywords:
-                if (not replace and
-                        not (card.keyword == '' and card.value == '')):
-                    # Don't add duplicate commentary cards (though completely
-                    # blank cards are allowed to be duplicated)
-                    for c in self.cards:
-                        if c.keyword == card.keyword and c.value == card.value:
-                            break
-                    else:
-                        self.set(card.keyword, card.value, after=prev_key)
-                        prev_key += 1
-                else:
-                    self.set(card.keyword, card.value, after=prev_key)
-                    prev_key += 1
+    def __get__(self, obj, owner=None):
+        try:
+            return obj.__dict__['_header']
+        except KeyError:
+            if obj._header_str is not None:
+                hdr = Header.fromstring(obj._header_str)
+                obj._header_str = None
             else:
-                self.set(card.keyword, card.value, card.comment,
-                         after=prev_key)
-                prev_key += 1
+                raise AttributeError("'{}' object has no attribute '_header'"
+                                     .format(obj.__class__.__name__))
+
+            obj.__dict__['_header'] = hdr
+            return hdr
+
+    def __set__(self, obj, val):
+        obj.__dict__['_header'] = val
+
+    def __delete__(self, obj):
+        del obj.__dict__['_header']
 
 
-collections.MutableSequence.register(Header)
-collections.MutableMapping.register(Header)
+class _BasicHeaderCards:
+    """
+    This class allows to access cards with the _BasicHeader.cards attribute.
+
+    This is needed because during the HDU class detection, some HDUs uses
+    the .cards interface.  Cards cannot be modified here as the _BasicHeader
+    object will be deleted once the HDU object is created.
+
+    """
+
+    def __init__(self, header):
+        self.header = header
+
+    def __getitem__(self, key):
+        # .cards is a list of cards, so key here is an integer.
+        # get the keyword name from its index.
+        key = self.header._keys[key]
+        # then we get the card from the _BasicHeader._cards list, or parse it
+        # if needed.
+        try:
+            return self.header._cards[key]
+        except KeyError:
+            cardstr = self.header._raw_cards[key]
+            card = Card.fromstring(cardstr)
+            self.header._cards[key] = card
+            return card
 
 
-class _CardAccessor(object):
+class _BasicHeader(collections.abc.Mapping):
+    """This class provides a fast header parsing, without all the additional
+    features of the Header class. Here only standard keywords are parsed, no
+    support for CONTINUE, HIERARCH, COMMENT, HISTORY, or rvkc.
+
+    The raw card images are stored and parsed only if needed. The idea is that
+    to create the HDU objects, only a small subset of standard cards is needed.
+    Once a card is parsed, which is deferred to the Card class, the Card object
+    is kept in a cache. This is useful because a small subset of cards is used
+    a lot in the HDU creation process (NAXIS, XTENSION, ...).
+
+    """
+
+    def __init__(self, cards):
+        # dict of (keywords, card images)
+        self._raw_cards = cards
+        self._keys = list(cards.keys())
+        # dict of (keyword, Card object) storing the parsed cards
+        self._cards = {}
+        # the _BasicHeaderCards object allows to access Card objects from
+        # keyword indices
+        self.cards = _BasicHeaderCards(self)
+
+        self._modified = False
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            key = self._keys[key]
+
+        try:
+            return self._cards[key].value
+        except KeyError:
+            # parse the Card and store it
+            cardstr = self._raw_cards[key]
+            self._cards[key] = card = Card.fromstring(cardstr)
+            return card.value
+
+    def __len__(self):
+        return len(self._raw_cards)
+
+    def __iter__(self):
+        return iter(self._raw_cards)
+
+    def index(self, keyword):
+        return self._keys.index(keyword)
+
+    @classmethod
+    def fromfile(cls, fileobj):
+        """The main method to parse a FITS header from a file. The parsing is
+        done with the parse_header function implemented in Cython."""
+
+        close_file = False
+        if isinstance(fileobj, str):
+            fileobj = open(fileobj, 'rb')
+            close_file = True
+
+        try:
+            header_str, cards = parse_header(fileobj)
+            _check_padding(header_str, BLOCK_SIZE, False)
+            return header_str, cls(cards)
+        finally:
+            if close_file:
+                fileobj.close()
+
+
+class _CardAccessor:
     """
     This is a generic class for wrapping a Header in such a way that you can
     use the header's slice/filtering capabilities to return a subset of cards
@@ -2148,13 +2109,13 @@ class _CardAccessor(object):
     def __eq__(self, other):
         # If the `other` item is a scalar we will still treat it as equal if
         # this _CardAccessor only contains one item
-        if not isiterable(other) or isinstance(other, string_types):
+        if not isiterable(other) or isinstance(other, str):
             if len(self) == 1:
                 other = [other]
             else:
                 return False
 
-        for a, b in zip_longest(self, other):
+        for a, b in itertools.zip_longest(self, other):
             if a != b:
                 return False
         else:
@@ -2181,7 +2142,7 @@ class _CardAccessor(object):
                 indices = range(*item.indices(len(self)))
             else:
                 indices = self._header._wildcardmatch(item)
-            if isinstance(value, string_types) or not isiterable(value):
+            if isinstance(value, str) or not isiterable(value):
                 value = itertools.repeat(value, len(indices))
             for idx, val in zip(indices, value):
                 self[idx] = val
@@ -2189,8 +2150,8 @@ class _CardAccessor(object):
         return False
 
 
-collections.Mapping.register(_CardAccessor)
-collections.Sequence.register(_CardAccessor)
+collections.abc.Mapping.register(_CardAccessor)
+collections.abc.Sequence.register(_CardAccessor)
 
 
 class _HeaderComments(_CardAccessor):
@@ -2214,7 +2175,8 @@ class _HeaderComments(_CardAccessor):
         keyword_length = KEYWORD_LENGTH
         for card in self._header._cards:
             keyword_length = max(keyword_length, len(card.keyword))
-        return '\n'.join('%*s  %s' % (keyword_length, c.keyword, c.comment)
+        return '\n'.join('{:>{len}}  {}'.format(c.keyword, c.comment,
+                                                len=keyword_length)
                          for c in self._header._cards)
 
     def __getitem__(self, item):
@@ -2223,7 +2185,7 @@ class _HeaderComments(_CardAccessor):
         returned cards.  Otherwise the comment of a single card is returned.
         """
 
-        item = super(_HeaderComments, self).__getitem__(item)
+        item = super().__getitem__(item)
         if isinstance(item, _HeaderComments):
             # The item key was a slice
             return item
@@ -2253,7 +2215,7 @@ class _HeaderCommentaryCards(_CardAccessor):
     """
 
     def __init__(self, header, keyword=''):
-        super(_HeaderCommentaryCards, self).__init__(header)
+        super().__init__(header)
         self._keyword = keyword
         self._count = self._header.count(self._keyword)
         self._indices = slice(self._count).indices(self._count)
@@ -2276,7 +2238,7 @@ class _HeaderCommentaryCards(_CardAccessor):
             n._indices = idx.indices(self._count)
             return n
         elif not isinstance(idx, int):
-            raise ValueError('%s index must be an integer' % self._keyword)
+            raise ValueError(f'{self._keyword} index must be an integer')
 
         idx = list(range(*self._indices))[idx]
         return self._header[(self._keyword, idx)]
@@ -2309,3 +2271,32 @@ def _pad_length(stringlen):
     """Bytes needed to pad the input stringlen to the next FITS block."""
 
     return (BLOCK_SIZE - (stringlen % BLOCK_SIZE)) % BLOCK_SIZE
+
+
+def _check_padding(header_str, block_size, is_eof, check_block_size=True):
+    # Strip any zero-padding (see ticket #106)
+    if header_str and header_str[-1] == '\0':
+        if is_eof and header_str.strip('\0') == '':
+            # TODO: Pass this warning to validation framework
+            warnings.warn(
+                'Unexpected extra padding at the end of the file.  This '
+                'padding may not be preserved when saving changes.',
+                AstropyUserWarning)
+            raise EOFError()
+        else:
+            # Replace the illegal null bytes with spaces as required by
+            # the FITS standard, and issue a nasty warning
+            # TODO: Pass this warning to validation framework
+            warnings.warn(
+                'Header block contains null bytes instead of spaces for '
+                'padding, and is not FITS-compliant. Nulls may be '
+                'replaced with spaces upon writing.', AstropyUserWarning)
+            header_str.replace('\0', ' ')
+
+    if check_block_size and (len(header_str) % block_size) != 0:
+        # This error message ignores the length of the separator for
+        # now, but maybe it shouldn't?
+        actual_len = len(header_str) - block_size + BLOCK_SIZE
+        # TODO: Pass this error to validation framework
+        raise ValueError('Header size is not multiple of {}: {}'
+                         .format(BLOCK_SIZE, actual_len))

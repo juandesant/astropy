@@ -1,9 +1,7 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-from ..extern import six
 
-from .. import config as _config
+from astropy import config as _config
+
 
 class Conf(_config.ConfigNamespace):
     """
@@ -18,24 +16,48 @@ class Conf(_config.ConfigNamespace):
     default_notebook_table_class = _config.ConfigItem(
         'table-striped table-bordered table-condensed',
         'The table class to be used in Jupyter notebooks when displaying '
-        'tables (and not overridden). See <http://getbootstrap.com/css/#tables '
+        'tables (and not overridden). See <https://getbootstrap.com/css/#tables '
         'for a list of useful bootstrap classes.')
+    replace_warnings = _config.ConfigItem(
+        [],
+        'List of conditions for issuing a warning when replacing a table '
+        "column using setitem, e.g. t['a'] = value.  Allowed options are "
+        "'always', 'slice', 'refcount', 'attributes'.",
+        'list',
+        )
+    replace_inplace = _config.ConfigItem(
+        False,
+        'Always use in-place update of a table column when using setitem, '
+        "e.g. t['a'] = value.  This overrides the default behavior of "
+        "replacing the column entirely with the new value when possible. "
+        "This configuration option will be deprecated and then removed in "
+        "subsequent major releases."
+        )
 
 
 conf = Conf()
 
 
-from .column import Column, MaskedColumn
+from .column import Column, MaskedColumn, StringTruncateWarning, ColumnInfo
 from .groups import TableGroups, ColumnGroups
-from .table import Table, QTable, TableColumns, Row, TableFormatter, NdarrayMixin
-from .operations import join, hstack, vstack, unique, TableMergeError
-from .jsviewer import JSViewer
+from .table import (Table, QTable, TableColumns, Row, TableFormatter,
+                    NdarrayMixin, TableReplaceWarning)
+from .operations import join, setdiff, hstack, dstack, vstack, unique, TableMergeError
 from .bst import BST, FastBST, FastRBT
 from .sorted_array import SortedArray
+from .soco import SCEngine
+from .serialize import SerializedColumn, represent_mixins_as_columns
 
-# Import routines that connect readers/writers to astropy.table
-from ..io.ascii import connect
-from ..io.fits import connect
-from ..io.misc import connect
-from ..io.votable import connect
-from . import jsviewer
+# Finally import the formats for the read and write method but delay building
+# the documentation until all are loaded. (#5275)
+from astropy.io import registry
+
+with registry.delay_doc_updates(Table):
+    # Import routines that connect readers/writers to astropy.table
+    from .jsviewer import JSViewer
+    from astropy.io.ascii import connect
+    from astropy.io.fits import connect
+    from astropy.io.misc import connect
+    from astropy.io.votable import connect
+    from astropy.io.misc.asdf import connect
+    from astropy.io.misc.pandas import connect

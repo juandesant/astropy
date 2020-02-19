@@ -1,13 +1,12 @@
-.. doctest-skip-all
 .. _astropy-wcs:
 
 ***************************************
 World Coordinate System (`astropy.wcs`)
 ***************************************
 
-.. _FITS WCS standard: http://fits.gsfc.nasa.gov/fits_wcs.html
-.. _distortion paper: http://www.atnf.csiro.au/people/mcalabre/WCS/dcs_20040422.pdf
-.. _SIP: http://irsa.ipac.caltech.edu/data/SPITZER/docs/files/spitzer/shupeADASS.pdf
+.. _wcslib: https://www.atnf.csiro.au/people/mcalabre/WCS/wcslib/index.html
+.. _distortion paper: https://www.atnf.csiro.au/people/mcalabre/WCS/dcs_20040422.pdf
+.. _SIP: https://irsa.ipac.caltech.edu/data/SPITZER/docs/files/spitzer/shupeADASS.pdf
 
 Introduction
 ============
@@ -24,7 +23,7 @@ It performs three separate classes of WCS transformations:
   Calabretta's `wcslib`_.  (Also includes ``TPV`` and ``TPD``
   distortion, but not ``SIP``).
 
-- Simple Imaging Polynomial (`SIP`_) convention.
+- Simple Imaging Polynomial (`SIP`_) convention. (See :doc:`note about SIP in headers <note_sip>`.)
 
 - table lookup distortions as defined in the FITS WCS `distortion
   paper`_.
@@ -89,12 +88,13 @@ The basic workflow is as follows:
            coordinates to image coordinates.  Commonly used for narrow
            column correction.
 
-For example, to convert pixel coordinates to world coordinates::
+For example, to convert pixel coordinates from a two dimensional image to world coordinates::
 
     >>> from astropy.wcs import WCS
-    >>> w = WCS('image.fits')
+    >>> w = WCS('image.fits')  # doctest: +IGNORE_WARNINGS
     >>> lon, lat = w.all_pix2world(30, 40, 0)
     >>> print(lon, lat)
+    31.0 41.0
 
 
 Using `astropy.wcs`
@@ -229,30 +229,30 @@ area can be extracted with the utility function
 Matplotlib plots with correct WCS projection
 ============================================
 
-The `WCSAxes <http://wcsaxes.readthedocs.io>`_ affiliated package adds the
-ability to use the :class:`~astropy.wcs.WCS` to define projections in
-Matplotlib. More information on installing and using WCSAxes can be found `here
-<http://wcsaxes.readthedocs.io>`__.
+The :ref:`WCSAxes <wcsaxes>` framework, previously a standalone package, allows
+the :class:`~astropy.wcs.WCS` to be used to define projections in Matplotlib.
+More information on using WCSAxes can be found :ref:`here <wcsaxes>`.
 
 .. plot::
+    :context: reset
     :include-source:
+    :align: center
 
     from matplotlib import pyplot as plt
     from astropy.io import fits
     from astropy.wcs import WCS
-    from astropy.utils.data import download_file
+    from astropy.utils.data import get_pkg_data_filename
 
-    fits_file = 'http://data.astropy.org/tutorials/FITS-images/HorseHead.fits'
-    image_file = download_file(fits_file, cache=True)
-    hdu = fits.open(image_file)[0]
+    filename = get_pkg_data_filename('tutorials/FITS-images/HorseHead.fits')
+
+    hdu = fits.open(filename)[0]
     wcs = WCS(hdu.header)
 
     fig = plt.figure()
     fig.add_subplot(111, projection=wcs)
-    plt.imshow(hdu.data, origin='lower', cmap='cubehelix')
+    plt.imshow(hdu.data, origin='lower', cmap=plt.cm.viridis)
     plt.xlabel('RA')
     plt.ylabel('Dec')
-    plt.show()
 
 Other information
 =================
@@ -262,6 +262,12 @@ Other information
 
    relax
    history
+   wcsapi
+
+.. note that if this section gets too long, it should be moved to a separate
+   doc page - see the top of performance.inc.rst for the instructions on how to do
+   that
+.. include:: performance.inc.rst
 
 See Also
 ========
@@ -272,6 +278,7 @@ Reference/API
 =============
 
 .. automodapi:: astropy.wcs
+   :inherited-members:
 
 .. automodapi:: astropy.wcs.utils
 

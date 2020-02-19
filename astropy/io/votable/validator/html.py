@@ -1,21 +1,17 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import absolute_import, division, print_function, unicode_literals
-from ....extern import six
-from ....extern.six.moves import xrange
 
 # STDLIB
 import contextlib
-import io
 from math import ceil
 import os
 import re
 
 # ASTROPY
-from ....utils.xml.writer import XMLWriter, xml_escape
-from .... import online_docs_root
+from astropy.utils.xml.writer import XMLWriter, xml_escape
+from astropy import online_docs_root
 
 # VO
-from .. import exceptions
+from astropy.io.votable import exceptions
 
 html_header = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html
@@ -82,7 +78,7 @@ def write_source_line(w, line, nchar=0):
 
     w.write('  ')
     w.write(part1)
-    w.write('<span class="highlight">%s</span>' % char)
+    w.write(f'<span class="highlight">{char}</span>')
     w.write(part2)
     w.write('\n\n')
 
@@ -92,24 +88,24 @@ def write_warning(w, line, xml_lines):
     if not warning['is_something']:
         w.data(line)
     else:
-        w.write('Line %d: ' % warning['nline'])
+        w.write('Line {:d}: '.format(warning['nline']))
         if warning['warning']:
-            w.write('<a href="%s/%s">%s</a>: ' % (
+            w.write('<a href="{}/{}">{}</a>: '.format(
                 online_docs_root, warning['doc_url'], warning['warning']))
         msg = warning['message']
-        if not isinstance(warning['message'], six.text_type):
+        if not isinstance(warning['message'], str):
             msg = msg.decode('utf-8')
         w.write(xml_escape(msg))
         w.write('\n')
-        if warning['nline'] >= 1 and warning['nline'] < len(xml_lines):
+        if 1 <= warning['nline'] < len(xml_lines):
             write_source_line(w, xml_lines[warning['nline'] - 1], warning['nchar'])
 
 
 def write_votlint_warning(w, line, xml_lines):
-    match = re.search("(WARNING|ERROR|INFO) \(l.(?P<line>[0-9]+), c.(?P<column>[0-9]+)\): (?P<rest>.*)", line)
+    match = re.search(r"(WARNING|ERROR|INFO) \(l.(?P<line>[0-9]+), c.(?P<column>[0-9]+)\): (?P<rest>.*)", line)
     if match:
-        w.write('Line %d: %s\n' %
-                (int(match.group('line')), xml_escape(match.group('rest'))))
+        w.write('Line {:d}: {}\n'.format(
+                int(match.group('line')), xml_escape(match.group('rest'))))
         write_source_line(
             w, xml_lines[int(match.group('line')) - 1],
             int(match.group('column')) - 1)
@@ -127,7 +123,7 @@ def write_result(result):
 
     path = os.path.join(result.get_dirpath(), 'index.html')
 
-    with io.open(path, 'w', encoding='utf-8') as fd:
+    with open(path, 'w', encoding='utf-8') as fd:
         w = XMLWriter(fd)
         with make_html_header(w):
             with w.tag('p'):
@@ -144,7 +140,7 @@ def write_result(result):
                 w.element('hr')
                 w.element('p', 'xmllint results:')
                 content = result['xmllint_content']
-                if not isinstance(content, six.text_type):
+                if not isinstance(content, str):
                     content = content.decode('ascii')
                 content = content.replace(result.get_dirpath() + '/', '')
                 with w.tag('pre'):
@@ -155,7 +151,7 @@ def write_result(result):
                     w.element('hr')
                     w.element('p', 'votlint results:')
                     content = result['votlint_content']
-                    if not isinstance(content, six.text_type):
+                    if not isinstance(content, str):
                         content = content.decode('ascii')
                     with w.tag('pre'):
                         w._flush()
@@ -171,10 +167,10 @@ def write_result_row(w, result):
                 w.data(result.url.decode('ascii'))
             else:
                 w.element('a', result.url.decode('ascii'),
-                          href='%s/index.html' % result.get_htmlpath())
+                          href='{}/index.html'.format(result.get_htmlpath()))
 
         if 'network_error' in result and result['network_error'] is not None:
-            w.element('td', six.text_type(result['network_error']),
+            w.element('td', str(result['network_error']),
                       attrib={'class': 'red'})
             w.element('td', '-')
             w.element('td', '-')
@@ -188,7 +184,7 @@ def write_result_row(w, result):
                 msg = 'Fatal'
             elif result['nwarnings']:
                 cls = 'yellow'
-                msg = six.text_type(result['nwarnings'])
+                msg = str(result['nwarnings'])
             else:
                 cls = 'green'
                 msg = '-'
@@ -233,24 +229,24 @@ def write_table(basename, name, results, root="results", chunk_size=500):
             return
         with w.tag('center'):
             if j > 0:
-                w.element('a', '<< ', href='%s_%02d.html' % (basename, j-1))
-            for i in xrange(npages):
+                w.element('a', '<< ', href='{}_{:02d}.html'.format(basename, j-1))
+            for i in range(npages):
                 if i == j:
-                    w.data(six.text_type(i+1))
+                    w.data(str(i+1))
                 else:
                     w.element(
-                        'a', six.text_type(i+1),
-                        href='%s_%02d.html' % (basename, i))
+                        'a', str(i+1),
+                        href=f'{basename}_{i:02d}.html')
                 w.data(' ')
             if j < npages - 1:
-                w.element('a', '>>', href='%s_%02d.html' % (basename, j+1))
+                w.element('a', '>>', href='{}_{:02d}.html'.format(basename, j+1))
 
     npages = int(ceil(float(len(results)) / chunk_size))
 
-    for i, j in enumerate(xrange(0, max(len(results), 1), chunk_size)):
+    for i, j in enumerate(range(0, max(len(results), 1), chunk_size)):
         subresults = results[j:j+chunk_size]
-        path = os.path.join(root, '%s_%02d.html' % (basename, i))
-        with io.open(path, 'w', encoding='utf-8') as fd:
+        path = os.path.join(root, f'{basename}_{i:02d}.html')
+        with open(path, 'w', encoding='utf-8') as fd:
             w = XMLWriter(fd)
             with make_html_header(w):
                 write_page_links(i)
@@ -284,17 +280,17 @@ def add_subset(w, basename, name, subresults, inside=['p'], total=None):
         with w.tag('td'):
             for element in inside:
                 w.start(element)
-            w.element('a', name, href='%s_00.html' % basename)
+            w.element('a', name, href=f'{basename}_00.html')
             for element in reversed(inside):
                 w.end(element)
-        numbers = '%d (%.2f%%)' % (len(subresults), percentage * 100.0)
+        numbers = '{:d} ({:.2%})'.format(len(subresults), percentage)
         with w.tag('td'):
             w.data(numbers)
 
 
 def write_index(subsets, results, root='results'):
     path = os.path.join(root, 'index.html')
-    with io.open(path, 'w', encoding='utf-8') as fd:
+    with open(path, 'w', encoding='utf-8') as fd:
         w = XMLWriter(fd)
         with make_html_header(w):
             w.element('h1', 'VO Validation results')
@@ -309,5 +305,5 @@ def write_index_table(root, basename, name, subresults, inside=None,
     if total is None:
         total = len(subresults)
     percentage = (float(len(subresults)) / total)
-    numbers = '%d (%.2f%%)' % (len(subresults), percentage * 100.0)
+    numbers = '{:d} ({:.2%})'.format(len(subresults), percentage)
     write_table(basename, name + ' ' + numbers, subresults, root, chunk_size)

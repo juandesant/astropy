@@ -3,8 +3,6 @@
 Various utilities and cookbook-like things.
 """
 
-from __future__ import absolute_import, division, print_function, unicode_literals
-from ...extern import six
 
 # STDLIB
 import codecs
@@ -46,7 +44,7 @@ def convert_to_writable_filelike(fd, compressed=False):
     -------
     fd : writable file-like object
     """
-    if isinstance(fd, six.string_types):
+    if isinstance(fd, str):
         if fd.endswith('.gz') or compressed:
             with gzip.GzipFile(fd, 'wb') as real_fd:
                 encoded_fd = io.TextIOWrapper(real_fd, encoding='utf8')
@@ -55,11 +53,11 @@ def convert_to_writable_filelike(fd, compressed=False):
                 real_fd.flush()
                 return
         else:
-            with io.open(fd, 'wt', encoding='utf8') as real_fd:
+            with open(fd, 'wt', encoding='utf8') as real_fd:
                 yield real_fd
                 return
     elif hasattr(fd, 'write'):
-        assert six.callable(fd.write)
+        assert callable(fd.write)
 
         if compressed:
             fd = gzip.GzipFile(fileobj=fd)
@@ -87,7 +85,7 @@ def convert_to_writable_filelike(fd, compressed=False):
         raise TypeError("Can not be coerced to writable file-like object")
 
 
-# <http://www.ivoa.net/Documents/REC/DM/STC-20071030.html>
+# <http://www.ivoa.net/documents/REC/DM/STC-20071030.html>
 stc_reference_frames = set([
     'FK4', 'FK5', 'ECLIPTIC', 'ICRS', 'GALACTIC', 'GALACTIC_I', 'GALACTIC_II',
     'SUPER_GALACTIC', 'AZ_EL', 'BODY', 'GEO_C', 'GEO_D', 'MAG', 'GSE', 'GSM',
@@ -104,7 +102,7 @@ def coerce_range_list_param(p, frames=None, numeric=True):
 
     As defined in `Section 8.7.2 of Simple
     Spectral Access Protocol
-    <http://www.ivoa.net/Documents/REC/DAL/SSA-20080201.html>`_.
+    <http://www.ivoa.net/documents/REC/DAL/SSA-20080201.html>`_.
 
     Parameters
     ----------
@@ -149,12 +147,12 @@ def coerce_range_list_param(p, frames=None, numeric=True):
 
     def numeric_or_range(x):
         if isinstance(x, tuple) and len(x) == 2:
-            return '%s/%s' % (str_or_none(x[0]), str_or_none(x[1]))
+            return '{}/{}'.format(str_or_none(x[0]), str_or_none(x[1]))
         else:
             return str_or_none(x)
 
     def is_frame_of_reference(x):
-        return isinstance(x, six.string_types)
+        return isinstance(x, str)
 
     if p is None:
         return None, 0
@@ -171,13 +169,13 @@ def coerce_range_list_param(p, frames=None, numeric=True):
         if has_frame_of_reference:
             if frames is not None and p[-1] not in frames:
                 raise ValueError(
-                    "'%s' is not a valid frame of reference" % p[-1])
+                    "'{}' is not a valid frame of reference".format(p[-1]))
             out += ';' + p[-1]
             length += 1
 
         return out, length
 
-    elif isinstance(p, six.string_types):
+    elif isinstance(p, str):
         number = r'([-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?)?'
         if not numeric:
             number = r'(' + number + ')|([A-Z_]+)'
@@ -187,19 +185,19 @@ def coerce_range_list_param(p, frames=None, numeric=True):
             p)
 
         if match is None:
-            raise ValueError("'%s' is not a valid range list" % p)
+            raise ValueError(f"'{p}' is not a valid range list")
 
         frame = match.groupdict()['frame']
         if frames is not None and frame is not None and frame not in frames:
             raise ValueError(
-                "'%s' is not a valid frame of reference" % frame)
+                f"'{frame}' is not a valid frame of reference")
         return p, p.count(',') + p.count(';') + 1
 
     try:
         float(p)
         return str(p), 1
     except TypeError:
-        raise ValueError("'%s' is not a valid range list" % p)
+        raise ValueError(f"'{p}' is not a valid range list")
 
 
 def version_compare(a, b):

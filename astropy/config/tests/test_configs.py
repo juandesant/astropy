@@ -1,49 +1,50 @@
 # -*- coding: utf-8 -*-
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
-import io
 import os
 import sys
 import subprocess
 
-from ...tests.helper import catch_warnings
-from ...extern import six
+import pytest
 
-from ...utils.data import get_pkg_data_filename
-from .. import configuration
-from .. import paths
-from ...utils.exceptions import AstropyDeprecationWarning
+from astropy.tests.helper import catch_warnings
+
+from astropy.utils.data import get_pkg_data_filename
+from astropy.config import configuration
+from astropy.config import paths
+from astropy.utils.exceptions import AstropyDeprecationWarning
 
 
 def test_paths():
     assert 'astropy' in paths.get_config_dir()
     assert 'astropy' in paths.get_cache_dir()
 
+    assert 'testpkg' in paths.get_config_dir(rootname='testpkg')
+    assert 'testpkg' in paths.get_cache_dir(rootname='testpkg')
+
 
 def test_set_temp_config(tmpdir, monkeypatch):
     monkeypatch.setattr(paths.set_temp_config, '_temp_path', None)
 
-    orig_config_dir = paths.get_config_dir()
+    orig_config_dir = paths.get_config_dir(rootname='astropy')
     temp_config_dir = str(tmpdir.mkdir('config'))
     temp_astropy_config = os.path.join(temp_config_dir, 'astropy')
 
     # Test decorator mode
     @paths.set_temp_config(temp_config_dir)
     def test_func():
-        assert paths.get_config_dir() == temp_astropy_config
+        assert paths.get_config_dir(rootname='astropy') == temp_astropy_config
 
         # Test temporary restoration of original default
         with paths.set_temp_config() as d:
-            assert d == orig_config_dir == paths.get_config_dir()
+            assert d == orig_config_dir == paths.get_config_dir(rootname='astropy')
 
     test_func()
 
     # Test context manager mode (with cleanup)
     with paths.set_temp_config(temp_config_dir, delete=True):
-        assert paths.get_config_dir() == temp_astropy_config
+        assert paths.get_config_dir(rootname='astropy') == temp_astropy_config
 
     assert not os.path.exists(temp_config_dir)
 
@@ -51,30 +52,42 @@ def test_set_temp_config(tmpdir, monkeypatch):
 def test_set_temp_cache(tmpdir, monkeypatch):
     monkeypatch.setattr(paths.set_temp_cache, '_temp_path', None)
 
-    orig_cache_dir = paths.get_cache_dir()
+    orig_cache_dir = paths.get_cache_dir(rootname='astropy')
     temp_cache_dir = str(tmpdir.mkdir('cache'))
     temp_astropy_cache = os.path.join(temp_cache_dir, 'astropy')
 
     # Test decorator mode
     @paths.set_temp_cache(temp_cache_dir)
     def test_func():
-        assert paths.get_cache_dir() == temp_astropy_cache
+        assert paths.get_cache_dir(rootname='astropy') == temp_astropy_cache
 
         # Test temporary restoration of original default
         with paths.set_temp_cache() as d:
-            assert d == orig_cache_dir == paths.get_cache_dir()
+            assert d == orig_cache_dir == paths.get_cache_dir(rootname='astropy')
 
     test_func()
 
     # Test context manager mode (with cleanup)
     with paths.set_temp_cache(temp_cache_dir, delete=True):
-        assert paths.get_cache_dir() == temp_astropy_cache
+        assert paths.get_cache_dir(rootname='astropy') == temp_astropy_cache
 
     assert not os.path.exists(temp_cache_dir)
 
 
+def test_set_temp_cache_resets_on_exception(tmpdir):
+    """Test for regression of  bug #9704"""
+    t = paths.get_cache_dir()
+    a = tmpdir / 'a'
+    with open(a, 'wt') as f:
+        f.write("not a good cache\n")
+    with pytest.raises(OSError):
+        with paths.set_temp_cache(a):
+            pass
+    assert t == paths.get_cache_dir()
+
+
 def test_config_file():
-    from ..configuration import get_config, reload_config
+    from astropy.config.configuration import get_config, reload_config
 
     apycfg = get_config('astropy')
     assert apycfg.filename.endswith('astropy.cfg')
@@ -84,12 +97,41 @@ def test_config_file():
     assert cfgsec.name == 'config'
     assert cfgsec.parent.filename.endswith('astropy.cfg')
 
+    # try with a different package name, still inside astropy config dir:
+    testcfg = get_config('testpkg', rootname='astropy')
+    parts = os.path.normpath(testcfg.filename).split(os.sep)
+    assert '.astropy' in parts or 'astropy' in parts
+    assert parts[-1] == 'testpkg.cfg'
+    configuration._cfgobjs['testpkg'] = None # HACK
+
+    # try with a different package name, no specified root name (should
+    #   default to astropy):
+    testcfg = get_config('testpkg')
+    parts = os.path.normpath(testcfg.filename).split(os.sep)
+    assert '.astropy' in parts or 'astropy' in parts
+    assert parts[-1] == 'testpkg.cfg'
+    configuration._cfgobjs['testpkg'] = None # HACK
+
+    # try with a different package name, specified root name:
+    testcfg = get_config('testpkg', rootname='testpkg')
+    parts = os.path.normpath(testcfg.filename).split(os.sep)
+    assert '.testpkg' in parts or 'testpkg' in  parts
+    assert parts[-1] == 'testpkg.cfg'
+    configuration._cfgobjs['testpkg'] = None # HACK
+
+    # try with a subpackage with specified root name:
+    testcfg_sec = get_config('testpkg.somemodule', rootname='testpkg')
+    parts = os.path.normpath(testcfg_sec.parent.filename).split(os.sep)
+    assert '.testpkg' in parts or 'testpkg' in  parts
+    assert parts[-1] == 'testpkg.cfg'
+    configuration._cfgobjs['testpkg'] = None # HACK
+
     reload_config('astropy')
 
 
 def test_configitem():
 
-    from ..configuration import ConfigNamespace, ConfigItem, get_config
+    from astropy.config.configuration import ConfigNamespace, ConfigItem, get_config
 
     ci = ConfigItem(34, 'this is a Description')
 
@@ -120,9 +162,7 @@ def test_configitem():
 
 def test_configitem_types():
 
-    from ...tests.helper import pytest
-
-    from ..configuration import ConfigNamespace, ConfigItem
+    from astropy.config.configuration import ConfigNamespace, ConfigItem
 
     cio = ConfigItem(['op1', 'op2', 'op3'])
 
@@ -137,7 +177,7 @@ def test_configitem_types():
     assert isinstance(conf.tstnm1, int)
     assert isinstance(conf.tstnm2, float)
     assert isinstance(conf.tstnm3, bool)
-    assert isinstance(conf.tstnm4, six.text_type)
+    assert isinstance(conf.tstnm4, str)
 
     with pytest.raises(TypeError):
         conf.tstnm1 = 34.3
@@ -150,8 +190,7 @@ def test_configitem_types():
 
 def test_configitem_options(tmpdir):
 
-    from ...tests.helper import pytest
-    from ..configuration import ConfigNamespace, ConfigItem, get_config
+    from astropy.config.configuration import ConfigNamespace, ConfigItem, get_config
 
     cio = ConfigItem(['op1', 'op2', 'op3'])
 
@@ -162,7 +201,7 @@ def test_configitem_options(tmpdir):
 
     sec = get_config(cio.module)
 
-    assert isinstance(cio(), six.text_type)
+    assert isinstance(cio(), str)
     assert cio() == 'op1'
     assert sec['tstnmo'] == 'op1'
 
@@ -176,9 +215,9 @@ def test_configitem_options(tmpdir):
     while apycfg.parent is not apycfg:
         apycfg = apycfg.parent
     f = tmpdir.join('astropy.cfg')
-    with io.open(f.strpath, 'wb') as fd:
+    with open(f.strpath, 'wb') as fd:
         apycfg.write(fd)
-    with io.open(f.strpath, 'rU', encoding='utf-8') as fd:
+    with open(f.strpath, 'r', encoding='utf-8') as fd:
         lns = [x.strip() for x in f.readlines()]
 
     assert 'tstnmo = op2' in lns
@@ -189,25 +228,24 @@ def test_config_noastropy_fallback(monkeypatch):
     Tests to make sure configuration items fall back to their defaults when
     there's a problem accessing the astropy directory
     """
-    from ...tests.helper import pytest
 
     # make sure the config directory is not searched
-    monkeypatch.setenv(str('XDG_CONFIG_HOME'), 'foo')
-    monkeypatch.delenv(str('XDG_CONFIG_HOME'))
+    monkeypatch.setenv('XDG_CONFIG_HOME', 'foo')
+    monkeypatch.delenv('XDG_CONFIG_HOME')
     monkeypatch.setattr(paths.set_temp_config, '_temp_path', None)
 
-    # make sure the _find_or_create_astropy_dir function fails as though the
+    # make sure the _find_or_create_root_dir function fails as though the
     # astropy dir could not be accessed
-    def osraiser(dirnm, linkto):
+    def osraiser(dirnm, linkto, pkgname=None):
         raise OSError
-    monkeypatch.setattr(paths, '_find_or_create_astropy_dir', osraiser)
+    monkeypatch.setattr(paths, '_find_or_create_root_dir', osraiser)
 
     # also have to make sure the stored configuration objects are cleared
     monkeypatch.setattr(configuration, '_cfgobjs', {})
 
     with pytest.raises(OSError):
         # make sure the config dir search fails
-        paths.get_config_dir()
+        paths.get_config_dir(rootname='astropy')
 
     # now run the basic tests, and make sure the warning about no astropy
     # is present
@@ -220,7 +258,7 @@ def test_config_noastropy_fallback(monkeypatch):
 
 def test_configitem_setters():
 
-    from ..configuration import ConfigNamespace, ConfigItem
+    from astropy.config.configuration import ConfigNamespace, ConfigItem
 
     class Conf(ConfigNamespace):
         tstnm12 = ConfigItem(42, 'this is another Description')
@@ -242,17 +280,17 @@ def test_configitem_setters():
     try:
         with conf.set_temp('tstnm12', 47):
             raise Exception
-    except:
+    except Exception:
         pass
 
     assert conf.tstnm12 == 43
 
 
 def test_empty_config_file():
-    from ..configuration import is_unedited_config_file
+    from astropy.config.configuration import is_unedited_config_file
 
     def get_content(fn):
-        with io.open(get_pkg_data_filename(fn), 'rt', encoding='latin-1') as fd:
+        with open(get_pkg_data_filename(fn), 'rt', encoding='latin-1') as fd:
             return fd.read()
 
     content = get_content('data/empty.cfg')
@@ -268,7 +306,7 @@ def test_empty_config_file():
     assert is_unedited_config_file(content)
 
 
-class TestAliasRead(object):
+class TestAliasRead:
 
     def setup_class(self):
         configuration._override_config_file = get_pkg_data_filename('data/alias.cfg')
@@ -294,7 +332,7 @@ class TestAliasRead(object):
 
 def test_configitem_unicode(tmpdir):
 
-    from ..configuration import ConfigNamespace, ConfigItem, get_config
+    from astropy.config.configuration import ConfigNamespace, ConfigItem, get_config
 
     cio = ConfigItem('ასტრონომიის')
 
@@ -305,7 +343,7 @@ def test_configitem_unicode(tmpdir):
 
     sec = get_config(cio.module)
 
-    assert isinstance(cio(), six.text_type)
+    assert isinstance(cio(), str)
     assert cio() == 'ასტრონომიის'
     assert sec['tstunicode'] == 'ასტრონომიის'
 
@@ -313,7 +351,7 @@ def test_configitem_unicode(tmpdir):
 def test_warning_move_to_top_level():
     # Check that the warning about deprecation config items in the
     # file works.  See #2514
-    from ... import conf
+    from astropy import conf
 
     configuration._override_config_file = get_pkg_data_filename('data/deprecated.cfg')
 
@@ -340,7 +378,7 @@ def test_no_home():
     paths = [astropy_path]
     if env.get('PYTHONPATH'):
         paths.append(env.get('PYTHONPATH'))
-    env[str('PYTHONPATH')] = str(os.pathsep.join(paths))
+    env['PYTHONPATH'] = os.pathsep.join(paths)
 
     for val in ['HOME', 'XDG_CONFIG_HOME']:
         if val in env:

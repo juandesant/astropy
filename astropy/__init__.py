@@ -6,14 +6,26 @@ Python. It also provides an index for other astronomy packages and tools for
 managing them.
 """
 
-from __future__ import absolute_import
-
 import sys
 import os
 from warnings import warn
 
-if sys.version_info[:2] < (2, 7):
-    warn("Astropy does not support Python 2.6 (in v1.2 and later)")
+from .version import version as __version__
+
+__minimum_python_version__ = '3.6'
+__minimum_numpy_version__ = '1.16.0'
+# ASDF is an optional dependency, but this is the minimum version that is
+# compatible with Astropy when it is installed.
+__minimum_asdf_version__ = '2.5.0'
+
+
+class UnsupportedPythonError(Exception):
+    pass
+
+
+# This is the same check as the one at the top of setup.py
+if sys.version_info < tuple(int(val) for val in __minimum_python_version__.split('.')):
+    raise UnsupportedPythonError(f"Astropy does not support Python < {__minimum_python_version__}")
 
 
 def _is_astropy_source(path=None):
@@ -49,42 +61,12 @@ def _is_astropy_setup():
             _is_astropy_source(main_mod.__file__))
 
 
-# this indicates whether or not we are in astropy's setup.py
-try:
-    _ASTROPY_SETUP_
-except NameError:
-    from sys import version_info
-    if version_info[0] >= 3:
-        import builtins
-    else:
-        import __builtin__ as builtins
-
-    # This will set the _ASTROPY_SETUP_ to True by default if
-    # we are running Astropy's setup.py
-    builtins._ASTROPY_SETUP_ = _is_astropy_setup()
-
-
-try:
-    from .version import version as __version__
-except ImportError:
-    # TODO: Issue a warning using the logging framework
-    __version__ = ''
-try:
-    from .version import githash as __githash__
-except ImportError:
-    # TODO: Issue a warning using the logging framework
-    __githash__ = ''
-
-
-__minimum_numpy_version__ = '1.7.0'
-
-
 # The location of the online documentation for astropy
 # This location will normally point to the current released version of astropy
 if 'dev' in __version__:
     online_docs_root = 'http://docs.astropy.org/en/latest/'
 else:
-    online_docs_root = 'http://docs.astropy.org/en/{0}/'.format(__version__)
+    online_docs_root = f'http://docs.astropy.org/en/{__version__}/'
 
 
 def _check_numpy():
@@ -95,28 +77,28 @@ def _check_numpy():
     # Note: We could have used distutils.version for this comparison,
     # but it seems like overkill to import distutils at runtime.
     requirement_met = False
-
+    import_fail = ''
     try:
         import numpy
     except ImportError:
-        pass
+        import_fail = 'Numpy is not installed.'
     else:
         from .utils import minversion
         requirement_met = minversion(numpy, __minimum_numpy_version__)
 
     if not requirement_met:
-        msg = ("Numpy version {0} or later must be installed to use "
-               "Astropy".format(__minimum_numpy_version__))
+        msg = (f"Numpy version {__minimum_numpy_version__} or later must "
+               f"be installed to use Astropy. {import_fail}")
         raise ImportError(msg)
 
     return numpy
 
 
-if not _ASTROPY_SETUP_:
-    _check_numpy()
+_check_numpy()
 
 
 from . import config as _config
+
 
 class Conf(_config.ConfigNamespace):
     """
@@ -147,7 +129,84 @@ class Conf(_config.ConfigNamespace):
         cfgtype='integer(default=None)',
         aliases=['astropy.table.pprint.max_width'])
 
+
 conf = Conf()
+
+
+# Define a base ScienceState for configuring constants and units
+from .utils.state import ScienceState
+
+
+class base_constants_version(ScienceState):
+    """
+    Base class for the real version-setters below
+    """
+    _value = 'test'
+
+    _versions = dict(test='test')
+
+    @classmethod
+    def validate(cls, value):
+        if value not in cls._versions:
+            raise ValueError('Must be one of {}'
+                             .format(list(cls._versions.keys())))
+        return cls._versions[value]
+
+    @classmethod
+    def set(cls, value):
+        """
+        Set the current constants value.
+        """
+        import sys
+        if 'astropy.units' in sys.modules:
+            raise RuntimeError('astropy.units is already imported')
+        if 'astropy.constants' in sys.modules:
+            raise RuntimeError('astropy.constants is already imported')
+
+        class _Context:
+            def __init__(self, parent, value):
+                self._value = value
+                self._parent = parent
+
+            def __enter__(self):
+                pass
+
+            def __exit__(self, type, value, tb):
+                self._parent._value = self._value
+
+            def __repr__(self):
+                return ('<ScienceState {}: {!r}>'
+                        .format(self._parent.__name__, self._parent._value))
+
+        ctx = _Context(cls, cls._value)
+        value = cls.validate(value)
+        cls._value = value
+        return ctx
+
+
+class physical_constants(base_constants_version):
+    """
+    The version of physical constants to use
+    """
+    # Maintainers: update when new constants are added
+    _value = 'codata2018'
+
+    _versions = dict(codata2018='codata2018', codata2014='codata2014',
+                     codata2010='codata2010', astropyconst40='codata2018',
+                     astropyconst20='codata2014', astropyconst13='codata2010')
+
+
+class astronomical_constants(base_constants_version):
+    """
+    The version of astronomical constants to use
+    """
+    # Maintainers: update when new constants are added
+    _value = 'iau2015'
+
+    _versions = dict(iau2015='iau2015', iau2012='iau2012',
+                     astropyconst40='iau2015', astropyconst20='iau2015',
+                     astropyconst13='iau2012')
+
 
 # Create the test() function
 from .tests.runner import TestRunner
@@ -184,7 +243,7 @@ def _initialize_astropy():
 
             try:
                 _rebuild_extensions()
-            except:
+            except BaseException as exc:
                 _rollback_import(
                     'An error occurred while attempting to rebuild the '
                     'extension modules.  Please try manually running '
@@ -192,6 +251,12 @@ def _initialize_astropy():
                     '--inplace` to see what the issue was.  Extension '
                     'modules must be successfully compiled and importable '
                     'in order to import astropy.')
+                # Reraise the Exception only in case it wasn't an Exception,
+                # for example if a "SystemExit" or "KeyboardInterrupt" was
+                # invoked.
+                if not isinstance(exc, Exception):
+                    raise
+
         else:
             # Outright broken installation; don't be nice.
             raise
@@ -215,7 +280,6 @@ def _rebuild_extensions():
     import time
 
     from .utils.console import Spinner
-    from .extern.six import next
 
     devnull = open(os.devnull, 'w')
     old_cwd = os.getcwd()
@@ -234,7 +298,7 @@ def _rebuild_extensions():
 
     if sp.returncode != 0:
         raise OSError('Running setup.py build_ext --inplace failed '
-                      'with error code {0}: try rerunning this command '
+                      'with error code {}: try rerunning this command '
                       'manually to check what the error was.'.format(
                           sp.returncode))
 
@@ -251,20 +315,18 @@ def _rebuild_extensions():
         pass
 
 
-# Set the bibtex entry to the article referenced in CITATION
+# Set the bibtex entry to the article referenced in CITATION.
 def _get_bibtex():
-    import re
-    if os.path.exists('CITATION'):
-        with open('CITATION', 'r') as citation:
-            refs = re.findall(r'\{[^()]*\}', citation.read())
-            if len(refs) == 0: return ''
-            bibtexreference = "@ARTICLE{0}".format(refs[0])
-        return bibtexreference
-    else:
-        return ''
+    citation_file = os.path.join(os.path.dirname(__file__), 'CITATION')
 
-__bibtex__ = _get_bibtex()
+    with open(citation_file, 'r') as citation:
+        refs = citation.read().split('@ARTICLE')[1:]
+        if len(refs) == 0: return ''
+        bibtexreference = "@ARTICLE{}".format(refs[0])
+    return bibtexreference
 
+
+__citation__ = __bibtex__ = _get_bibtex()
 
 import logging
 
@@ -272,14 +334,13 @@ import logging
 log = logging.getLogger()
 
 
-if not _ASTROPY_SETUP_:
-    from .logger import _init_log, _teardown_log
+from .logger import _init_log, _teardown_log
 
-    log = _init_log()
+log = _init_log()
 
-    _initialize_astropy()
+_initialize_astropy()
 
-    from .utils.misc import find_api_page
+from .utils.misc import find_api_page
 
 
 def online_help(query):
@@ -293,7 +354,7 @@ def online_help(query):
     query : str
         The search query.
     """
-    from .extern.six.moves.urllib.parse import urlencode
+    from urllib.parse import urlencode
     import webbrowser
 
     version = __version__
@@ -302,23 +363,24 @@ def online_help(query):
     else:
         version = 'v' + version
 
-    url = 'http://docs.astropy.org/en/{0}/search.html?{1}'.format(
+    url = 'http://docs.astropy.org/en/{}/search.html?{}'.format(
         version, urlencode({'q': query}))
 
     webbrowser.open(url)
 
 
-__dir__ = ['__version__', '__githash__', '__minimum_numpy_version__',
-           '__bibtex__', 'test', 'log', 'find_api_page', 'online_help',
-           'online_docs_root', 'conf']
+__dir_inc__ = ['__version__', '__githash__', '__minimum_numpy_version__',
+               '__bibtex__', 'test', 'log', 'find_api_page', 'online_help',
+               'online_docs_root', 'conf', 'physical_constants',
+               'astronomical_constants']
 
 
 from types import ModuleType as __module_type__
-# Clean up top-level namespace--delete everything that isn't in __dir__
+# Clean up top-level namespace--delete everything that isn't in __dir_inc__
 # or is a magic attribute, and that isn't a submodule of this package
 for varname in dir():
     if not ((varname.startswith('__') and varname.endswith('__')) or
-            varname in __dir__ or
+            varname in __dir_inc__ or
             (varname[0] != '_' and
                 isinstance(locals()[varname], __module_type__) and
                 locals()[varname].__name__.startswith(__name__ + '.'))):

@@ -9,7 +9,6 @@
 #
 # All configuration values have a default. Some values are defined in
 # the global Astropy configuration which is loaded here before anything else.
-# See astropy.sphinx.conf for which values are set there.
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
@@ -21,75 +20,80 @@
 # done. If the sys.path entry above is added, when the astropy.sphinx.conf
 # import occurs, it will import the *source* version of astropy instead of the
 # version installed (if invoked as "make html" or directly with sphinx), or the
-# version in the build directory (if "python setup.py build_sphinx" is used).
+# version in the build directory (if "python setup.py build_docs" is used).
 # Thus, any C-extensions that are needed to build the documentation will *not*
 # be accessible, and the documentation will not build correctly.
+# See sphinx_astropy.conf for which values are set there.
 
-try:
-    import astropy_helpers
-except ImportError:
-    # Building from inside the docs/ directory?
-    import os
-    import sys
-    if os.path.basename(os.getcwd()) == 'docs':
-        a_h_path = os.path.abspath(os.path.join('..', 'astropy_helpers'))
-        if os.path.isdir(a_h_path):
-            sys.path.insert(1, a_h_path)
+from datetime import datetime
+import os
+import sys
 
-    # If that doesn't work trying to import from astropy_helpers below will
-    # still blow up
-
-# Load all of the global Astropy configuration
-from astropy_helpers.sphinx.conf import *
-from astropy.extern import six
+from pkg_resources import get_distribution
 
 import astropy
 
-# Use the astropy style when building docs
-from astropy import visualization
-plot_rcparams = visualization.astropy_mpl_docs_style
-plot_apply_rcparams = True
+try:
+    from sphinx_astropy.conf.v1 import *  # noqa
+except ImportError:
+    print('ERROR: the documentation requires the sphinx-astropy package to be installed')
+    sys.exit(1)
 
+plot_rcparams = {}
+plot_rcparams['figure.figsize'] = (6, 6)
+plot_rcparams['savefig.facecolor'] = 'none'
+plot_rcparams['savefig.bbox'] = 'tight'
+plot_rcparams['axes.labelsize'] = 'large'
+plot_rcparams['figure.subplot.hspace'] = 0.5
+
+plot_apply_rcparams = True
+plot_html_show_source_link = False
+plot_formats = ['png', 'svg', 'pdf']
+# Don't use the default - which includes a numpy and matplotlib import
+plot_pre_code = ""
 
 # -- General configuration ----------------------------------------------------
 
 # If your documentation needs a minimal Sphinx version, state it here.
-#needs_sphinx = '1.1'
+needs_sphinx = '1.7'
 
 # To perform a Sphinx version check that needs to be more specific than
 # major.minor, call `check_sphinx_version("x.y.z")` here.
 check_sphinx_version("1.2.1")
 
-# The intersphinx_mapping in astropy_helpers.sphinx.conf refers to astropy for
-# the benefit of affiliated packages who want to refer to objects in the
+# The intersphinx_mapping in sphinx_astropy.sphinx refers to astropy for
+# the benefit of other packages who want to refer to objects in the
 # astropy core.  However, we don't want to cyclically reference astropy in its
 # own build so we remove it here.
 del intersphinx_mapping['astropy']
 
 # add any custom intersphinx for astropy
-intersphinx_mapping['pytest'] = ('http://pytest.org/latest/', None)
-intersphinx_mapping['ipython'] = ('http://ipython.readthedocs.io/en/stable/', None)
-intersphinx_mapping['pandas'] = ('http://pandas.pydata.org/pandas-docs/stable/', None)
+intersphinx_mapping['pytest'] = ('https://pytest.readthedocs.io/en/stable/', None)
+intersphinx_mapping['ipython'] = ('https://ipython.readthedocs.io/en/stable/', None)
+intersphinx_mapping['pandas'] = ('https://pandas.pydata.org/pandas-docs/stable/', None)
+intersphinx_mapping['sphinx_automodapi'] = ('https://sphinx-automodapi.readthedocs.io/en/stable/', None)
+intersphinx_mapping['packagetemplate'] = ('http://docs.astropy.org/projects/package-template/en/latest/', None)
+intersphinx_mapping['h5py'] = ('http://docs.h5py.org/en/stable/', None)
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 exclude_patterns.append('_templates')
 exclude_patterns.append('_pkgtemplate.rst')
+exclude_patterns.append('**/*.inc.rst')  # .inc.rst mean *include* files, don't have sphinx process them
 
 # Add any paths that contain templates here, relative to this directory.
 if 'templates_path' not in locals():  # in case parent conf.py defines it
     templates_path = []
 templates_path.append('_templates')
 
-
 # This is added to the end of RST files - a good place to put substitutions to
 # be used globally.
 rst_epilog += """
+.. |minimum_python_version| replace:: {0.__minimum_python_version__}
 .. |minimum_numpy_version| replace:: {0.__minimum_numpy_version__}
 
 .. Astropy
-.. _Astropy: http://astropy.org
-.. _`Astropy mailing list`: http://mail.scipy.org/mailman/listinfo/astropy
+.. _`Astropy mailing list`: https://mail.python.org/mailman/listinfo/astropy
 .. _`astropy-dev mailing list`: http://groups.google.com/group/astropy-dev
 """.format(astropy)
 
@@ -97,16 +101,20 @@ rst_epilog += """
 
 project = u'Astropy'
 author = u'The Astropy Developers'
-copyright = u'2011-2016, ' + author
+copyright = u'2011–{0}, '.format(datetime.utcnow().year) + author
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
 # built documents.
 
-# The short X.Y version.
-version = astropy.__version__.split('-', 1)[0]
 # The full version, including alpha/beta/rc tags.
-release = astropy.__version__
+release = get_distribution(project).version
+# The short X.Y version.
+version = '.'.join(release.split('.')[:2])
+
+# -- Options for the module index ---------------------------------------------
+
+modindex_common_prefix = ['astropy.']
 
 
 # -- Options for HTML output ---------------------------------------------------
@@ -159,6 +167,10 @@ html_title = '{0} v{1}'.format(project, release)
 # Output file base name for HTML help builder.
 htmlhelp_basename = project + 'doc'
 
+# A dictionary of values to pass into the template engine’s context for all pages.
+html_context = {
+    'to_be_indexed': ['stable', 'latest']
+}
 
 # -- Options for LaTeX output --------------------------------------------------
 
@@ -177,26 +189,9 @@ latex_logo = '_static/astropy_logo.pdf'
 man_pages = [('index', project.lower(), project + u' Documentation',
               [author], 1)]
 
-
-# -- Options for the edit_on_github extension ----------------------------------------
-
-extensions += ['astropy_helpers.sphinx.ext.edit_on_github']
-
-# Don't import the module as "version" or it will override the
-# "version" configuration parameter
-from astropy import version as versionmod
-edit_on_github_project = "astropy/astropy"
-if versionmod.release:
-    edit_on_github_branch = "v{0}.{1}.x".format(
-        versionmod.major, versionmod.minor)
-else:
-    edit_on_github_branch = "master"
-edit_on_github_source_root = ""
-edit_on_github_doc_root = "docs"
-
-edit_on_github_skip_regex = '_.*|api/.*'
-
+# Setting this URL is requited by sphinx-astropy
 github_issues_url = 'https://github.com/astropy/astropy/issues/'
+edit_on_github_branch = 'master'
 
 # Enable nitpicky mode - which ensures that all references in the docs
 # resolve.
@@ -209,10 +204,7 @@ for line in open('nitpick-exceptions'):
         continue
     dtype, target = line.split(None, 1)
     target = target.strip()
-    nitpick_ignore.append((dtype, six.u(target)))
-
-if six.PY2:
-    nitpick_ignore.extend([('py:obj', six.u('bases'))])
+    nitpick_ignore.append((dtype, target))
 
 # -- Options for the Sphinx gallery -------------------------------------------
 
@@ -221,33 +213,50 @@ try:
     extensions += ["sphinx_gallery.gen_gallery"]
 
     sphinx_gallery_conf = {
-        'mod_example_dir': 'generated/modules', # path to store the module using example template
+        'backreferences_dir': 'generated/modules', # path to store the module using example template
         'filename_pattern': '^((?!skip_).)*$', # execute all examples except those that start with "skip_"
         'examples_dirs': '..{}examples'.format(os.sep), # path to the examples scripts
         'gallery_dirs': 'generated/examples', # path to save gallery generated examples
         'reference_url': {
             'astropy': None,
-            'matplotlib': 'http://matplotlib.org/',
+            'matplotlib': 'https://matplotlib.org/',
             'numpy': 'http://docs.scipy.org/doc/numpy/',
-        }
+        },
+        'abort_on_example_error': True
     }
 
-    # TODO: remove the code below once a better solution is implemented in
-    # sphinx-gallery.
-    # We want to make sure that gallery examples fail the build if there are
-    # any errors, when building the docs with the option to fail if there are
-    # any warnings. However, at the moment, we can only either fail the build
-    # completely or not fail it at all, until this is fixed properly in
-    # sphinx-gallery: https://github.com/sphinx-gallery/sphinx-gallery/pull/97
-    # Therefore, for now we simply check if we are on Travis, and if so, we
-    # enabled the abort_on_example_error.
-    if os.environ.get('TRAVIS', 'false') == 'true':
-        def setup(app):
-            app.config.values['abort_on_example_error'] = (True, 'html', ())
+    # Filter out backend-related warnings as described in
+    # https://github.com/sphinx-gallery/sphinx-gallery/pull/564
+    warnings.filterwarnings("ignore", category=UserWarning,
+                            message='Matplotlib is currently using agg, which is a'
+                                    ' non-GUI backend, so cannot show the figure.')
 
 except ImportError:
     def setup(app):
-        app.warn('The sphinx_gallery extension is not installed, so the '
-                 'gallery will not be built.  You will probably see '
-                 'additional warnings about undefined references due '
-                 'to this.')
+        msg = ('The sphinx_gallery extension is not installed, so the '
+               'gallery will not be built.  You will probably see '
+               'additional warnings about undefined references due '
+               'to this.')
+        try:
+            app.warn(msg)
+        except AttributeError:
+            # Sphinx 1.6+
+            from sphinx.util import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(msg)
+
+
+# -- Options for linkcheck output -------------------------------------------
+linkcheck_retry = 5
+linkcheck_ignore = ['https://journals.aas.org/manuscript-preparation/',
+                    'https://maia.usno.navy.mil/',
+                    'https://www.usno.navy.mil/USNO/time/gps/usno-gps-time-transfer',
+                    'https://aa.usno.navy.mil/publications/docs/Circular_179.php',
+                    r'https://github\.com/astropy/astropy/(?:issues|pull)/\d+']
+linkcheck_timeout = 180
+linkcheck_anchors = False
+
+# Add any extra paths that contain custom files (such as robots.txt or
+# .htaccess) here, relative to this directory. These files are copied
+# directly to the root of the documentation.
+html_extra_path = ['robots.txt']

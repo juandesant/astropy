@@ -1,27 +1,38 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 import os
-from ....tests.helper import pytest
 
-from ....table import Table, Column
+import pytest
+
+from astropy.table import Table, Column
+
+from astropy.table.table_helpers import simple_table
+
+import numpy as np
 
 ROOT = os.path.abspath(os.path.dirname(__file__))
 
-files = ['t/cds.dat', 't/ipac.dat', 't/daophot.dat', 't/latex1.tex',
-         't/simple_csv.csv']
+files = ['data/cds.dat', 'data/ipac.dat', 'data/daophot.dat', 'data/latex1.tex',
+         'data/simple_csv.csv']
 
 # Check to see if the BeautifulSoup dependency is present.
 
 try:
-    from bs4 import BeautifulSoup  # pylint: disable=W0611
+    from bs4 import BeautifulSoup  # noqa
     HAS_BEAUTIFUL_SOUP = True
 except ImportError:
     HAS_BEAUTIFUL_SOUP = False
 
+try:
+    import yaml  # noqa
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+
 if HAS_BEAUTIFUL_SOUP:
-    files.append('t/html.html')
+    files.append('data/html.html')
+
 
 @pytest.mark.parametrize('filename', files)
-
 def test_read_generic(filename):
     Table.read(os.path.join(ROOT, filename), format='ascii')
 
@@ -34,23 +45,23 @@ def test_write_generic(tmpdir):
 
 
 def test_read_ipac():
-    Table.read(os.path.join(ROOT, 't/ipac.dat'), format='ipac')
+    Table.read(os.path.join(ROOT, 'data/ipac.dat'), format='ipac')
 
 
 def test_read_cds():
-    Table.read(os.path.join(ROOT, 't/cds.dat'), format='cds')
+    Table.read(os.path.join(ROOT, 'data/cds.dat'), format='cds')
 
 
 def test_read_dapphot():
-    Table.read(os.path.join(ROOT, 't/daophot.dat'), format='daophot')
+    Table.read(os.path.join(ROOT, 'data/daophot.dat'), format='daophot')
 
 
 def test_read_latex():
-    Table.read(os.path.join(ROOT, 't/latex1.tex'), format='latex')
+    Table.read(os.path.join(ROOT, 'data/latex1.tex'), format='latex')
 
 
 def test_read_latex_noformat():
-    Table.read(os.path.join(ROOT, 't/latex1.tex'))
+    Table.read(os.path.join(ROOT, 'data/latex1.tex'))
 
 
 def test_write_latex(tmpdir):
@@ -71,12 +82,12 @@ def test_write_latex_noformat(tmpdir):
 
 @pytest.mark.skipif('not HAS_BEAUTIFUL_SOUP')
 def test_read_html():
-    Table.read(os.path.join(ROOT, 't/html.html'), format='html')
+    Table.read(os.path.join(ROOT, 'data/html.html'), format='html')
 
 
 @pytest.mark.skipif('not HAS_BEAUTIFUL_SOUP')
 def test_read_html_noformat():
-    Table.read(os.path.join(ROOT, 't/html.html'))
+    Table.read(os.path.join(ROOT, 'data/html.html'))
 
 
 def test_write_html(tmpdir):
@@ -96,11 +107,11 @@ def test_write_html_noformat(tmpdir):
 
 
 def test_read_rdb():
-    Table.read(os.path.join(ROOT, 't/short.rdb'), format='rdb')
+    Table.read(os.path.join(ROOT, 'data/short.rdb'), format='rdb')
 
 
 def test_read_rdb_noformat():
-    Table.read(os.path.join(ROOT, 't/short.rdb'))
+    Table.read(os.path.join(ROOT, 'data/short.rdb'))
 
 
 def test_write_rdb(tmpdir):
@@ -124,7 +135,7 @@ def test_read_csv():
 
     #3189
     '''
-    Table.read(os.path.join(ROOT, 't/simple_csv.csv'))
+    Table.read(os.path.join(ROOT, 'data/simple_csv.csv'))
 
 
 def test_write_csv(tmpdir):
@@ -137,3 +148,12 @@ def test_write_csv(tmpdir):
     t.add_column(Column(name='b', data=['a', 'b', 'c']))
     path = str(tmpdir.join("data.csv"))
     t.write(path)
+
+
+@pytest.mark.skipif('not HAS_YAML')
+def test_auto_identify_ecsv(tmpdir):
+    tbl = simple_table()
+    tmpfile = str(tmpdir.join('/tmpFile.ecsv'))
+    tbl.write(tmpfile)
+    tbl2 = Table.read(tmpfile)
+    assert np.all(tbl == tbl2)

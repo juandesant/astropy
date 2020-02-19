@@ -3,14 +3,13 @@
 import gzip
 import io
 
-from ..file import _File
+from astropy.io.fits.file import _File
 from .base import NonstandardExtHDU
 from .hdulist import HDUList
-from ..header import Header, _pad_length
-from ..util import fileobj_name
+from astropy.io.fits.header import Header, _pad_length
+from astropy.io.fits.util import fileobj_name
 
-from ....extern.six import string_types
-from ....utils import lazyproperty
+from astropy.utils import lazyproperty
 
 
 class FitsHDU(NonstandardExtHDU):
@@ -53,7 +52,8 @@ class FitsHDU(NonstandardExtHDU):
             Gzip compress the FITS file
         """
 
-        return cls.fromhdulist(HDUList.fromfile(filename), compress=compress)
+        with HDUList.fromfile(filename) as hdulist:
+            return cls.fromhdulist(hdulist, compress=compress)
 
     @classmethod
     def fromhdulist(cls, hdulist, compress=False):
@@ -89,12 +89,12 @@ class FitsHDU(NonstandardExtHDU):
         bs.seek(0)
 
         cards = [
-            ('XTENSION',  cls._extension, 'FITS extension'),
-            ('BITPIX',    8, 'array data type'),
-            ('NAXIS',     1, 'number of array dimensions'),
-            ('NAXIS1',    len(bs.getvalue()), 'Axis length'),
-            ('PCOUNT',    0, 'number of parameters'),
-            ('GCOUNT',    1, 'number of groups'),
+            ('XTENSION', cls._extension, 'FITS extension'),
+            ('BITPIX', 8, 'array data type'),
+            ('NAXIS', 1, 'number of array dimensions'),
+            ('NAXIS1', len(bs.getvalue()), 'Axis length'),
+            ('PCOUNT', 0, 'number of parameters'),
+            ('GCOUNT', 1, 'number of groups'),
         ]
 
         # Add the XINDn keywords proposed by Perry, though nothing is done with
@@ -102,9 +102,9 @@ class FitsHDU(NonstandardExtHDU):
         if len(hdulist) > 1:
             for idx, hdu in enumerate(hdulist[1:]):
                 cards.append(('XIND' + str(idx + 1), hdu._header_offset,
-                              'byte offset of extension %d' % (idx + 1)))
+                              'byte offset of extension {}'.format(idx + 1)))
 
-        cards.append(('COMPRESS',  compress, 'Uses gzip compression'))
+        cards.append(('COMPRESS', compress, 'Uses gzip compression'))
         header = Header(cards)
         return cls._readfrom_internal(_File(bs), header=header)
 
@@ -114,7 +114,7 @@ class FitsHDU(NonstandardExtHDU):
         if card.keyword != 'XTENSION':
             return False
         xtension = card.value
-        if isinstance(xtension, string_types):
+        if isinstance(xtension, str):
             xtension = xtension.rstrip()
         return xtension == cls._extension
 
@@ -122,4 +122,4 @@ class FitsHDU(NonstandardExtHDU):
 
     def _summary(self):
         # TODO: Perhaps make this more descriptive...
-        return (self.name, self.__class__.__name__, len(self._header))
+        return (self.name, self.ver, self.__class__.__name__, len(self._header))

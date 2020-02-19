@@ -1,15 +1,15 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 # This module implements the Slicing mixin to the NDData class.
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
-from ... import log
+from astropy import log
+from astropy.wcs.wcsapi import (BaseLowLevelWCS, BaseHighLevelWCS,
+                                SlicedLowLevelWCS, HighLevelWCSWrapper)
 
 __all__ = ['NDSlicingMixin']
 
 
-class NDSlicingMixin(object):
+class NDSlicingMixin:
     """Mixin to provide slicing on objects using the `NDData`
     interface.
 
@@ -36,8 +36,9 @@ class NDSlicingMixin(object):
         >>> import numpy as np
         >>> mask = np.array([True, False, True, True, False])
         >>> nd2 = NDDataSliceable(nd, mask=mask)
-        >>> nd2[1:3].mask
-        array([False,  True], dtype=bool)
+        >>> nd2slc = nd2[1:3]
+        >>> nd2slc[nd2slc.mask]
+        NDDataSliceable([3])
 
     Be aware that changing values of the sliced instance will change the values
     of the original::
@@ -117,8 +118,15 @@ class NDSlicingMixin(object):
     def _slice_wcs(self, item):
         if self.wcs is None:
             return None
+
         try:
-            return self.wcs[item]
-        except TypeError:
-            log.info("wcs cannot be sliced.")
-        return self.wcs
+            llwcs = SlicedLowLevelWCS(self.wcs.low_level_wcs, item)
+            return HighLevelWCSWrapper(llwcs)
+        except Exception as err:
+            self._handle_wcs_slicing_error(err, item)
+
+    # Implement this in a method to allow subclasses to customise the error.
+    def _handle_wcs_slicing_error(self, err, item):
+        raise ValueError(f"Slicing the WCS object with the slice '{item}' "
+        "failed, if you want to slice the NDData object without the WCS, you "
+        "can remove by setting `NDData.wcs = None` and then retry.") from err

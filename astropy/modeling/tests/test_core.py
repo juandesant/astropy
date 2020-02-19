@@ -1,17 +1,27 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
+# pylint: disable=invalid-name
+import os
+import sys
+import subprocess
 
-from __future__ import (absolute_import, unicode_literals, division,
-                        print_function)
-
+import pytest
 import numpy as np
-from numpy.testing.utils import assert_allclose
-from ..core import Model, InputParameterError, custom_model
-from ..parameters import Parameter
-from .. import models
+from inspect import signature
+from numpy.testing import assert_allclose
 
-from ...tests.helper import pytest, catch_warnings
-from ...utils.compat.funcsigs import signature
-from ...utils.exceptions import AstropyDeprecationWarning
+import astropy
+from astropy.modeling.core import Model, custom_model
+from astropy.modeling.parameters import Parameter
+from astropy.modeling import models
+import astropy.units as u
+from astropy.tests.helper import assert_quantity_allclose
+
+try:
+    import scipy  # pylint: disable=W0611 # noqa
+except ImportError:
+    HAS_SCIPY = False
+else:
+    HAS_SCIPY = True
 
 
 class NonFittableModel(Model):
@@ -20,8 +30,7 @@ class NonFittableModel(Model):
     a = Parameter()
 
     def __init__(self, a, model_set_axis=None):
-        super(NonFittableModel, self).__init__(
-            a, model_set_axis=model_set_axis)
+        super().__init__(a, model_set_axis=model_set_axis)
 
     @staticmethod
     def evaluate():
@@ -29,17 +38,17 @@ class NonFittableModel(Model):
 
 
 def test_Model_instance_repr_and_str():
-    m = NonFittableModel(42)
-    assert repr(m) == "<NonFittableModel(a=42.0)>"
+    m = NonFittableModel(42.5)
+    assert repr(m) == "<NonFittableModel(a=42.5)>"
     assert (str(m) ==
-        "Model: NonFittableModel\n"
-        "Inputs: ()\n"
-        "Outputs: ()\n"
-        "Model set size: 1\n"
-        "Parameters:\n"
-        "     a  \n"
-        "    ----\n"
-        "    42.0")
+            "Model: NonFittableModel\n"
+            "Inputs: ()\n"
+            "Outputs: ()\n"
+            "Model set size: 1\n"
+            "Parameters:\n"
+            "     a  \n"
+            "    ----\n"
+            "    42.5")
 
     assert len(m) == 1
 
@@ -56,8 +65,8 @@ def test_inputless_model():
     """
 
     class TestModel(Model):
-        inputs = ()
-        outputs = ('y',)
+
+        n_outputs = 1
         a = Parameter()
 
         @staticmethod
@@ -102,9 +111,11 @@ def test_custom_model_signature():
     assert model_a.param_names == ()
     assert model_a.n_inputs == 1
     sig = signature(model_a.__init__)
-    assert list(sig.parameters.keys()) == ['self', 'args', 'kwargs']
+    assert list(sig.parameters.keys()) == ['self', 'args', 'meta', 'name', 'kwargs']
     sig = signature(model_a.__call__)
-    assert list(sig.parameters.keys()) == ['self', 'x', 'model_set_axis']
+    assert list(sig.parameters.keys()) == ['self', 'inputs', 'model_set_axis',
+                                           'with_bounding_box', 'fill_value',
+                                           'equivalencies', 'inputs_map', 'new_inputs']
 
     @custom_model
     def model_b(x, a=1, b=2):
@@ -116,7 +127,9 @@ def test_custom_model_signature():
     assert list(sig.parameters.keys()) == ['self', 'a', 'b', 'kwargs']
     assert [x.default for x in sig.parameters.values()] == [sig.empty, 1, 2, sig.empty]
     sig = signature(model_b.__call__)
-    assert list(sig.parameters.keys()) == ['self', 'x', 'model_set_axis']
+    assert list(sig.parameters.keys()) == ['self', 'inputs', 'model_set_axis',
+                                           'with_bounding_box', 'fill_value',
+                                           'equivalencies', 'inputs_map', 'new_inputs']
 
     @custom_model
     def model_c(x, y, a=1, b=2):
@@ -128,7 +141,9 @@ def test_custom_model_signature():
     assert list(sig.parameters.keys()) == ['self', 'a', 'b', 'kwargs']
     assert [x.default for x in sig.parameters.values()] == [sig.empty, 1, 2, sig.empty]
     sig = signature(model_c.__call__)
-    assert list(sig.parameters.keys()) == ['self', 'x', 'y', 'model_set_axis']
+    assert list(sig.parameters.keys()) == ['self', 'inputs', 'model_set_axis',
+                                           'with_bounding_box', 'fill_value',
+                                           'equivalencies', 'inputs_map', 'new_inputs']
 
 
 def test_custom_model_subclass():
@@ -142,7 +157,7 @@ def test_custom_model_subclass():
         # Override the evaluate from model_a
         @classmethod
         def evaluate(cls, x, a):
-            return -super(model_b, cls).evaluate(x, a)
+            return -super().evaluate(x, a)
 
     b = model_b()
     assert b.param_names == ('a',)
@@ -152,7 +167,9 @@ def test_custom_model_subclass():
     sig = signature(model_b.__init__)
     assert list(sig.parameters.keys()) == ['self', 'a', 'kwargs']
     sig = signature(model_b.__call__)
-    assert list(sig.parameters.keys()) == ['self', 'x', 'model_set_axis']
+    assert list(sig.parameters.keys()) == ['self', 'inputs', 'model_set_axis',
+                                           'with_bounding_box', 'fill_value',
+                                           'equivalencies', 'inputs_map', 'new_inputs']
 
 
 def test_custom_model_parametrized_decorator():
@@ -188,11 +205,7 @@ def test_custom_inverse():
     assert_allclose(x, p(p.inverse(x)))
     assert_allclose(x, p.inverse(p(x)))
 
-    with catch_warnings(AstropyDeprecationWarning) as w:
-        p.inverse = None
-
-    # TODO: This can be removed after Astropy v1.1 or so
-    assert len(w) == 1
+    p.inverse = None
 
     with pytest.raises(NotImplementedError):
         p.inverse
@@ -202,8 +215,9 @@ def test_custom_inverse_reset():
     """Test resetting a custom inverse to the model's default inverse."""
 
     class TestModel(Model):
-        inputs = ()
+        n_inputs = 0
         outputs = ('y',)
+
         @property
         def inverse(self):
             return models.Shift()
@@ -298,6 +312,7 @@ def test_render_model_1d():
                     assert ((flux - np.sum(boxed)) / flux) < 1e-7
 
 
+@pytest.mark.filterwarnings('ignore:invalid value encountered in less')
 def test_render_model_3d():
     imshape = (17, 21, 27)
     image = np.zeros(imshape)
@@ -314,7 +329,7 @@ def test_render_model_3d():
             return ((self.z0 - self.c, self.z0 + self.c),
                     (self.y0 - self.b, self.y0 + self.b),
                     (self.x0 - self.a, self.x0 + self.a))
-
+   
     model = Ellipsoid3D()
 
     # test points for edges
@@ -342,3 +357,124 @@ def test_render_model_3d():
                 if (z0, y0, x0) == (8, 10, 13):
                     boxed = model.render()
                     assert (np.sum(expected) - np.sum(boxed)) == 0
+
+
+def test_custom_bounding_box_1d():
+    """
+    Tests that the bounding_box setter works.
+    """
+    # 1D models
+    g1 = models.Gaussian1D()
+    bb = g1.bounding_box
+    expected = g1.render()
+
+    # assign the same bounding_box, now through the bounding_box setter
+    g1.bounding_box = bb
+    assert_allclose(g1.render(), expected)
+
+    # 2D models
+    g2 = models.Gaussian2D()
+    bb = g2.bounding_box
+    expected = g2.render()
+
+    # assign the same bounding_box, now through the bounding_box setter
+    g2.bounding_box = bb
+    assert_allclose(g2.render(), expected)
+
+
+def test_n_submodels_in_single_models():
+    assert models.Gaussian1D().n_submodels == 1
+    assert models.Gaussian2D().n_submodels == 1
+
+
+def test_compound_deepcopy():
+    model = (models.Gaussian1D(10, 2, 3) | models.Shift(2)) & models.Rotation2D(21.3)
+    new_model = model.deepcopy()
+    assert id(model) != id(new_model)
+    assert id(model._leaflist) != id(new_model._leaflist)
+    assert id(model[0]) != id(new_model[0])
+    assert id(model[1]) != id(new_model[1])
+    assert id(model[2]) != id(new_model[2])
+
+
+@pytest.mark.skipif('not HAS_SCIPY')
+def test_units_with_bounding_box():
+    points = np.arange(10, 20)
+    table = np.arange(10) * u.Angstrom
+    t = models.Tabular1D(points, lookup_table=table)
+
+    assert isinstance(t(10), u.Quantity)
+    assert isinstance(t(10, with_bounding_box=True), u.Quantity)
+
+    assert_quantity_allclose(t(10), t(10, with_bounding_box=True))
+
+
+RENAMED_MODEL = models.Gaussian1D.rename('CustomGaussian')
+
+MODEL_RENAME_CODE = """
+from astropy.modeling.models import Gaussian1D
+print(repr(Gaussian1D))
+print(repr(Gaussian1D.rename('CustomGaussian')))
+""".strip()
+
+MODEL_RENAME_EXPECTED = b"""
+<class 'astropy.modeling.functional_models.Gaussian1D'>
+Name: Gaussian1D
+N_inputs: 1
+N_outputs: 1
+Fittable parameters: ('amplitude', 'mean', 'stddev')
+<class '__main__.CustomGaussian'>
+Name: CustomGaussian (Gaussian1D)
+N_inputs: 1
+N_outputs: 1
+Fittable parameters: ('amplitude', 'mean', 'stddev')
+""".strip()
+
+
+def test_rename_path(tmpdir):
+
+    # Regression test for a bug that caused the path to the class to be
+    # incorrect in a renamed model's __repr__.
+
+    assert repr(RENAMED_MODEL).splitlines()[0] == "<class 'astropy.modeling.tests.test_core.CustomGaussian'>"
+
+    # Make sure that when called from a user script, the class name includes
+    # __main__.
+
+    env = os.environ.copy()
+    paths = [os.path.dirname(astropy.__path__[0])] + sys.path
+    env['PYTHONPATH'] = os.pathsep.join(paths)
+
+    script = tmpdir.join('rename.py').strpath
+    with open(script, 'w') as f:
+        f.write(MODEL_RENAME_CODE)
+
+    output = subprocess.check_output([sys.executable, script], env=env)
+    assert output.splitlines() == MODEL_RENAME_EXPECTED.splitlines()
+
+
+@pytest.mark.parametrize('model_class',
+                         [models.Gaussian1D, models.Polynomial1D,
+                          models.Shift, models.Tabular1D])
+def test_rename_1d(model_class):
+    new_model = model_class.rename(name='Test1D')
+    assert new_model.name == 'Test1D'
+
+
+@pytest.mark.parametrize('model_class',
+                         [models.Gaussian2D, models.Polynomial2D, models.Tabular2D])
+def test_rename_2d(model_class):
+    new_model = model_class.rename(name='Test2D')
+    assert new_model.name == 'Test2D'
+
+
+def test_rename_inputs_outputs():
+    g2 = models.Gaussian2D(10, 2, 3, 1, 2)
+    assert g2.inputs == ("x", "y")
+    assert g2.outputs == ("z",)
+
+    with pytest.raises(ValueError):
+        g2.inputs = ("w", )
+
+    with pytest.raises(ValueError):
+        g2.outputs = ("w", "e")

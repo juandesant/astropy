@@ -1,6 +1,5 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-from __future__ import absolute_import
 
 import os
 
@@ -17,10 +16,10 @@ TEST_DIR = os.path.dirname(__file__)
 
 has_isnan = True
 try:
-    from math import isnan  # pylint: disable=W0611
+    from math import isnan  # noqa
 except ImportError:
     try:
-        from numpy import isnan  # pylint: disable=W0611
+        from numpy import isnan  # noqa
     except ImportError:
         has_isnan = False
         print('Tests requiring isnan will fail')
@@ -39,8 +38,8 @@ def assert_equal(a, b):
     assert a == b
 
 
-def assert_almost_equal(a, b):
-    assert np.allclose(a, b)
+def assert_almost_equal(a, b, **kwargs):
+    assert np.allclose(a, b, **kwargs)
 
 
 def assert_true(a):
@@ -101,10 +100,8 @@ def raises(*exceptions):
                 func(*arg, **kw)
             except exceptions:
                 pass
-            except:
-                raise
             else:
-                message = "%s() did not raise %s" % (name, valid)
+                message = f"{name}() did not raise {valid}"
                 raise AssertionError(message)
         newfunc = make_decorator(func)(newfunc)
         return newfunc

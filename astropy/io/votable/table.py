@@ -5,11 +5,6 @@ This file contains a contains the high-level functions to read a
 VOTable file.
 """
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-
-from ...extern import six
-
 # STDLIB
 import io
 import os
@@ -20,15 +15,19 @@ import warnings
 # LOCAL
 from . import exceptions
 from . import tree
-from ...utils.xml import iterparser
-from ...utils import data
-
+from astropy.utils.xml import iterparser
+from astropy.utils import data
+from astropy.utils.decorators import deprecated_renamed_argument
+from astropy.utils.exceptions import AstropyDeprecationWarning
 
 __all__ = ['parse', 'parse_single_table', 'from_table', 'writeto', 'validate',
            'reset_vo_warnings']
 
+VERIFY_OPTIONS = ['ignore', 'warn', 'exception']
 
-def parse(source, columns=None, invalid='exception', pedantic=None,
+
+@deprecated_renamed_argument('pedantic', 'verify', pending=True, since='4.0')
+def parse(source, columns=None, invalid='exception', verify=None,
           chunk_size=tree.DEFAULT_CHUNK_SIZE, table_number=None,
           table_id=None, filename=None, unit_format=None,
           datatype_mapping=None, _debug_python_based_parser=False):
@@ -53,13 +52,17 @@ def parse(source, columns=None, invalid='exception', pedantic=None,
 
             - 'mask': mask out invalid values
 
-    pedantic : bool, optional
-        When `True`, raise an error when the file violates the spec,
-        otherwise issue a warning.  Warnings may be controlled using
-        the standard Python mechanisms.  See the `warnings`
-        module in the Python standard library for more information.
-        When not provided, uses the configuration setting
-        ``astropy.io.votable.pedantic``, which defaults to False.
+    verify : {'ignore', 'warn', 'exception'}, optional
+        When ``'exception'``, raise an error when the file violates the spec,
+        otherwise either issue a warning (``'warn'``) or silently continue
+        (``'ignore'``). Warnings may be controlled using the standard Python
+        mechanisms.  See the `warnings` module in the Python standard library
+        for more information. When not provided, uses the configuration setting
+        ``astropy.io.votable.verify``, which defaults to 'ignore'.
+
+        .. versionchanged:: 4.0
+           ``verify`` replaces the ``pedantic`` argument, which will be
+           deprecated in future.
 
     chunk_size : int, optional
         The number of rows to read before converting to an array.
@@ -111,31 +114,55 @@ def parse(source, columns=None, invalid='exception', pedantic=None,
     from . import conf
 
     invalid = invalid.lower()
-    assert invalid in ('exception', 'mask')
+    if invalid not in ('exception', 'mask'):
+        raise ValueError("accepted values of ``invalid`` are: "
+                         "``'exception'`` or ``'mask'``.")
 
-    if pedantic is None:
-        pedantic = conf.pedantic
+    if verify is None:
+
+        # NOTE: since the pedantic argument isn't fully deprecated yet, we need
+        # to catch the deprecation warning that occurs when accessing the
+        # configuration item, but only if it is for the pedantic option in the
+        # [io.votable] section.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore",
+                                    r"Config parameter \'pedantic\' in section \[io.votable\]",
+                                    AstropyDeprecationWarning)
+            conf_verify_lowercase = conf.verify.lower()
+
+        # We need to allow verify to be booleans as strings since the
+        # configuration framework doesn't make it easy/possible to have mixed
+        # types.
+        if conf_verify_lowercase in ['false', 'true']:
+            verify = conf_verify_lowercase == 'true'
+        else:
+            verify = conf_verify_lowercase
+
+    if isinstance(verify, bool):
+        verify = 'exception' if verify else 'warn'
+    elif verify not in VERIFY_OPTIONS:
+        raise ValueError('verify should be one of {}'.format('/'.join(VERIFY_OPTIONS)))
 
     if datatype_mapping is None:
         datatype_mapping = {}
 
     config = {
-        'columns'          : columns,
-        'invalid'          : invalid,
-        'pedantic'         : pedantic,
-        'chunk_size'       : chunk_size,
-        'table_number'     : table_number,
-        'filename'         : filename,
-        'unit_format'      : unit_format,
-        'datatype_mapping' : datatype_mapping
+        'columns': columns,
+        'invalid': invalid,
+        'verify': verify,
+        'chunk_size': chunk_size,
+        'table_number': table_number,
+        'filename': filename,
+        'unit_format': unit_format,
+        'datatype_mapping': datatype_mapping
     }
 
-    if filename is None and isinstance(source, six.string_types):
+    if filename is None and isinstance(source, str):
         config['filename'] = source
 
     with iterparser.get_xml_iterator(
-        source,
-        _debug_python_based_parser=_debug_python_based_parser) as iterator:
+            source,
+            _debug_python_based_parser=_debug_python_based_parser) as iterator:
         return tree.VOTableFile(
             config=config, pos=(1, 1)).parse(iterator, config)
 
@@ -178,7 +205,7 @@ def writeto(table, file, tabledata_format=None):
         each ``table`` object as it was created or read in.  See
         :ref:`votable-serialization`.
     """
-    from ...table import Table
+    from astropy.table import Table
     if isinstance(table, Table):
         table = tree.VOTableFile.from_table(table)
     elif not isinstance(table, tree.VOTableFile):
@@ -220,7 +247,7 @@ def validate(source, output=None, xmllint=False, filename=None):
         `None`, the return value will be a string.
     """
 
-    from ...utils.console import print_code_line, color_print
+    from astropy.utils.console import print_code_line, color_print
 
     if output is None:
         output = sys.stdout
@@ -240,7 +267,7 @@ def validate(source, output=None, xmllint=False, filename=None):
     content_buffer.seek(0)
 
     if filename is None:
-        if isinstance(source, six.string_types):
+        if isinstance(source, str):
             filename = source
         elif hasattr(source, 'name'):
             filename = source.name
@@ -253,7 +280,7 @@ def validate(source, output=None, xmllint=False, filename=None):
         warnings.resetwarnings()
         warnings.simplefilter("always", exceptions.VOWarning, append=True)
         try:
-            votable = parse(content_buffer, pedantic=False, filename=filename)
+            votable = parse(content_buffer, verify='warn', filename=filename)
         except ValueError as e:
             lines.append(str(e))
 
@@ -261,7 +288,7 @@ def validate(source, output=None, xmllint=False, filename=None):
              issubclass(x.category, exceptions.VOWarning)] + lines
 
     content_buffer.seek(0)
-    output.write("Validation report for {0}\n\n".format(filename))
+    output.write(f"Validation report for {filename}\n\n")
 
     if len(lines):
         xml_lines = iterparser.xml_readlines(content_buffer)
@@ -280,7 +307,7 @@ def validate(source, output=None, xmllint=False, filename=None):
                 else:
                     color = 'red'
                 color_print(
-                    '{0:d}: '.format(w['nline']), '',
+                    '{:d}: '.format(w['nline']), '',
                     warning or 'EXC', color,
                     ': ', '',
                     textwrap.fill(
@@ -295,19 +322,19 @@ def validate(source, output=None, xmllint=False, filename=None):
 
     success = 0
     if xmllint and os.path.exists(filename):
-        from ...utils.xml import validate
+        from . import xmlutil
 
         if votable is None:
             version = "1.1"
         else:
             version = votable.version
-        success, stdout, stderr = validate.validate_schema(
+        success, stdout, stderr = xmlutil.validate_schema(
             filename, version)
 
         if success != 0:
             output.write(
                 'xmllint schema violations:\n\n')
-            output.write(stderr)
+            output.write(stderr.decode('utf-8'))
         else:
             output.write('xmllint passed\n')
 
@@ -353,12 +380,12 @@ def is_votable(source):
     """
     try:
         with iterparser.get_xml_iterator(source) as iterator:
-            for start, tag, data, pos in iterator:
+            for start, tag, d, pos in iterator:
                 if tag != 'xml':
                     return False
                 break
 
-            for start, tag, data, pos in iterator:
+            for start, tag, d, pos in iterator:
                 if tag != 'VOTABLE':
                     return False
                 break
@@ -378,12 +405,12 @@ def reset_vo_warnings():
     """
     from . import converters, xmlutil
 
-    #-----------------------------------------------------------#
-    # This is a special variable used by the Python warnings    #
-    # infrastructure to keep track of warnings that have        #
-    # already been seen.  Since we want to get every single     #
-    # warning out of this, we have to delete all of them first. #
-    #-----------------------------------------------------------#
+    # -----------------------------------------------------------#
+    #  This is a special variable used by the Python warnings    #
+    #  infrastructure to keep track of warnings that have        #
+    #  already been seen.  Since we want to get every single     #
+    #  warning out of this, we have to delete all of them first. #
+    # -----------------------------------------------------------#
     for module in (converters, exceptions, tree, xmlutil):
         if hasattr(module, '__warningregistry__'):
             del module.__warningregistry__

@@ -3,15 +3,13 @@
 """Functions related to Python runtime introspection."""
 
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-
-
 import inspect
+import re
+import os
+import sys
 import types
-
-from ..extern import six
-
+import importlib
+from distutils.version import LooseVersion
 
 __all__ = ['resolve_name', 'minversion', 'find_current_module',
            'isinstancemethod']
@@ -59,13 +57,12 @@ def resolve_name(name, *additional_parts):
     if additional_parts:
         name = name + '.' + additional_parts
 
-    # Note: On python 2 these must be str objects and not unicode
-    parts = [str(part) for part in name.split('.')]
+    parts = name.split('.')
 
     if len(parts) == 1:
         # No dots in the name--just a straight up module import
         cursor = 1
-        fromlist=[]
+        fromlist = []
     else:
         cursor = len(parts) - 1
         fromlist = [parts[-1]]
@@ -74,7 +71,7 @@ def resolve_name(name, *additional_parts):
 
     while cursor > 0:
         try:
-            ret = __import__(str('.'.join(module_name)), fromlist=fromlist)
+            ret = __import__('.'.join(module_name), fromlist=fromlist)
             break
         except ImportError:
             if cursor == 0:
@@ -97,10 +94,6 @@ def minversion(module, version, inclusive=True, version_path='__version__'):
     """
     Returns `True` if the specified Python module satisfies a minimum version
     requirement, and `False` if not.
-
-    By default this uses `pkg_resources.parse_version` to do the version
-    comparison if available.  Otherwise it falls back on
-    `distutils.version.LooseVersion`.
 
     Parameters
     ----------
@@ -130,10 +123,9 @@ def minversion(module, version, inclusive=True, version_path='__version__'):
     >>> minversion(astropy, '0.4.4')
     True
     """
-
     if isinstance(module, types.ModuleType):
         module_name = module.__name__
-    elif isinstance(module, six.string_types):
+    elif isinstance(module, str):
         module_name = module
         try:
             module = resolve_name(module_name)
@@ -142,22 +134,25 @@ def minversion(module, version, inclusive=True, version_path='__version__'):
     else:
         raise ValueError('module argument must be an actual imported '
                          'module, or the import name of the module; '
-                         'got {0!r}'.format(module))
+                         'got {!r}'.format(module))
 
     if '.' not in version_path:
         have_version = getattr(module, version_path)
     else:
         have_version = resolve_name(module.__name__, version_path)
 
-    try:
-        from pkg_resources import parse_version
-    except ImportError:
-        from distutils.version import LooseVersion as parse_version
+    # LooseVersion raises a TypeError when strings like dev, rc1 are part
+    # of the version number. Match the dotted numbers only. Regex taken
+    # from PEP440, https://www.python.org/dev/peps/pep-0440/, Appendix B
+    expr = '^([1-9]\\d*!)?(0|[1-9]\\d*)(\\.(0|[1-9]\\d*))*'
+    m = re.match(expr, version)
+    if m:
+        version = m.group(0)
 
     if inclusive:
-        return parse_version(have_version) >= parse_version(version)
+        return LooseVersion(have_version) >= LooseVersion(version)
     else:
-        return parse_version(have_version) > parse_version(version)
+        return LooseVersion(have_version) > LooseVersion(version)
 
 
 def find_current_module(depth=1, finddiff=False):
@@ -245,7 +240,7 @@ def find_current_module(depth=1, finddiff=False):
             return None
 
     if finddiff:
-        currmod = inspect.getmodule(frm)
+        currmod = _get_module_from_frame(frm)
         if finddiff is True:
             diffmods = [currmod]
         else:
@@ -253,8 +248,8 @@ def find_current_module(depth=1, finddiff=False):
             for fd in finddiff:
                 if inspect.ismodule(fd):
                     diffmods.append(fd)
-                elif isinstance(fd, six.string_types):
-                    diffmods.append(__import__(fd))
+                elif isinstance(fd, str):
+                    diffmods.append(importlib.import_module(fd))
                 elif fd is True:
                     diffmods.append(currmod)
                 else:
@@ -262,12 +257,55 @@ def find_current_module(depth=1, finddiff=False):
 
         while frm:
             frmb = frm.f_back
-            modb = inspect.getmodule(frmb)
+            modb = _get_module_from_frame(frmb)
             if modb not in diffmods:
                 return modb
             frm = frmb
     else:
-        return inspect.getmodule(frm)
+        return _get_module_from_frame(frm)
+
+
+def _get_module_from_frame(frm):
+    """Uses inspect.getmodule() to get the module that the current frame's
+    code is running in.
+
+    However, this does not work reliably for code imported from a zip file,
+    so this provides a fallback mechanism for that case which is less
+    reliable in general, but more reliable than inspect.getmodule() for this
+    particular case.
+    """
+
+    mod = inspect.getmodule(frm)
+    if mod is not None:
+        return mod
+
+    # Check to see if we're importing from a bundle file. First ensure that
+    # __file__ is available in globals; this is cheap to check to bail out
+    # immediately if this fails
+
+    if '__file__' in frm.f_globals and '__name__' in frm.f_globals:
+
+        filename = frm.f_globals['__file__']
+
+        # Using __file__ from the frame's globals and getting it into the form
+        # of an absolute path name with .py at the end works pretty well for
+        # looking up the module using the same means as inspect.getmodule
+
+        if filename[-4:].lower() in ('.pyc', '.pyo'):
+            filename = filename[:-4] + '.py'
+        filename = os.path.realpath(os.path.abspath(filename))
+        if filename in inspect.modulesbyfile:
+            return sys.modules.get(inspect.modulesbyfile[filename])
+
+        # On Windows, inspect.modulesbyfile appears to have filenames stored
+        # in lowercase, so we check for this case too.
+        if filename.lower() in inspect.modulesbyfile:
+            return sys.modules.get(inspect.modulesbyfile[filename.lower()])
+
+    # Otherwise there are still some even trickier things that might be possible
+    # to track down the module, but we'll leave those out unless we find a case
+    # where it's really necessary.  So return None if the module is not found.
+    return None
 
 
 def find_mod_objs(modname, onlylocals=False):
@@ -328,7 +366,7 @@ def find_mod_objs(modname, onlylocals=False):
     if onlylocals:
         if onlylocals is True:
             onlylocals = [modname]
-        valids = [any([fqn.startswith(nm) for nm in onlylocals]) for fqn in fqnames]
+        valids = [any(fqn.startswith(nm) for nm in onlylocals) for fqn in fqnames]
         localnames = [e for i, e in enumerate(localnames) if valids[i]]
         fqnames = [e for i, e in enumerate(fqnames) if valids[i]]
         objs = [e for i, e in enumerate(objs) if valids[i]]
@@ -357,16 +395,15 @@ def isinstancemethod(cls, obj):
 
     Examples
     --------
-    >>> from astropy.extern import six
     >>> class MetaClass(type):
     ...     def a_classmethod(cls): pass
     ...
-    >>> @six.add_metaclass(MetaClass)
-    ... class MyClass(object):
-    ...     __metaclass__ = MetaClass
+    >>> class MyClass(metaclass=MetaClass):
     ...     def an_instancemethod(self): pass
+    ...
     ...     @classmethod
     ...     def another_classmethod(cls): pass
+    ...
     ...     @staticmethod
     ...     def a_staticmethod(): pass
     ...
@@ -383,23 +420,19 @@ def isinstancemethod(cls, obj):
     return _isinstancemethod(cls, obj)
 
 
-if six.PY3:
-    def _isinstancemethod(cls, obj):
-        if not isinstance(obj, types.FunctionType):
-            return False
+def _isinstancemethod(cls, obj):
+    if not isinstance(obj, types.FunctionType):
+        return False
 
-        # Unfortunately it seems the easiest way to get to the original
-        # staticmethod object is to look in the class's __dict__, though we
-        # also need to look up the MRO in case the method is not in the given
-        # class's dict
-        name = obj.__name__
-        for basecls in cls.mro():  # This includes cls
-            if name in basecls.__dict__:
-                return not isinstance(basecls.__dict__[name], staticmethod)
+    # Unfortunately it seems the easiest way to get to the original
+    # staticmethod object is to look in the class's __dict__, though we
+    # also need to look up the MRO in case the method is not in the given
+    # class's dict
+    name = obj.__name__
+    for basecls in cls.mro():  # This includes cls
+        if name in basecls.__dict__:
+            return not isinstance(basecls.__dict__[name], staticmethod)
 
-        # This shouldn't happen, though this is the most sensible response if
-        # it does.
-        raise AttributeError(name)
-else:
-    def _isinstancemethod(cls, obj):
-        return isinstance(obj, types.MethodType) and obj.im_class is cls
+    # This shouldn't happen, though this is the most sensible response if
+    # it does.
+    raise AttributeError(name)

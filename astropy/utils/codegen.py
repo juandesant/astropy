@@ -2,8 +2,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """Utilities for generating new Python code at runtime."""
 
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
 import inspect
 import itertools
@@ -13,7 +11,6 @@ import re
 import textwrap
 
 from .introspection import find_current_module
-from ..extern import six
 
 
 __all__ = ['make_function_with_signature']
@@ -55,12 +52,8 @@ def make_function_with_signature(func, args=(), kwargs={}, varargs=None,
     pos_args = []
     key_args = []
 
-    if six.PY2 and varargs and kwargs:
-        raise SyntaxError('keyword arguments not allowed after '
-                          '*{0}'.format(varargs))
-
     if isinstance(kwargs, dict):
-        iter_kwargs = six.iteritems(kwargs)
+        iter_kwargs = kwargs.items()
     else:
         iter_kwargs = iter(kwargs)
 
@@ -74,36 +67,36 @@ def make_function_with_signature(func, args=(), kwargs={}, varargs=None,
             pos_args.append(item)
 
         if keyword.iskeyword(argname) or not _ARGNAME_RE.match(argname):
-            raise SyntaxError('invalid argument name: {0}'.format(argname))
+            raise SyntaxError(f'invalid argument name: {argname}')
 
     for item in (varargs, varkwargs):
         if item is not None:
             if keyword.iskeyword(item) or not _ARGNAME_RE.match(item):
-                raise SyntaxError('invalid argument name: {0}'.format(item))
+                raise SyntaxError(f'invalid argument name: {item}')
 
     def_signature = [', '.join(pos_args)]
 
     if varargs:
-        def_signature.append(', *{0}'.format(varargs))
+        def_signature.append(f', *{varargs}')
 
     call_signature = def_signature[:]
 
     if name is None:
         name = func.__name__
 
-    global_vars = {'__{0}__func'.format(name): func}
+    global_vars = {f'__{name}__func': func}
     local_vars = {}
     # Make local variables to handle setting the default args
     for idx, item in enumerate(key_args):
         key, value = item
-        default_var = '_kwargs{0}'.format(idx)
+        default_var = f'_kwargs{idx}'
         local_vars[default_var] = value
-        def_signature.append(', {0}={1}'.format(key, default_var))
+        def_signature.append(f', {key}={default_var}')
         call_signature.append(', {0}={0}'.format(key))
 
     if varkwargs:
-        def_signature.append(', **{0}'.format(varkwargs))
-        call_signature.append(', **{0}'.format(varkwargs))
+        def_signature.append(f', **{varkwargs}')
+        call_signature.append(f', **{varkwargs}')
 
     def_signature = ''.join(def_signature).lstrip(', ')
     call_signature = ''.join(call_signature).lstrip(', ')

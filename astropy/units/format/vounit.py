@@ -2,14 +2,11 @@
 """
 Handles the "VOUnit" unit format.
 """
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
 
-from ...extern import six
-from ...extern.six.moves import zip
 
 import copy
 import keyword
+import operator
 import re
 import warnings
 
@@ -21,16 +18,17 @@ class VOUnit(generic.Generic):
     The IVOA standard for units used by the VO.
 
     This is an implementation of `Units in the VO 1.0
-    <http://www.ivoa.net/Documents/VOUnits/>`_.
+    <http://www.ivoa.net/documents/VOUnits/>`_.
     """
     _explicit_custom_unit_regex = re.compile(
-        "^[YZEPTGMkhdcmunpfazy]?'((?!\d)\w)+'$")
-    _custom_unit_regex = re.compile("^((?!\d)\w)+$")
+        r"^[YZEPTGMkhdcmunpfazy]?'((?!\d)\w)+'$")
+    _custom_unit_regex = re.compile(r"^((?!\d)\w)+$")
     _custom_units = {}
 
     @staticmethod
     def _generate_unit_names():
-        from ... import units as u
+        from astropy import units as u
+        from astropy.units import required_by_vounit as uvo
 
         names = {}
         deprecated_names = set()
@@ -70,7 +68,8 @@ class VOUnit(generic.Generic):
                         continue
                     if keyword.iskeyword(key):
                         continue
-                    names[key] = getattr(u, key)
+
+                    names[key] = getattr(u if hasattr(u, key) else uvo, key)
                     if base in deprecated_units:
                         deprecated_names.add(key)
 
@@ -86,9 +85,11 @@ class VOUnit(generic.Generic):
             return None
         if s == '':
             return core.dimensionless_unscaled
-        if s.count('/') > 1:
+        # Check for excess solidi, but exclude fractional exponents (allowed)
+        if (s.count('/') > 1 and
+                s.count('/') - len(re.findall(r'\(\d+/\d+\)', s)) > 1):
             raise core.UnitsError(
-                "'{0}' contains multiple slashes, which is "
+                "'{}' contains multiple slashes, which is "
                 "disallowed by the VOUnit standard".format(s))
         result = cls._do_parse(s, debug=debug)
         if hasattr(result, 'function_unit'):
@@ -106,8 +107,8 @@ class VOUnit(generic.Generic):
                 raise ValueError()
 
             warnings.warn(
-                "Unit {0!r} not supported by the VOUnit "
-                "standard. {1}".format(
+                "Unit {!r} not supported by the VOUnit "
+                "standard. {}".format(
                     unit, utils.did_you_mean_units(
                         unit, cls._units, cls._deprecated_units,
                         cls._to_decomposed_alternative)),
@@ -129,21 +130,21 @@ class VOUnit(generic.Generic):
         if isinstance(unit, core.PrefixUnit):
             if unit._represents.scale == 10.0:
                 raise ValueError(
-                    "In '{0}': VOUnit can not represent units with the 'da' "
+                    "In '{}': VOUnit can not represent units with the 'da' "
                     "(deka) prefix".format(unit))
             elif unit._represents.scale == 0.1:
                 raise ValueError(
-                    "In '{0}': VOUnit can not represent units with the 'd' "
+                    "In '{}': VOUnit can not represent units with the 'd' "
                     "(deci) prefix".format(unit))
 
         name = unit.get_format_name('vounit')
 
-        if unit in six.itervalues(cls._custom_units):
+        if unit in cls._custom_units.values():
             return name
 
         if name not in cls._units:
             raise ValueError(
-                "Unit {0!r} is not part of the VOUnit standard".format(name))
+                f"Unit {name!r} is not part of the VOUnit standard")
 
         if name in cls._deprecated_units:
             utils.unit_deprecation_warning(
@@ -186,7 +187,7 @@ class VOUnit(generic.Generic):
 
     @classmethod
     def to_string(cls, unit):
-        from .. import core
+        from astropy.units import core
 
         # Remove units that aren't known to the format
         unit = utils.decompose_to_known_units(unit, cls._get_unit_name)
@@ -196,7 +197,7 @@ class VOUnit(generic.Generic):
                 raise core.UnitScaleError(
                     "The VOUnit format is not able to "
                     "represent scale for dimensionless units. "
-                    "Multiply your data by {0:e}."
+                    "Multiply your data by {:e}."
                     .format(unit.scale))
             s = ''
             if unit.scale != 1:
@@ -213,7 +214,7 @@ class VOUnit(generic.Generic):
                 s += ' '.join(parts)
 
             pairs = list(zip(unit.bases, unit.powers))
-            pairs.sort(key=lambda x: x[1], reverse=True)
+            pairs.sort(key=operator.itemgetter(1), reverse=True)
 
             s += cls._format_unit_list(pairs)
         elif isinstance(unit, core.NamedUnit):
@@ -223,7 +224,7 @@ class VOUnit(generic.Generic):
 
     @classmethod
     def _to_decomposed_alternative(cls, unit):
-        from .. import core
+        from astropy.units import core
 
         try:
             s = cls.to_string(unit)
@@ -231,6 +232,6 @@ class VOUnit(generic.Generic):
             scale = unit.scale
             unit = copy.copy(unit)
             unit._scale = 1.0
-            return '{0} (with data multiplied by {1})'.format(
+            return '{} (with data multiplied by {})'.format(
                 cls.to_string(unit), scale)
         return s

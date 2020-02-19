@@ -1,6 +1,5 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import os
 import sys
@@ -33,7 +32,7 @@ if __name__ == '__main__':
         numpy_include = np.get_numpy_include()
 
     wcsapi_test_module = Extension(
-        str('wcsapi_test'),
+        'wcsapi_test',
         include_dirs=[
             numpy_include,
             os.path.join(wcs.get_include(), 'astropy_wcs'),

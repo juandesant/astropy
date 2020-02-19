@@ -1,16 +1,14 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
+# pylint: disable=invalid-name
 
 """
 Optimization algorithms used in `~astropy.modeling.fitting`.
 """
 
-from __future__ import (absolute_import, unicode_literals, division,
-                        print_function)
 import warnings
 import abc
 import numpy as np
-from ..extern import six
-from ..utils.exceptions import AstropyUserWarning
+from astropy.utils.exceptions import AstropyUserWarning
 
 __all__ = ["Optimization", "SLSQP", "Simplex"]
 
@@ -20,14 +18,13 @@ DEFAULT_MAXITER = 100
 # Step for the forward difference approximation of the Jacobian
 DEFAULT_EPS = np.sqrt(np.finfo(float).eps)
 
-#Default requested accuracy
+# Default requested accuracy
 DEFAULT_ACC = 1e-07
 
 DEFAULT_BOUNDS = (-10 ** 12, 10 ** 12)
 
 
-@six.add_metaclass(abc.ABCMeta)
-class Optimization(object):
+class Optimization(metaclass=abc.ABCMeta):
     """
     Base class for optimizers.
 
@@ -83,11 +80,12 @@ class Optimization(object):
         self._acc = val
 
     def __repr__(self):
-        fmt = "{0}()".format(self.__class__.__name__)
+        fmt = f"{self.__class__.__name__}()"
         return fmt
 
     @property
     def opt_method(self):
+        """ Return the optimization method."""
         return self._opt_method
 
     @abc.abstractmethod
@@ -111,7 +109,7 @@ class SLSQP(Optimization):
 
     def __init__(self):
         from scipy.optimize import fmin_slsqp
-        super(SLSQP, self).__init__(fmin_slsqp)
+        super().__init__(fmin_slsqp)
         self.fit_info = {
             'final_func_val': None,
             'numiter': None,
@@ -141,6 +139,8 @@ class SLSQP(Optimization):
             kwargs['epsilon'] = self._eps
         if 'acc' not in kwargs:
             kwargs['acc'] = self._acc
+        # Get the verbosity level
+        disp = kwargs.pop('verblevel', None)
 
         # set the values of constraints to match the requirements of fmin_slsqp
         model = fargs[0]
@@ -149,15 +149,15 @@ class SLSQP(Optimization):
         bounds = np.asarray(bounds)
         for i in bounds:
             if i[0] is None:
-                i[0] =  DEFAULT_BOUNDS[0]
+                i[0] = DEFAULT_BOUNDS[0]
             if i[1] is None:
                 i[1] = DEFAULT_BOUNDS[1]
         # older versions of scipy require this array to be float
-        bounds = np.asarray(bounds, dtype=np.float)
+        bounds = np.asarray(bounds, dtype=float)
         eqcons = np.array(model.eqcons)
         ineqcons = np.array(model.ineqcons)
         fitparams, final_func_val, numiter, exit_mode, mess = self.opt_method(
-            objfunc, initval, args=fargs, full_output=True,
+            objfunc, initval, args=fargs, full_output=True, disp=disp,
             bounds=bounds, eqcons=eqcons, ieqcons=ineqcons,
             **kwargs)
 
@@ -176,20 +176,22 @@ class SLSQP(Optimization):
 
 class Simplex(Optimization):
     """
-    Neald-Mead (downhill simplex) algorithm [1].
+    Neald-Mead (downhill simplex) algorithm.
 
-    This algorithm only uses function values, not derivatives.
+    This algorithm [1]_ only uses function values, not derivatives.
     Uses `scipy.optimize.fmin`.
 
+    References
+    ----------
     .. [1] Nelder, J.A. and Mead, R. (1965), "A simplex method for function
-           minimization", The Computer Journal, 7, pp. 308-313
+       minimization", The Computer Journal, 7, pp. 308-313
     """
 
     supported_constraints = ['bounds', 'fixed', 'tied']
 
     def __init__(self):
         from scipy.optimize import fmin as simplex
-        super(Simplex, self).__init__(simplex)
+        super().__init__(simplex)
         self.fit_info = {
             'final_func_val': None,
             'numiter': None,
@@ -221,9 +223,11 @@ class Simplex(Optimization):
         if 'xtol' in kwargs:
             self._acc = kwargs['xtol']
             kwargs.pop('xtol')
+        # Get the verbosity level
+        disp = kwargs.pop('verblevel', None)
 
         fitparams, final_func_val, numiter, funcalls, exit_mode = self.opt_method(
-            objfunc, initval, args=fargs, xtol=self._acc,
+            objfunc, initval, args=fargs, xtol=self._acc, disp=disp,
             full_output=True, **kwargs)
         self.fit_info['final_func_val'] = final_func_val
         self.fit_info['numiter'] = numiter

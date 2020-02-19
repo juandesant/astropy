@@ -2,28 +2,28 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """Sundry function and class decorators."""
 
-from __future__ import print_function
-
 
 import functools
 import inspect
 import textwrap
 import types
 import warnings
+from inspect import signature
+from functools import wraps
 
-from .codegen import make_function_with_signature
-from .exceptions import (AstropyDeprecationWarning,
+from .exceptions import (AstropyDeprecationWarning, AstropyUserWarning,
                          AstropyPendingDeprecationWarning)
-from ..extern import six
 
 
-__all__ = ['deprecated', 'deprecated_attribute', 'classproperty',
-           'lazyproperty', 'sharedmethod', 'wraps',
-           'format_doc']
+__all__ = ['classproperty', 'deprecated', 'deprecated_attribute',
+           'deprecated_renamed_argument', 'format_doc',
+           'lazyproperty', 'sharedmethod', 'wraps']
+
+_NotFound = object()
 
 
 def deprecated(since, message='', name='', alternative='', pending=False,
-               obj_type=None):
+               obj_type=None, warning_type=AstropyDeprecationWarning):
     """
     Used to mark a function or class as deprecated.
 
@@ -61,11 +61,15 @@ def deprecated(since, message='', name='', alternative='', pending=False,
 
     pending : bool, optional
         If True, uses a AstropyPendingDeprecationWarning instead of a
-        AstropyDeprecationWarning.
+        ``warning_type``.
 
     obj_type : str, optional
         The type of this object, if the automatically determined one
         needs to be overridden.
+
+    warning_type : warning
+        Warning to be issued.
+        Default is `~astropy.utils.exceptions.AstropyDeprecationWarning`.
     """
 
     method_types = (classmethod, staticmethod, types.MethodType)
@@ -78,9 +82,9 @@ def deprecated(since, message='', name='', alternative='', pending=False,
         if not old_doc:
             old_doc = ''
         old_doc = textwrap.dedent(old_doc).strip('\n')
-        new_doc = (('\n.. deprecated:: %(since)s'
-                    '\n    %(message)s\n\n' %
-                    {'since': since, 'message': message.strip()}) + old_doc)
+        new_doc = (('\n.. deprecated:: {since}'
+                    '\n    {message}\n\n'.format(
+                     **{'since': since, 'message': message.strip()})) + old_doc)
         if not old_doc:
             # This is to prevent a spurious 'unexpected unindent' warning from
             # docutils when the original docstring was blank.
@@ -96,10 +100,10 @@ def deprecated(since, message='', name='', alternative='', pending=False,
             func = func.__func__
         return func
 
-    def deprecate_function(func, message):
+    def deprecate_function(func, message, warning_type=warning_type):
         """
-        Returns a wrapped function that displays an
-        ``AstropyDeprecationWarning`` when it is called.
+        Returns a wrapped function that displays ``warning_type``
+        when it is called.
         """
 
         if isinstance(func, method_types):
@@ -113,7 +117,7 @@ def deprecated(since, message='', name='', alternative='', pending=False,
             if pending:
                 category = AstropyPendingDeprecationWarning
             else:
-                category = AstropyDeprecationWarning
+                category = warning_type
 
             warnings.warn(message, category, stacklevel=2)
 
@@ -131,40 +135,32 @@ def deprecated(since, message='', name='', alternative='', pending=False,
 
         return func_wrapper(deprecated_func)
 
-    def deprecate_class(cls, message):
+    def deprecate_class(cls, message, warning_type=warning_type):
         """
-        Returns a wrapper class with the docstrings updated and an
-        __init__ function that will raise an
-        ``AstropyDeprectationWarning`` warning when called.
+        Update the docstring and wrap the ``__init__`` in-place (or ``__new__``
+        if the class or any of the bases overrides ``__new__``) so it will give
+        a deprecation warning when an instance is created.
+
+        This won't work for extension classes because these can't be modified
+        in-place and the alternatives don't work in the general case:
+
+        - Using a new class that looks and behaves like the original doesn't
+          work because the __new__ method of extension types usually makes sure
+          that it's the same class or a subclass.
+        - Subclassing the class and return the subclass can lead to problems
+          with pickle and will look weird in the Sphinx docs.
         """
-        # Creates a new class with the same name and bases as the
-        # original class, but updates the dictionary with a new
-        # docstring and a wrapped __init__ method.  __module__ needs
-        # to be manually copied over, since otherwise it will be set
-        # to *this* module (astropy.utils.misc).
-
-        # This approach seems to make Sphinx happy (the new class
-        # looks enough like the original class), and works with
-        # extension classes (which functools.wraps does not, since
-        # it tries to modify the original class).
-
-        # We need to add a custom pickler or you'll get
-        #     Can't pickle <class ..>: it's not found as ...
-        # errors. Picklability is required for any class that is
-        # documented by Sphinx.
-
-        members = cls.__dict__.copy()
-
-        members.update({
-            '__doc__': deprecate_doc(cls.__doc__, message),
-            '__init__': deprecate_function(get_function(cls.__init__),
-                                           message),
-        })
-
-        return type(cls)(cls.__name__, cls.__bases__, members)
+        cls.__doc__ = deprecate_doc(cls.__doc__, message)
+        if cls.__new__ is object.__new__:
+            cls.__init__ = deprecate_function(get_function(cls.__init__),
+                                              message, warning_type)
+        else:
+            cls.__new__ = deprecate_function(get_function(cls.__new__),
+                                             message, warning_type)
+        return cls
 
     def deprecate(obj, message=message, name=name, alternative=alternative,
-                  pending=pending):
+                  pending=pending, warning_type=warning_type):
         if obj_type is None:
             if isinstance(obj, type):
                 obj_type_name = 'class'
@@ -183,25 +179,25 @@ def deprecated(since, message='', name='', alternative='', pending=False,
         altmessage = ''
         if not message or type(message) is type(deprecate):
             if pending:
-                message = ('The %(func)s %(obj_type)s will be deprecated in a '
+                message = ('The {func} {obj_type} will be deprecated in a '
                            'future version.')
             else:
-                message = ('The %(func)s %(obj_type)s is deprecated and may '
+                message = ('The {func} {obj_type} is deprecated and may '
                            'be removed in a future version.')
             if alternative:
-                altmessage = '\n        Use %s instead.' % alternative
+                altmessage = f'\n        Use {alternative} instead.'
 
-        message = ((message % {
+        message = ((message.format(**{
             'func': name,
             'name': name,
             'alternative': alternative,
-            'obj_type': obj_type_name}) +
+            'obj_type': obj_type_name})) +
             altmessage)
 
         if isinstance(obj, type):
-            return deprecate_class(obj, message)
+            return deprecate_class(obj, message, warning_type)
         else:
-            return deprecate_function(obj, message)
+            return deprecate_function(obj, message, warning_type)
 
     if type(message) is type(deprecate):
         return deprecate(message)
@@ -210,7 +206,7 @@ def deprecated(since, message='', name='', alternative='', pending=False,
 
 
 def deprecated_attribute(name, since, message=None, alternative=None,
-                         pending=False):
+                         pending=False, warning_type=AstropyDeprecationWarning):
     """
     Used to mark a public attribute as deprecated.  This creates a
     property that will warn when the given attribute name is accessed.
@@ -240,8 +236,12 @@ def deprecated_attribute(name, since, message=None, alternative=None,
         user about this alternative if provided.
 
     pending : bool, optional
-        If True, uses a AstropyPendingDeprecationWarning instead of a
-        AstropyDeprecationWarning.
+        If True, uses a AstropyPendingDeprecationWarning instead of
+        ``warning_type``.
+
+    warning_type : warning
+        Warning to be issued.
+        Default is `~astropy.utils.exceptions.AstropyDeprecationWarning`.
 
     Examples
     --------
@@ -257,19 +257,271 @@ def deprecated_attribute(name, since, message=None, alternative=None,
     """
     private_name = '_' + name
 
-    @deprecated(since, name=name, obj_type='attribute')
+    @deprecated(since, name=name, obj_type='attribute', warning_type=warning_type)
     def get(self):
         return getattr(self, private_name)
 
-    @deprecated(since, name=name, obj_type='attribute')
+    @deprecated(since, name=name, obj_type='attribute', warning_type=warning_type)
     def set(self, val):
         setattr(self, private_name, val)
 
-    @deprecated(since, name=name, obj_type='attribute')
+    @deprecated(since, name=name, obj_type='attribute', warning_type=warning_type)
     def delete(self):
         delattr(self, private_name)
 
     return property(get, set, delete)
+
+
+def deprecated_renamed_argument(old_name, new_name, since,
+                                arg_in_kwargs=False, relax=False,
+                                pending=False,
+                                warning_type=AstropyDeprecationWarning,
+                                alternative=''):
+    """Deprecate a _renamed_ or _removed_ function argument.
+
+    The decorator assumes that the argument with the ``old_name`` was removed
+    from the function signature and the ``new_name`` replaced it at the
+    **same position** in the signature.  If the ``old_name`` argument is
+    given when calling the decorated function the decorator will catch it and
+    issue a deprecation warning and pass it on as ``new_name`` argument.
+
+    Parameters
+    ----------
+    old_name : str or list/tuple thereof
+        The old name of the argument.
+
+    new_name : str or list/tuple thereof or `None`
+        The new name of the argument. Set this to `None` to remove the
+        argument ``old_name`` instead of renaming it.
+
+    since : str or number or list/tuple thereof
+        The release at which the old argument became deprecated.
+
+    arg_in_kwargs : bool or list/tuple thereof, optional
+        If the argument is not a named argument (for example it
+        was meant to be consumed by ``**kwargs``) set this to
+        ``True``.  Otherwise the decorator will throw an Exception
+        if the ``new_name`` cannot be found in the signature of
+        the decorated function.
+        Default is ``False``.
+
+    relax : bool or list/tuple thereof, optional
+        If ``False`` a ``TypeError`` is raised if both ``new_name`` and
+        ``old_name`` are given.  If ``True`` the value for ``new_name`` is used
+        and a Warning is issued.
+        Default is ``False``.
+
+    pending : bool or list/tuple thereof, optional
+        If ``True`` this will hide the deprecation warning and ignore the
+        corresponding ``relax`` parameter value.
+        Default is ``False``.
+
+    warning_type : warning
+        Warning to be issued.
+        Default is `~astropy.utils.exceptions.AstropyDeprecationWarning`.
+
+    alternative : str, optional
+        An alternative function or class name that the user may use in
+        place of the deprecated object if ``new_name`` is None. The deprecation
+        warning will tell the user about this alternative if provided.
+
+
+    Raises
+    ------
+    TypeError
+        If the new argument name cannot be found in the function
+        signature and arg_in_kwargs was False or if it is used to
+        deprecate the name of the ``*args``-, ``**kwargs``-like arguments.
+        At runtime such an Error is raised if both the new_name
+        and old_name were specified when calling the function and
+        "relax=False".
+
+    Notes
+    -----
+    The decorator should be applied to a function where the **name**
+    of an argument was changed but it applies the same logic.
+
+    .. warning::
+        If ``old_name`` is a list or tuple the ``new_name`` and ``since`` must
+        also be a list or tuple with the same number of entries. ``relax`` and
+        ``arg_in_kwarg`` can be a single bool (applied to all) or also a
+        list/tuple with the same number of entries like ``new_name``, etc.
+
+    Examples
+    --------
+    The deprecation warnings are not shown in the following examples.
+
+    To deprecate a positional or keyword argument::
+
+        >>> from astropy.utils.decorators import deprecated_renamed_argument
+        >>> @deprecated_renamed_argument('sig', 'sigma', '1.0')
+        ... def test(sigma):
+        ...     return sigma
+
+        >>> test(2)
+        2
+        >>> test(sigma=2)
+        2
+        >>> test(sig=2)  # doctest: +SKIP
+        2
+
+    To deprecate an argument caught inside the ``**kwargs`` the
+    ``arg_in_kwargs`` has to be set::
+
+        >>> @deprecated_renamed_argument('sig', 'sigma', '1.0',
+        ...                             arg_in_kwargs=True)
+        ... def test(**kwargs):
+        ...     return kwargs['sigma']
+
+        >>> test(sigma=2)
+        2
+        >>> test(sig=2)  # doctest: +SKIP
+        2
+
+    By default providing the new and old keyword will lead to an Exception. If
+    a Warning is desired set the ``relax`` argument::
+
+        >>> @deprecated_renamed_argument('sig', 'sigma', '1.0', relax=True)
+        ... def test(sigma):
+        ...     return sigma
+
+        >>> test(sig=2)  # doctest: +SKIP
+        2
+
+    It is also possible to replace multiple arguments. The ``old_name``,
+    ``new_name`` and ``since`` have to be `tuple` or `list` and contain the
+    same number of entries::
+
+        >>> @deprecated_renamed_argument(['a', 'b'], ['alpha', 'beta'],
+        ...                              ['1.0', 1.2])
+        ... def test(alpha, beta):
+        ...     return alpha, beta
+
+        >>> test(a=2, b=3)  # doctest: +SKIP
+        (2, 3)
+
+    In this case ``arg_in_kwargs`` and ``relax`` can be a single value (which
+    is applied to all renamed arguments) or must also be a `tuple` or `list`
+    with values for each of the arguments.
+
+    """
+    cls_iter = (list, tuple)
+    if isinstance(old_name, cls_iter):
+        n = len(old_name)
+        # Assume that new_name and since are correct (tuple/list with the
+        # appropriate length) in the spirit of the "consenting adults". But the
+        # optional parameters may not be set, so if these are not iterables
+        # wrap them.
+        if not isinstance(arg_in_kwargs, cls_iter):
+            arg_in_kwargs = [arg_in_kwargs] * n
+        if not isinstance(relax, cls_iter):
+            relax = [relax] * n
+        if not isinstance(pending, cls_iter):
+            pending = [pending] * n
+    else:
+        # To allow a uniform approach later on, wrap all arguments in lists.
+        n = 1
+        old_name = [old_name]
+        new_name = [new_name]
+        since = [since]
+        arg_in_kwargs = [arg_in_kwargs]
+        relax = [relax]
+        pending = [pending]
+
+    def decorator(function):
+        # The named arguments of the function.
+        arguments = signature(function).parameters
+        keys = list(arguments.keys())
+        position = [None] * n
+
+        for i in range(n):
+            # Determine the position of the argument.
+            if arg_in_kwargs[i]:
+                pass
+            else:
+                if new_name[i] is None:
+                    continue
+                elif new_name[i] in arguments:
+                    param = arguments[new_name[i]]
+                # In case the argument is not found in the list of arguments
+                # the only remaining possibility is that it should be caught
+                # by some kind of **kwargs argument.
+                # This case has to be explicitly specified, otherwise throw
+                # an exception!
+                else:
+                    raise TypeError('"{}" was not specified in the function '
+                                    'signature. If it was meant to be part of '
+                                    '"**kwargs" then set "arg_in_kwargs" to "True"'
+                                    '.'.format(new_name[i]))
+
+                # There are several possibilities now:
+
+                # 1.) Positional or keyword argument:
+                if param.kind == param.POSITIONAL_OR_KEYWORD:
+                    position[i] = keys.index(new_name[i])
+
+                # 2.) Keyword only argument:
+                elif param.kind == param.KEYWORD_ONLY:
+                    # These cannot be specified by position.
+                    position[i] = None
+
+                # 3.) positional-only argument, varargs, varkwargs or some
+                #     unknown type:
+                else:
+                    raise TypeError('cannot replace argument "{}" of kind '
+                                    '{!r}.'.format(new_name[i], param.kind))
+
+        @functools.wraps(function)
+        def wrapper(*args, **kwargs):
+            for i in range(n):
+                # The only way to have oldkeyword inside the function is
+                # that it is passed as kwarg because the oldkeyword
+                # parameter was renamed to newkeyword.
+                if old_name[i] in kwargs:
+                    value = kwargs.pop(old_name[i])
+                    # Display the deprecation warning only when it's not
+                    # pending.
+                    if not pending[i]:
+                        message = ('"{}" was deprecated in version {} '
+                                   'and will be removed in a future version. '
+                                   .format(old_name[i], since[i]))
+                        if new_name[i] is not None:
+                            message += ('Use argument "{}" instead.'
+                                        .format(new_name[i]))
+                        elif alternative:
+                            message += ('\n        Use {} instead.'
+                                        .format(alternative))
+                        warnings.warn(message, warning_type, stacklevel=2)
+
+                    # Check if the newkeyword was given as well.
+                    newarg_in_args = (position[i] is not None and
+                                      len(args) > position[i])
+                    newarg_in_kwargs = new_name[i] in kwargs
+
+                    if newarg_in_args or newarg_in_kwargs:
+                        if not pending[i]:
+                            # If both are given print a Warning if relax is
+                            # True or raise an Exception is relax is False.
+                            if relax[i]:
+                                warnings.warn(
+                                    '"{0}" and "{1}" keywords were set. '
+                                    'Using the value of "{1}".'
+                                    ''.format(old_name[i], new_name[i]),
+                                    AstropyUserWarning)
+                            else:
+                                raise TypeError(
+                                    'cannot specify both "{}" and "{}"'
+                                    '.'.format(old_name[i], new_name[i]))
+                    else:
+                        # Pass the value of the old argument with the
+                        # name of the new argument to the function
+                        if new_name[i] is not None:
+                            kwargs[new_name[i]] = value
+
+            return function(*args, **kwargs)
+
+        return wrapper
+    return decorator
 
 
 # TODO: This can still be made to work for setters by implementing an
@@ -287,7 +539,7 @@ class classproperty(property):
     .. note::
 
         classproperty only works for *read-only* properties.  It does not
-        currently allow writeable/deleteable properties, due to subtleties of how
+        currently allow writeable/deletable properties, due to subtleties of how
         Python descriptors work.  In order to implement such properties on a class
         a metaclass for that class must be implemented.
 
@@ -314,7 +566,7 @@ class classproperty(property):
 
     ::
 
-        >>> class Foo(object):
+        >>> class Foo:
         ...     _bar_internal = 1
         ...     @classproperty
         ...     def bar(cls):
@@ -332,7 +584,7 @@ class classproperty(property):
     As previously noted, a `classproperty` is limited to implementing
     read-only attributes::
 
-        >>> class Foo(object):
+        >>> class Foo:
         ...     _bar_internal = 1
         ...     @classproperty
         ...     def bar(cls):
@@ -348,7 +600,7 @@ class classproperty(property):
 
     When the ``lazy`` option is used, the getter is only called once::
 
-        >>> class Foo(object):
+        >>> class Foo:
         ...     @classproperty(lazy=True)
         ...     def bar(cls):
         ...         print("Performing complicated calculation")
@@ -382,7 +634,7 @@ class classproperty(property):
 
             return wrapper
 
-        return super(classproperty, cls).__new__(cls)
+        return super().__new__(cls)
 
     def __init__(self, fget, doc=None, lazy=False):
         self._lazy = lazy
@@ -390,37 +642,32 @@ class classproperty(property):
             self._cache = {}
         fget = self._wrap_fget(fget)
 
-        super(classproperty, self).__init__(fget=fget, doc=doc)
+        super().__init__(fget=fget, doc=doc)
 
         # There is a buglet in Python where self.__doc__ doesn't
         # get set properly on instances of property subclasses if
         # the doc argument was used rather than taking the docstring
         # from fget
+        # Related Python issue: https://bugs.python.org/issue24766
         if doc is not None:
             self.__doc__ = doc
 
-    def __get__(self, obj, objtype=None):
+    def __get__(self, obj, objtype):
         if self._lazy and objtype in self._cache:
             return self._cache[objtype]
 
-        if objtype is not None:
-            # The base property.__get__ will just return self here;
-            # instead we pass objtype through to the original wrapped
-            # function (which takes the class as its sole argument)
-            val = self.fget.__wrapped__(objtype)
-        else:
-            val = super(classproperty, self).__get__(obj, objtype=objtype)
+        # The base property.__get__ will just return self here;
+        # instead we pass objtype through to the original wrapped
+        # function (which takes the class as its sole argument)
+        val = self.fget.__wrapped__(objtype)
 
         if self._lazy:
-            if objtype is None:
-                objtype = obj.__class__
-
             self._cache[objtype] = val
 
         return val
 
     def getter(self, fget):
-        return super(classproperty, self).getter(self._wrap_fget(fget))
+        return super().getter(self._wrap_fget(fget))
 
     def setter(self, fset):
         raise NotImplementedError(
@@ -444,9 +691,6 @@ class classproperty(property):
         def fget(obj):
             return orig_fget(obj.__class__)
 
-        # Set the __wrapped__ attribute manually for support on Python 2
-        fget.__wrapped__ = orig_fget
-
         return fget
 
 
@@ -459,7 +703,7 @@ class lazyproperty(property):
     useful for computing the value of some property that should otherwise be
     invariant.  For example::
 
-        >>> class LazyTest(object):
+        >>> class LazyTest:
         ...     @lazyproperty
         ...     def complicated_property(self):
         ...         print('Computing the value for complicated_property...')
@@ -488,16 +732,18 @@ class lazyproperty(property):
     """
 
     def __init__(self, fget, fset=None, fdel=None, doc=None):
-        super(lazyproperty, self).__init__(fget, fset, fdel, doc)
+        super().__init__(fget, fset, fdel, doc)
         self._key = self.fget.__name__
 
     def __get__(self, obj, owner=None):
         try:
-            return obj.__dict__[self._key]
-        except KeyError:
-            val = self.fget(obj)
-            obj.__dict__[self._key] = val
-            return val
+            val = obj.__dict__.get(self._key, _NotFound)
+            if val is not _NotFound:
+                return val
+            else:
+                val = self.fget(obj)
+                obj.__dict__[self._key] = val
+                return val
         except AttributeError:
             if obj is None:
                 return self
@@ -531,7 +777,7 @@ class sharedmethod(classmethod):
     behaves like a normal instance method (a reference to the instance is
     automatically passed as the first ``self`` argument of the method)::
 
-        >>> class Example(object):
+        >>> class Example:
         ...     @sharedmethod
         ...     def identify(self, *args):
         ...         print('self was', self)
@@ -554,14 +800,12 @@ class sharedmethod(classmethod):
     has a method of the same name as the `sharedmethod`, the version on
     the metaclass is delegated to::
 
-        >>> from astropy.extern.six import add_metaclass
         >>> class ExampleMeta(type):
         ...     def identify(self):
         ...         print('this implements the {0}.identify '
         ...               'classmethod'.format(self.__name__))
         ...
-        >>> @add_metaclass(ExampleMeta)
-        ... class Example(object):
+        >>> class Example(metaclass=ExampleMeta):
         ...     @sharedmethod
         ...     def identify(self):
         ...         print('this implements the instancemethod')
@@ -572,23 +816,12 @@ class sharedmethod(classmethod):
         this implements the Example.identify classmethod
     """
 
-    def __getobjwrapper(func):
-        return func
-
-    @__getobjwrapper
     def __get__(self, obj, objtype=None):
         if obj is None:
             mcls = type(objtype)
             clsmeth = getattr(mcls, self.__func__.__name__, None)
             if callable(clsmeth):
-                if isinstance(clsmeth, types.MethodType):
-                    # This case will generally only apply on Python 2, which
-                    # uses MethodType for unbound methods; Python 3 has no
-                    # particular concept of unbound methods and will just
-                    # return a function
-                    func = clsmeth.__func__
-                else:
-                    func = clsmeth
+                func = clsmeth
             else:
                 func = self.__func__
 
@@ -596,118 +829,9 @@ class sharedmethod(classmethod):
         else:
             return self._make_method(self.__func__, obj)
 
-    del __getobjwrapper
-
-    if six.PY3:
-        # The 'instancemethod' type of Python 2 and the method type of
-        # Python 3 have slightly different constructors
-        @staticmethod
-        def _make_method(func, instance):
-            return types.MethodType(func, instance)
-    else:
-        @staticmethod
-        def _make_method(func, instance):
-            return types.MethodType(func, instance, type(instance))
-
-
-def wraps(wrapped, assigned=functools.WRAPPER_ASSIGNMENTS,
-          updated=functools.WRAPPER_UPDATES, exclude_args=()):
-    """
-    An alternative to `functools.wraps` which also preserves the original
-    function's call signature by way of
-    `~astropy.utils.codegen.make_function_with_signature`.
-
-    This also adds an optional ``exclude_args`` argument.  If given it should
-    be a sequence of argument names that should not be copied from the wrapped
-    function (either positional or keyword arguments).
-
-    The documentation for the original `functools.wraps` follows:
-
-    """
-
-    wrapped_args = _get_function_args(wrapped, exclude_args=exclude_args)
-
-    def wrapper(func):
-        if '__name__' in assigned:
-            name = wrapped.__name__
-        else:
-            name = func.__name__
-
-        func = make_function_with_signature(func, name=name, **wrapped_args)
-        func = functools.update_wrapper(func, wrapped, assigned=assigned,
-                                        updated=updated)
-        return func
-
-    return wrapper
-
-
-if isinstance(wraps.__doc__, six.string_types):
-    wraps.__doc__ += functools.wraps.__doc__
-
-
-if six.PY3:
-    def _get_function_args_internal(func):
-        """
-        Utility function for `wraps`.
-
-        Reads the argspec for the given function and converts it to arguments
-        for `make_function_with_signature`.  This requires different
-        implementations on Python 2 versus Python 3.
-        """
-
-        argspec = inspect.getfullargspec(func)
-
-        if argspec.defaults:
-            args = argspec.args[:-len(argspec.defaults)]
-            kwargs = zip(argspec.args[len(args):], argspec.defaults)
-        else:
-            args = argspec.args
-            kwargs = []
-
-        if argspec.kwonlyargs:
-            kwargs.extend((argname, argspec.kwonlydefaults[argname])
-                          for argname in argspec.kwonlyargs)
-
-        return {'args': args, 'kwargs': kwargs, 'varargs': argspec.varargs,
-                'varkwargs': argspec.varkw}
-else:
-    def _get_function_args_internal(func):
-        """
-        Utility function for `wraps`.
-
-        Reads the argspec for the given function and converts it to arguments
-        for `make_function_with_signature`.  This requires different
-        implementations on Python 2 versus Python 3.
-        """
-
-        argspec = inspect.getargspec(func)
-
-        if argspec.defaults:
-            args = argspec.args[:-len(argspec.defaults)]
-            kwargs = zip(argspec.args[len(args):], argspec.defaults)
-        else:
-            args = argspec.args
-            kwargs = {}
-
-        return {'args': args, 'kwargs': kwargs, 'varargs': argspec.varargs,
-                'varkwargs': argspec.keywords}
-
-
-def _get_function_args(func, exclude_args=()):
-    all_args = _get_function_args_internal(func)
-
-    if exclude_args:
-        exclude_args = set(exclude_args)
-
-        for arg_type in ('args', 'kwargs'):
-            all_args[arg_type] = [arg for arg in all_args[arg_type]
-                                  if arg not in exclude_args]
-
-        for arg_type in ('varargs', 'varkwargs'):
-            if all_args[arg_type] in exclude_args:
-                all_args[arg_type] = None
-
-    return all_args
+    @staticmethod
+    def _make_method(func, instance):
+        return types.MethodType(func, instance)
 
 
 def format_doc(docstring, *args, **kwargs):
@@ -794,7 +918,7 @@ def format_doc(docstring, *args, **kwargs):
             num1, num2 : Numbers
             Returns
             -------
-            result: Number
+            result : Number
 
     in case one might want to format it further::
 
@@ -828,7 +952,7 @@ def format_doc(docstring, *args, **kwargs):
             num1, num2 : Numbers
             Returns
             -------
-            result: Number
+            result : Number
                 result of num1 + num2
         >>> help(subtract) # doctest: +SKIP
         Help on function subtract in module __main__:
@@ -840,9 +964,9 @@ def format_doc(docstring, *args, **kwargs):
             num1, num2 : Numbers
             Returns
             -------
-            result: Number
+            result : Number
                 result of num1 - num2
-            Notes: This one has additional notes.
+            Notes : This one has additional notes.
 
     These methods can be combined an even taking the docstring from another
     object is possible as docstring attribute. You just have to specify the
@@ -862,7 +986,7 @@ def format_doc(docstring, *args, **kwargs):
             num1, num2 : Numbers
             Returns
             -------
-            result: Number
+            result : Number
                 result of num1 + num2
 
     But be aware that this decorator *only* formats the given docstring not
@@ -884,7 +1008,7 @@ def format_doc(docstring, *args, **kwargs):
             num1, num2 : Numbers
             Returns
             -------
-            result: Number
+            result : Number
                 result of num1 + num2
             This one is good for {0}.
 
@@ -912,7 +1036,7 @@ def format_doc(docstring, *args, **kwargs):
             # Delete documentation in this case so we don't end up with
             # awkwardly self-inserted docs.
             obj.__doc__ = None
-        elif isinstance(docstring, six.string_types):
+        elif isinstance(docstring, str):
             # String: use the string that was given
             doc = docstring
         else:
@@ -927,12 +1051,6 @@ def format_doc(docstring, *args, **kwargs):
         # If the original has a not-empty docstring append it to the format
         # kwargs.
         kwargs['__doc__'] = obj.__doc__ or ''
-        if six.PY2 and isinstance(obj, type):
-            # For python 2 we must create a subclass because there the __doc__
-            # is not mutable for objects.
-            obj = type(obj.__name__, (obj,), {'__doc__': doc.format(*args, **kwargs),
-                                              '__module__': obj.__module__})
-        else:
-            obj.__doc__ = doc.format(*args, **kwargs)
+        obj.__doc__ = doc.format(*args, **kwargs)
         return obj
     return set_docstring

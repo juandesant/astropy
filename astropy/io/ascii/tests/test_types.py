@@ -1,26 +1,20 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-# TEST_UNICODE_LITERALS
 
-try:
-    from cStringIO import StringIO
-except ImportError:
-    from io import StringIO
+from io import StringIO
 
-import numpy as np
+from astropy.io import ascii
 
-from ... import ascii
-
-from .common import assert_equal, setup_function, teardown_function
+from .common import assert_equal
 
 
 def test_types_from_dat():
-    converters = {'a': [ascii.convert_numpy(np.float)],
-                  'e': [ascii.convert_numpy(np.str)]}
+    converters = {'a': [ascii.convert_numpy(float)],
+                  'e': [ascii.convert_numpy(str)]}
 
     dat = ascii.read(['a b c d e', '1 1 cat 2.1 4.2'],
-                          Reader=ascii.Basic,
-                          converters=converters)
+                     Reader=ascii.Basic,
+                     converters=converters)
 
     assert dat['a'].dtype.kind == 'f'
     assert dat['b'].dtype.kind == 'i'
@@ -31,7 +25,7 @@ def test_types_from_dat():
 
 def test_rdb_write_types():
     dat = ascii.read(['a b c d', '1 1.0 cat 2.1'],
-                          Reader=ascii.Basic)
+                     Reader=ascii.Basic)
     out = StringIO()
     ascii.write(dat, out, Writer=ascii.Rdb)
     outs = out.getvalue().splitlines()
@@ -47,7 +41,7 @@ def test_ipac_read_types():
    2.09708   2956        73765    2.06000   B8IVpMnHg
 """
     reader = ascii.get_reader(Reader=ascii.Ipac)
-    dat = reader.read(table)
+    reader.read(table)
     types = [ascii.FloatType,
              ascii.FloatType,
              ascii.IntType,

@@ -1,17 +1,20 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-# TEST_UNICODE_LITERALS
 
 """Test behavior related to masked tables"""
 
+import pytest
 import numpy as np
 import numpy.ma as ma
 
-from ...tests.helper import pytest
-from ...table import Column, MaskedColumn, Table
+from astropy.table import Column, MaskedColumn, Table, QTable
+from astropy.table.column import BaseColumn
+from astropy.tests.helper import catch_warnings
+from astropy.time import Time
+import astropy.units as u
 
 
-class SetupData(object):
+class SetupData:
     def setup_method(self, method):
         self.a = MaskedColumn(name='a', data=[1, 2, 3], fill_value=1)
         self.b = MaskedColumn(name='b', data=[4, 5, 6], mask=True)
@@ -20,6 +23,8 @@ class SetupData(object):
         self.d = MaskedColumn(name='d', data=[7, 8, 7], mask=self.d_mask)
         self.t = Table([self.a, self.b], masked=True)
         self.ca = Column(name='ca', data=[1, 2, 3])
+        self.sc = MaskedColumn(name='sc', data=[(1, 1.), (2, 2.), (3, 3.)],
+                               dtype='i8,f8', fill_value=(0, -1.))
 
 
 class TestPprint(SetupData):
@@ -27,8 +32,9 @@ class TestPprint(SetupData):
         assert self.t.pformat() == [' a   b ', '--- ---', '  1  --', '  2  --', '  3  --']
 
 
-class TestFilled(object):
+class TestFilled:
     """Test the filled method in MaskedColumn and Table"""
+
     def setup_method(self, method):
         mask = [True, False, False]
         self.meta = {'a': 1, 'b': [2, 3]}
@@ -117,6 +123,15 @@ class TestFillValue(SetupData):
         assert np.all(c.filled() == ['ABCD', 'yyyy'])
         assert np.all(c.filled('XY') == ['XY', 'yyyy'])
 
+    def test_set_get_fill_value_for_structured_column(self):
+        assert self.sc.fill_value == np.array((0, -1.), self.sc.dtype)
+        sc = self.sc.copy()
+        assert sc.fill_value.item() == (0, -1.)
+        sc.fill_value = (-1, np.inf)
+        assert sc.fill_value == np.array((-1, np.inf), self.sc.dtype)
+        sc2 = MaskedColumn(sc, fill_value=(-2, -np.inf))
+        assert sc2.fill_value == np.array((-2, -np.inf), sc2.dtype)
+
     def test_table_column_mask_not_ref(self):
         """Table column mask is not ref of original column mask"""
         self.b.fill_value = -999
@@ -169,25 +184,56 @@ class TestMaskedColumnInit(SetupData):
 
 class TestTableInit(SetupData):
     """Initializing a table"""
+    def test_initialization_with_all_columns(self):
+        t1 = Table([self.a, self.b, self.c, self.d, self.ca, self.sc])
+        assert t1.colnames == ['a', 'b', 'c', 'd', 'ca', 'sc']
+        # Check we get the same result by passing in as list of dict.
+        # (Regression test for error uncovered by scintillometry package.)
+        lofd = [{k: row[k] for k in t1.colnames} for row in t1]
+        t2 = Table(lofd)
+        for k in t1.colnames:
+            assert np.all(t1[k] == t2[k]) in (True, np.ma.masked)
+            assert np.all(getattr(t1[k], 'mask', False) ==
+                          getattr(t2[k], 'mask', False))
 
-    def test_mask_true_if_any_input_masked(self):
-        """Masking is True if any input is masked"""
+    # Filter warnings since these are set to lead to exceptions,
+    # which changes behaviour in Table._convert_data_to_col
+    # (causing conversion of columns with masked elements to object dtype).
+    @pytest.mark.filterwarnings('ignore:.*converting a masked element.*')
+    def test_initialization_with_all_columns(self):
+        t1 = Table([self.a, self.b, self.c, self.d, self.ca, self.sc])
+        assert t1.colnames == ['a', 'b', 'c', 'd', 'ca', 'sc']
+        # Check we get the same result by passing in as list of dict.
+        # (Regression test for error uncovered by scintillometry package.)
+        lofd = [{k: row[k] for k in t1.colnames} for row in t1]
+        t2 = Table(lofd)
+        for k in t1.colnames:
+            # TODO: the final dtype should not depend on the presence of
+            # masked elements, but unfortunately np.ma.MaskedArray does take
+            # it into account.
+            if k not in ('b', 'd'):
+                assert t1[k].dtype == t2[k].dtype
+            assert np.all(t1[k] == t2[k]) in (True, np.ma.masked)
+            assert np.all(getattr(t1[k], 'mask', False) ==
+                          getattr(t2[k], 'mask', False))
+
+    def test_mask_false_if_input_mask_not_true(self):
+        """Masking is always False if initial masked arg is not True"""
         t = Table([self.ca, self.a])
-        assert t.masked is True
+        assert t.masked is False  # True before astropy 4.0
         t = Table([self.ca])
         assert t.masked is False
         t = Table([self.ca, ma.array([1, 2, 3])])
-        assert t.masked is True
+        assert t.masked is False  # True before astropy 4.0
 
     def test_mask_false_if_no_input_masked(self):
         """Masking not true if not (requested or input requires mask)"""
-        t0 = Table([[3,4]], masked=False)
+        t0 = Table([[3, 4]], masked=False)
         t1 = Table(t0, masked=True)
         t2 = Table(t1, masked=False)
         assert not t0.masked
         assert t1.masked
         assert not t2.masked
-
 
     def test_mask_property(self):
         t = self.t
@@ -207,7 +253,7 @@ class TestTableInit(SetupData):
                 assert np.all(t[name].mask == mask)
 
 
-class TestAddColumn(object):
+class TestAddColumn:
 
     def test_add_masked_column_to_masked_table(self):
         t = Table(masked=True)
@@ -216,6 +262,8 @@ class TestAddColumn(object):
         assert t.masked
         t.add_column(MaskedColumn(name='b', data=[4, 5, 6], mask=[1, 0, 1]))
         assert t.masked
+        assert isinstance(t['a'], MaskedColumn)
+        assert isinstance(t['b'], MaskedColumn)
         assert np.all(t['a'] == np.array([1, 2, 3]))
         assert np.all(t['a'].mask == np.array([0, 1, 0], bool))
         assert np.all(t['b'] == np.array([4, 5, 6]))
@@ -227,9 +275,11 @@ class TestAddColumn(object):
         t.add_column(Column(name='a', data=[1, 2, 3]))
         assert not t.masked
         t.add_column(MaskedColumn(name='b', data=[4, 5, 6], mask=[1, 0, 1]))
-        assert t.masked
+        assert not t.masked  # Changed in 4.0, table no longer auto-upgrades
+        assert isinstance(t['a'], Column)  # Was MaskedColumn before 4.0
+        assert isinstance(t['b'], MaskedColumn)
         assert np.all(t['a'] == np.array([1, 2, 3]))
-        assert np.all(t['a'].mask == np.array([0, 0, 0], bool))
+        assert not hasattr(t['a'], 'mask')
         assert np.all(t['b'] == np.array([4, 5, 6]))
         assert np.all(t['b'].mask == np.array([1, 0, 1], bool))
 
@@ -240,6 +290,8 @@ class TestAddColumn(object):
         assert t.masked
         t.add_column(MaskedColumn(name='b', data=[4, 5, 6], mask=[1, 0, 1]))
         assert t.masked
+        assert isinstance(t['a'], MaskedColumn)
+        assert isinstance(t['b'], MaskedColumn)
         assert np.all(t['a'] == np.array([1, 2, 3]))
         assert np.all(t['a'].mask == np.array([0, 0, 0], bool))
         assert np.all(t['b'] == np.array([4, 5, 6]))
@@ -257,35 +309,37 @@ class TestAddColumn(object):
         assert np.all(t['a'] == np.array([1, 2, 3]))
         assert np.all(t['b'] == np.array([4, 5, 6]))
 
-class TestRenameColumn(object):
+
+class TestRenameColumn:
 
     def test_rename_masked_column(self):
         t = Table(masked=True)
-        t.add_column(MaskedColumn(name='a', data=[1,2,3], mask=[0,1,0]))
+        t.add_column(MaskedColumn(name='a', data=[1, 2, 3], mask=[0, 1, 0]))
         t['a'].fill_value = 42
         t.rename_column('a', 'b')
         assert t.masked
-        assert np.all(t['b'] == np.array([1,2,3]))
-        assert np.all(t['b'].mask == np.array([0,1,0], bool))
+        assert np.all(t['b'] == np.array([1, 2, 3]))
+        assert np.all(t['b'].mask == np.array([0, 1, 0], bool))
         assert t['b'].fill_value == 42
         assert t.colnames == ['b']
 
-class TestRemoveColumn(object):
+
+class TestRemoveColumn:
 
     def test_remove_masked_column(self):
         t = Table(masked=True)
-        t.add_column(MaskedColumn(name='a', data=[1,2,3], mask=[0,1,0]))
+        t.add_column(MaskedColumn(name='a', data=[1, 2, 3], mask=[0, 1, 0]))
         t['a'].fill_value = 42
-        t.add_column(MaskedColumn(name='b', data=[4,5,6], mask=[1,0,1]))
+        t.add_column(MaskedColumn(name='b', data=[4, 5, 6], mask=[1, 0, 1]))
         t.remove_column('b')
         assert t.masked
-        assert np.all(t['a'] == np.array([1,2,3]))
-        assert np.all(t['a'].mask == np.array([0,1,0], bool))
+        assert np.all(t['a'] == np.array([1, 2, 3]))
+        assert np.all(t['a'].mask == np.array([0, 1, 0], bool))
         assert t['a'].fill_value == 42
         assert t.colnames == ['a']
 
 
-class TestAddRow(object):
+class TestAddRow:
 
     def test_add_masked_row_to_masked_table_iterable(self):
         t = Table(masked=True)
@@ -363,22 +417,41 @@ class TestAddRow(object):
 
     def test_add_masked_row_to_non_masked_table_iterable(self):
         t = Table(masked=False)
-        t.add_column(Column(name='a', data=[1]))
-        t.add_column(Column(name='b', data=[4]))
+        t['a'] = [1]
+        t['b'] = [4]
+        t['c'] = Time([1], format='cxcsec')
+
+        tm = Time(2, format='cxcsec')
         assert not t.masked
-        t.add_row([2, 5])
+        t.add_row([2, 5, tm])
         assert not t.masked
-        t.add_row([3, 6], mask=[0, 1])
-        assert t.masked
-        assert np.all(np.array(t['a']) == np.array([1, 2, 3]))
-        assert np.all(t['a'].mask == np.array([0, 0, 0], bool))
-        assert np.all(np.array(t['b']) == np.array([4, 5, 6]))
-        assert np.all(t['b'].mask == np.array([0, 0, 1], bool))
+        t.add_row([3, 6, tm], mask=[0, 1, 1])
+        assert not t.masked
+
+        assert type(t['a']) is Column
+        assert type(t['b']) is MaskedColumn
+        assert type(t['c']) is Time
+
+        assert np.all(t['a'] == [1, 2, 3])
+        assert np.all(t['b'].data == [4, 5, 6])
+        assert np.all(t['b'].mask == [False, False, True])
+        assert np.all(t['c'][:2] == Time([1, 2], format='cxcsec'))
+        assert np.all(t['c'].mask == [False, False, True])
+
+    def test_add_row_cannot_mask_column_raises_typeerror(self):
+        t = QTable()
+        t['a'] = [1, 2] * u.m
+        t.add_row((3 * u.m,))  # No problem
+        with pytest.raises(ValueError) as exc:
+            t.add_row((3 * u.m,), mask=(True,))
+        assert (exc.value.args[0].splitlines() ==
+                ["Unable to insert row because of exception in column 'a':",
+                 "mask was supplied for column 'a' but it does not support masked values"])
 
 
 def test_setting_from_masked_column():
     """Test issue in #2997"""
-    mask_b =  np.array([True, True, False, False])
+    mask_b = np.array([True, True, False, False])
     for select in (mask_b, slice(0, 2)):
         t = Table(masked=True)
         t['a'] = Column([1, 2, 3, 4])
@@ -413,3 +486,103 @@ def test_coercing_fill_value_type():
     c.set_fill_value('0')
     c2 = MaskedColumn(c, dtype=np.int32)
     assert isinstance(c2.fill_value, np.int32)
+
+
+def test_mask_copy():
+    """Test that the mask is copied when copying a table (issue #7362)."""
+
+    c = MaskedColumn([1, 2], mask=[False, True])
+    c2 = MaskedColumn(c, copy=True)
+    c2.mask[0] = True
+    assert np.all(c.mask == [False, True])
+    assert np.all(c2.mask == [True, True])
+
+
+def test_masked_as_array_with_mixin():
+    """Test that as_array() and Table.mask attr work with masked mixin columns"""
+    t = Table()
+    t['a'] = Time([1, 2], format='cxcsec')
+    t['b'] = [3, 4]
+    t['c'] = [5, 6] * u.m
+
+    # With no mask, the output should be ndarray
+    ta = t.as_array()
+    assert isinstance(ta, np.ndarray) and not isinstance(ta, np.ma.MaskedArray)
+
+    # With a mask, output is MaskedArray
+    t['a'][1] = np.ma.masked
+    ta = t.as_array()
+    assert isinstance(ta, np.ma.MaskedArray)
+    assert np.all(ta['a'].mask == [False, True])
+    assert np.isclose(ta['a'][0].cxcsec, 1.0)
+    assert np.all(ta['b'].mask == False)
+    assert np.all(ta['c'].mask == False)
+
+    # Check table ``mask`` property
+    tm = t.mask
+    assert np.all(tm['a'] == [False, True])
+    assert np.all(tm['b'] == False)
+    assert np.all(tm['c'] == False)
+
+
+def test_masked_column_with_unit_in_qtable():
+    """Test that adding a MaskedColumn with a unit to QTable issues warning"""
+    t = QTable()
+    with catch_warnings() as w:
+        t['a'] = MaskedColumn([1, 2])
+    assert len(w) == 0
+    assert isinstance(t['a'], MaskedColumn)
+
+    with catch_warnings() as w:
+        t['b'] = MaskedColumn([1, 2], unit=u.m)
+    assert len(w) == 0
+    assert isinstance(t['b'], u.Quantity)
+
+    with catch_warnings() as w:
+        t['c'] = MaskedColumn([1, 2], unit=u.m, mask=[True, False])
+    assert len(w) == 1
+    assert "dropping mask in Quantity column 'c'"
+    assert isinstance(t['b'], u.Quantity)
+
+
+def test_masked_column_data_attribute_is_plain_masked_array():
+    c = MaskedColumn([1, 2], mask=[False, True])
+    c_data = c.data
+    assert type(c_data) is np.ma.MaskedArray
+    assert type(c_data.data) is np.ndarray
+
+
+def test_mask_slicing_count_array_finalize():
+    """Check that we don't finalize MaskedColumn too often.
+
+    Regression test for gh-6721.
+    """
+    # Create a new BaseColumn class that counts how often
+    # ``__array_finalize__`` is called.
+    class MyBaseColumn(BaseColumn):
+        counter = 0
+
+        def __array_finalize__(self, obj):
+            super().__array_finalize__(obj)
+            MyBaseColumn.counter += 1
+
+    # Base a new MaskedColumn class on it.  The normal MaskedColumn
+    # hardcodes the initialization to BaseColumn, so we exchange that.
+    class MyMaskedColumn(MaskedColumn, Column, MyBaseColumn):
+        def __new__(cls, *args, **kwargs):
+            self = super().__new__(cls, *args, **kwargs)
+            self._baseclass = MyBaseColumn
+            return self
+
+    # Creation really needs 2 finalizations (once for the BaseColumn
+    # call inside ``__new__`` and once when the view as a MaskedColumn
+    # is taken), but since the first is hardcoded, we do not capture it
+    # and thus the count is only 1.
+    c = MyMaskedColumn([1, 2], mask=[False, True])
+    assert MyBaseColumn.counter == 1
+    # slicing should need only one ``__array_finalize__`` (used to be 3).
+    c0 = c[:]
+    assert MyBaseColumn.counter == 2
+    # repr should need none (used to be 2!!)
+    repr(c0)
+    assert MyBaseColumn.counter == 2

@@ -3,21 +3,17 @@
 This module tests fitting and model evaluation with various inputs
 """
 
-from __future__ import (absolute_import, unicode_literals, division,
-                        print_function)
-
+import pytest
 import numpy as np
+from numpy.testing import assert_allclose
 
-from numpy.testing.utils import assert_allclose
-
-from .. import models
-from .. import fitting
-from ..core import Model, FittableModel, Fittable1DModel
-from ..parameters import Parameter
-from ...tests.helper import pytest
+from astropy.modeling import models
+from astropy.modeling import fitting
+from astropy.modeling.core import Model, FittableModel, Fittable1DModel
+from astropy.modeling.parameters import Parameter
 
 try:
-    from scipy import optimize  # pylint: disable=W0611
+    from scipy import optimize  # pylint: disable=W0611 # noqa
     HAS_SCIPY = True
 except ImportError:
     HAS_SCIPY = False
@@ -38,7 +34,7 @@ model2d_params = [
 ]
 
 
-class TestInputType(object):
+class TestInputType:
     """
     This class tests that models accept numbers, lists and arrays.
 
@@ -67,7 +63,7 @@ class TestInputType(object):
         m(self.x2, self.y2)
 
 
-class TestFitting(object):
+class TestFitting:
     """Test various input options to fitting routines."""
 
     def setup_class(self):
@@ -218,7 +214,7 @@ class TestFitting(object):
             model = gfit(g2, self.x, self.y, z)
 
 
-class TestEvaluation(object):
+class TestEvaluation:
     """
     Test various input options to model evaluation
 
@@ -261,7 +257,7 @@ class TestEvaluation(object):
 
         p1 = models.Polynomial1D(4, n_models=2)
         y1 = p1(np.array([self.x1, self.x1]).T, model_set_axis=-1)
-        assert y1.shape == (2, 20)
+        assert y1.shape == (20, 2)
         assert_allclose(y1[0, :], y1[1, :], atol=10 ** (-12))
 
     def test_p2_1set_1pset(self):
@@ -282,21 +278,26 @@ class TestEvaluation(object):
 
     def test_nset_domain(self):
         """
-        Polynomial evaluation of multiple data sets with different domain
+        Test model set with negative model_set_axis.
+
+        In this case model_set_axis=-1 is identical to model_set_axis=1.
         """
 
         xx = np.array([self.x1, self.x1]).T
         xx[0, 0] = 100
         xx[1, 0] = 100
         xx[2, 0] = 99
-        p1 = models.Polynomial1D(5, n_models=2)
+        p1 = models.Polynomial1D(5, c0=[1, 2], c1=[3, 4], n_models=2)
         yy = p1(xx, model_set_axis=-1)
-        x1 = xx[:, 0]
-        x2 = xx[:, 1]
-        p1 = models.Polynomial1D(5)
-        assert_allclose(p1(x1), yy[0, :], atol=10 ** (-12))
-        p1 = models.Polynomial1D(5)
-        assert_allclose(p1(x2), yy[1, :], atol=10 ** (-12))
+        assert_allclose(xx.shape, yy.shape)
+        yy1 = p1(xx, model_set_axis=1)
+        assert_allclose(yy, yy1)
+        #x1 = xx[:, 0]
+        #x2 = xx[:, 1]
+        #p1 = models.Polynomial1D(5)
+        #assert_allclose(p1(x1), yy[0, :], atol=10 ** (-12))
+        #p1 = models.Polynomial1D(5)
+        #assert_allclose(p1(x2), yy[1, :], atol=10 ** (-12))
 
     def test_evaluate_gauss2d(self):
         cov = np.array([[1., 0.8], [0.8, 3]])
@@ -314,7 +315,7 @@ class TModel_1_1(Fittable1DModel):
         return x + p1 + p2
 
 
-class TestSingleInputSingleOutputSingleModel(object):
+class TestSingleInputSingleOutputSingleModel:
     """
     A suite of tests to check various cases of parameter and input combinations
     on models with n_input = n_output = 1 on a toy model with n_models=1.
@@ -460,7 +461,7 @@ class TestSingleInputSingleOutputSingleModel(object):
                                [31.10, 32.11, 33.12]]]])
 
 
-class TestSingleInputSingleOutputTwoModel(object):
+class TestSingleInputSingleOutputTwoModel:
     """
     A suite of tests to check various cases of parameter and input combinations
     on models with n_input = n_output = 1 on a toy model with n_models=2.
@@ -625,8 +626,9 @@ class TestSingleInputSingleOutputTwoModel(object):
 
 
 class TModel_1_2(FittableModel):
-    inputs = ('x',)
-    outputs = ('y', 'z')
+
+    n_inputs =1
+    n_outputs = 2
 
     p1 = Parameter()
     p2 = Parameter()
@@ -637,7 +639,7 @@ class TModel_1_2(FittableModel):
         return (x + p1 + p2, x + p1 + p2 + p3)
 
 
-class TestSingleInputDoubleOutputSingleModel(object):
+class TestSingleInputDoubleOutputSingleModel:
     """
     A suite of tests to check various cases of parameter and input combinations
     on models with n_input = 1 but n_output = 2 on a toy model with n_models=1.
@@ -790,7 +792,6 @@ class TestSingleInputDoubleOutputSingleModel(object):
                              [[111.07, 222.08, 333.09],
                               [111.10, 222.11, 333.12]]])
 
-
         y2, z2 = t([[[[10]]], [[[20]]], [[[30]]]])
         assert np.shape(y2) == np.shape(z2) == (3, 2, 2, 3)
         assert_allclose(y2, [[[[11.01, 12.02, 13.03],
@@ -824,8 +825,8 @@ class TInputFormatter(Model):
     """
     A toy model to test input/output formatting.
     """
-
-    inputs = ('x', 'y')
+    n_inputs = 2
+    n_outputs = 2
     outputs = ('x', 'y')
 
     @staticmethod
@@ -850,3 +851,113 @@ def test_format_input_arrays_transposed():
     input = np.array([[1, 1]]).T, np.array([[2, 2]]).T
     result = model(*input)
     assert_allclose(result, input)
+
+
+@pytest.mark.parametrize('model',
+                         [models.Gaussian2D(), models.Polynomial2D(1,),
+                          models.Pix2Sky_TAN(), models.Tabular2D(lookup_table=np.ones((4,5)))])
+@pytest.mark.skipif('not HAS_SCIPY')
+def test_call_keyword_args_2(model):
+    """
+    Test calling a model with positional, keywrd and a mixture of both arguments.
+    """
+    positional = model(1, 2)
+    assert_allclose(positional, model(x=1, y=2))
+    assert_allclose(positional, model(1, y=2))
+
+    model.inputs = ('r', 't')
+    assert_allclose(positional, model(r=1, t=2))
+    assert_allclose(positional, model(1, t=2))
+    assert_allclose(positional, model(1, 2))
+
+    with pytest.raises(ValueError):
+        model(1, 2, 3)
+
+    with pytest.raises(ValueError):
+        model(1)
+
+    with pytest.raises(ValueError):
+        model(1, 2, t=12, r=3)
+
+
+@pytest.mark.parametrize('model',
+                         [models.Gaussian1D(), models.Polynomial1D(1,),
+                          models.Tabular1D(lookup_table=np.ones((5,))),
+                          models.Rotation2D(), models.Pix2Sky_TAN()])
+@pytest.mark.skipif('not HAS_SCIPY')
+def test_call_keyword_args_1(model):
+    """
+    Test calling a model with positional, keywrd and a mixture of both arguments.
+    """
+    positional = model(1)
+    assert_allclose(positional, model(x=1))
+
+    model.inputs = ('r',)
+    assert_allclose(positional, model(r=1))
+
+    with pytest.raises(ValueError):
+        model(1, 2, 3)
+
+    with pytest.raises(ValueError):
+        model()
+
+    with pytest.raises(ValueError):
+        model(1, 2, t=12, r=3)
+
+
+@pytest.mark.parametrize('model',
+                         [models.Gaussian2D() | models.Polynomial1D(1,),
+                          models.Gaussian1D() & models.Polynomial1D(1,),
+                          models.Gaussian2D() + models.Polynomial2D(1,),
+                          models.Gaussian2D() - models.Polynomial2D(1,),
+                          models.Gaussian2D() * models.Polynomial2D(1,),
+                          models.Identity(2) | models.Polynomial2D(1),
+                          models.Mapping((1,)) | models.Polynomial1D(1)])
+def test_call_keyword_args_1(model):
+    """
+    Test calling a model with positional, keywrd and a mixture of both arguments.
+    """
+    positional = model(1, 2)
+    model.inputs = ('r', 't')
+    assert_allclose(positional, model(r=1, t = 2))
+
+    assert_allclose(positional, model(1, t=2))
+
+    with pytest.raises(ValueError):
+        model(1, 2, 3)
+
+    with pytest.raises(ValueError):
+        model()
+
+    with pytest.raises(ValueError):
+        model(1, 2, t=12, r=3)
+
+
+@pytest.mark.parametrize('model',
+                         [models.Identity(2), models.Mapping((0, 1)),
+                          models.Mapping((1,))])
+def test_call_keyword_mappings(model):
+    """
+    Test calling a model with positional, keywrd and a mixture of both arguments.
+    """
+    positional = model(1, 2)
+    assert_allclose(positional, model(x0=1, x1=2))
+    assert_allclose(positional, model(1, x1=2))
+
+    # We take a copy before modifying the model since otherwise this changes
+    # the instance used in the parametrize call and affects future test runs.
+    model = model.copy()
+
+    model.inputs = ('r', 't')
+    assert_allclose(positional, model(r=1, t=2))
+    assert_allclose(positional, model(1, t=2))
+    assert_allclose(positional, model(1, 2))
+
+    with pytest.raises(ValueError):
+        model(1, 2, 3)
+
+    with pytest.raises(ValueError):
+        model(1)
+
+    with pytest.raises(ValueError):
+        model(1, 2, t=12, r=3)

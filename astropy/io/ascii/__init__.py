@@ -2,8 +2,7 @@
 """ An extensible ASCII table reader and writer.
 
 """
-
-from __future__ import absolute_import, division, print_function
+# flake8: noqa
 
 from .core import (InconsistentTableError,
                    ParameterError,

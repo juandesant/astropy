@@ -1,9 +1,9 @@
-.. _modify_table:
-
 .. include:: references.txt
 
+.. _modify_table:
+
 Modifying a table
------------------
+*****************
 
 The data values within a |Table| object can be modified in much the same manner
 as for `numpy` structured arrays by accessing columns or rows of data and
@@ -12,7 +12,7 @@ is the ability to easily modify the structure of the table: one can add or
 remove columns, and add new rows of data.
 
 Quick overview
-^^^^^^^^^^^^^^
+==============
 
 The code below shows the basics of modifying a table and its data.
 
@@ -28,11 +28,11 @@ The code below shows the basics of modifying a table and its data.
 **Modify data values**
 ::
 
-  >>> t['a'] = [1, -2, 3, -4, 5]  # Set all column values
-  >>> t['a'][2] = 30              # Set row 2 of column 'a'
-  >>> t[1] = (8, 9, 10)           # Set all row values
-  >>> t[1]['b'] = -9              # Set column 'b' of row 1
-  >>> t[0:3]['c'] = 100           # Set column 'c' of rows 0, 1, 2
+  >>> t['a'][:] = [1, -2, 3, -4, 5]  # Set all column values
+  >>> t['a'][2] = 30                 # Set row 2 of column 'a'
+  >>> t[1] = (8, 9, 10)              # Set all row values
+  >>> t[1]['b'] = -9                 # Set column 'b' of row 1
+  >>> t[0:3]['c'] = 100              # Set column 'c' of rows 0, 1, 2
 
 Note that ``table[row][column]`` assignments will not work with
 `numpy` "fancy" ``row`` indexing (in that case ``table[row]`` would be
@@ -76,11 +76,13 @@ of the correct size, or a scalar value that will be broadcast::
 For more explicit control the :meth:`~astropy.table.Table.add_column` and
 :meth:`~astropy.table.Table.add_columns` methods can be used to add one or multiple
 columns to a table.  In both cases the new columns must be specified as |Column| or
-|MaskedColumn| objects with the ``name`` defined::
+|MaskedColumn| objects::
 
   >>> from astropy.table import Column
   >>> aa = Column(np.arange(5), name='aa')
   >>> t.add_column(aa, index=0)  # Insert before the first table column
+  >>> bb = Column(np.arange(5))
+  >>> t.add_column(bb, name='bb')  # Append unnamed column to the table with 'bb' as name
 
   # Make a new table with the same number of rows and add columns to original table
   >>> t2 = Table(np.arange(25).reshape(5, 5), names=('e', 'f', 'g', 'h', 'i'))
@@ -111,15 +113,17 @@ Finally, columns can also be added from
 
 **Replace a column**
 
-For a table with an existing column ``a``, an expression like ``t['a'] = [1, 2,
-3]`` or ``t['a'] = 1`` replaces the data *values* without changing the data
-type or anything else about the column.  In order to entirely replace the
-column with a new column (and potentially change the data type), use the
-:meth:`~astropy.table.Table.replace_column` method.  For instance, to change
-the data type of the ``a`` column from ``int`` to ``float``:
+One can entirely replace an existing column with a new column by setting the
+column to any object that could be used to initialize a table column (e.g.  a
+list or numpy array).  For example, one could change the data type of the ``a``
+column from ``int`` to ``float`` using::
 
-  >>> a_float = t['a'].astype(float)
-  >>> t.replace_column('a', a_float)
+  >>> t['a'] = t['a'].astype(float)
+
+If the right hand side value is not column-like, then an in-place update
+using broadcasting will be done, e.g.::
+
+  >>> t['a'] = 1  # Internally does t['a'][:] = 1
 
 **Rename columns**
 ::
@@ -170,19 +174,13 @@ as the item as shown below::
   >>> t_acb = t[new_order]
 
 Caveats
-^^^^^^^
+=======
 
-Modifying the table data and properties is fairly straightforward.  There are
-only a few things to keep in mind:
-
-- The data type for a column cannot be changed in place.  In order to do this
-  you must make a copy of the table with the column type changed appropriately.
-- Adding or removing a column will generate a new copy
-  in memory of all the data.  If the table is very large this may be slow.
-- Adding a row *may* require a new copy in memory of the table data.  This
-  depends on the detailed layout of Python objects in memory and cannot be
-  reliably controlled.  In some cases it may be possible to build a table
-  row by row in less than O(N**2) time but you cannot count on it.
+Modifying the table data and properties is fairly straightforward.  One thing
+to keep in mind is that adding a row *may* require a new copy in memory of the
+table data.  This depends on the detailed layout of Python objects in memory
+and cannot be reliably controlled.  In some cases it may be possible to build a
+table row by row in less than O(N**2) time but you cannot count on it.
 
 Another subtlety to keep in mind are cases where the return value of an
 operation results in a new table in memory versus a view of the existing
@@ -204,3 +202,56 @@ row 1 of the copy.  The original ``t`` table was unaffected and the new
 temporary table disappeared once the statement was complete.  The takeaway
 is to pay attention to how certain operations are performed one step at
 a time.
+
+.. _table-replace-1_3:
+
+In-place versus replace column update
+=====================================
+
+Consider this code snippet::
+
+  >>> t = Table([[1, 2, 3]], names=['a'])
+  >>> t['a'] = [10.5, 20.5, 30.5]
+
+There are a couple of ways this could be handled.  It could update the existing array
+values in-place (truncating to integer), or it could replace the entire column with a new
+column based on the supplied data values.
+
+The answer for astropy (since version 1.3) is that the operation shown above does a *complete
+replacement* of the column object.  In this case it makes a new column
+object with float values by internally calling
+``t.replace_column('a', [10.5, 20.5, 30.5])``.  In general this behavior
+is more consistent with Python and Pandas behavior.
+
+**Forcing in-place update**
+
+It is straightforward to force an in-place update of a column as follows::
+
+  t[colname][:] = value
+
+**Finding the source of problems**
+
+In order to find potential problems related to the replacing columns, there is a
+configuration option ``table.conf.replace_warnings``.  This controls a set of warnings
+that are emitted under certain circumstances when a table column is replaced.
+This option must be set to a list that includes zero or more of the
+following string values:
+
+``always`` :
+  Print a warning every time a column gets replaced via the
+  setitem syntax (i.e. ``t['a'] = new_col``).
+
+``slice`` :
+  Print a warning when a column that appears to be a slice of
+  a parent column is replaced.
+
+``refcount`` :
+  Print a warning when the Python reference count for the
+  column changes.  This indicates that a stale object exists that might
+  be used elsewhere in the code and give unexpected results.
+
+``attributes`` :
+  Print a warning if any of the standard column attributes changed.
+
+The default value for the ``table.conf.replace_warnings`` option is
+``[]`` (no warnings).

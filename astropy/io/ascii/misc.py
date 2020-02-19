@@ -6,18 +6,16 @@ misc.py:
 :Author: Hannes Breytenbach (hannes@saao.ac.za)
 """
 
-from __future__ import absolute_import, division, print_function
 
+import collections.abc
 import itertools
-import collections
-
-from ...extern.six.moves import zip, map, filter
+import operator
 
 
 def first_true_index(iterable, pred=None, default=None):
     """find the first index position for the which the callable pred returns True"""
     if pred is None:
-        func = lambda x: x[1]
+        func = operator.itemgetter(1)
     else:
         func = lambda x: pred(x[1])
     ii = next(filter(func, enumerate(iterable)), default)  # either index-item pair or default
@@ -27,7 +25,7 @@ def first_true_index(iterable, pred=None, default=None):
 def first_false_index(iterable, pred=None, default=None):
     """find the first index position for the which the callable pred returns False"""
     if pred is None:
-        func = lambda x: not x
+        func = operator.not_
     else:
         func = lambda x: not pred(x)
     return first_true_index(iterable, func, default)
@@ -44,13 +42,13 @@ def sortmore(*args, **kw):
 
     Keywords
     --------
-    globalkey: None
+    globalkey : None
         revert to sorting by key function
-    globalkey: callable
+    globalkey : callable
         Sort by evaluated value for all items in the lists
         (call signature of this function needs to be such that it accepts an
         argument tuple of items from each list.
-        eg.: globalkey = lambda *l: sum(l) will order all the lists by the
+        eg.: ``globalkey = lambda *l: sum(l)`` will order all the lists by the
         sum of the items from each list
 
     if key: None
@@ -71,7 +69,8 @@ def sortmore(*args, **kw):
 
     Examples
     --------
-    Capture sorting indeces:
+    Capture sorting indices::
+
         l = list('CharacterS')
         In [1]: sortmore( l, range(len(l)) )
         Out[1]: (['C', 'S', 'a', 'a', 'c', 'e', 'h', 'r', 'r', 't'],
@@ -96,10 +95,10 @@ def sortmore(*args, **kw):
     if globalkey is None:
         globalkey = lambda *x: 0
 
-    if not isinstance(globalkey, collections.Callable):
+    if not isinstance(globalkey, collections.abc.Callable):
         raise ValueError('globalkey needs to be callable')
 
-    if isinstance(key, collections.Callable):
+    if isinstance(key, collections.abc.Callable):
         k = lambda x: (globalkey(*x), key(x[0]))
     elif isinstance(key, tuple):
         key = (k if k else lambda x: 0 for k in key)

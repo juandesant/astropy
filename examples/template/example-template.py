@@ -10,13 +10,11 @@ The example uses <packages> to <do something> and <other package> to <do other
 thing>. Include links to referenced packages like this: `astropy.io.fits` to
 show the astropy.io.fits or like this `~astropy.io.fits`to show just 'fits'
 
--------------------
 
 *By: <names>*
 
 *License: BSD*
 
--------------------
 
 """
 
@@ -24,7 +22,6 @@ show the astropy.io.fits or like this `~astropy.io.fits`to show just 'fits'
 # Make print work the same in all versions of Python, set up numpy,
 # matplotlib, and use a nicer set of plot parameters:
 
-from __future__ import print_function
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.visualization import astropy_mpl_style

@@ -25,11 +25,7 @@ static int
 PyDistLookup_clear(
     PyDistLookup* self) {
 
-  PyObject* tmp;
-
-  tmp = (PyObject*)self->py_data;
-  self->py_data = NULL;
-  Py_XDECREF(tmp);
+  Py_CLEAR(self->py_data);
 
   return 0;
 }
@@ -38,6 +34,7 @@ static void
 PyDistLookup_dealloc(
     PyDistLookup* self) {
 
+  PyObject_GC_UnTrack(self);
   distortion_lookup_t_free(&self->x);
   Py_XDECREF(self->py_data);
   Py_TYPE(self)->tp_free((PyObject*)self);
@@ -177,8 +174,7 @@ PyDistLookup_set_data(
   PyArrayObject* value_array = NULL;
 
   if (value == NULL) {
-    Py_XDECREF(self->py_data);
-    self->py_data = NULL;
+    Py_CLEAR(self->py_data);
     self->x.data = NULL;
     return 0;
   }
@@ -302,12 +298,7 @@ static PyMethodDef PyDistLookup_methods[] = {
 };
 
 PyTypeObject PyDistLookupType = {
-#if PY3K
   PyVarObject_HEAD_INIT(NULL, 0)
-#else
-  PyObject_HEAD_INIT(NULL)
-  0,                            /*ob_size*/
-#endif
   "astropy.wcs.DistortionLookupTable",  /*tp_name*/
   sizeof(PyDistLookup),         /*tp_basicsize*/
   0,                            /*tp_itemsize*/

@@ -14,6 +14,7 @@ Each cosmology has the following parameters defined:
     n           Density perturbation spectral index
     Tcmb0       Current temperature of the CMB
     Neff        Effective number of neutrino species
+    m_nu        Assumed mass of neutrino species, in eV.
     sigma8      Density perturbation amplitude
     tau         Ionisation optical depth
     z_reion     Redshift of hydrogen reionisation
@@ -24,35 +25,51 @@ Each cosmology has the following parameters defined:
 The list of cosmologies available are given by the tuple
 `available`. Current cosmologies available:
 
-Planck 15 parameters from Planck Collaboration 2015, arXiv: 1502.01589
+Planck 2018 (Planck18_arXiv_v2) parameters from Planck Collaboration 2018,
+ arXiv:1807.06209v2 (Paper VI), Table 2 (TT, TE, EE + lowE + lensing + BAO)
+
+Planck 2015 (Planck15) parameters from Planck Collaboration 2016, A&A, 594, A13
  (Paper XIII), Table 4 (TT, TE, EE + lowP + lensing + ext)
 
-Planck13 parameters from Planck Collaboration 2013, arXiv:1303.5076
+Planck 2013 (Planck13) parameters from Planck Collaboration 2014, A&A, 571, A16
  (Paper XVI), Table 5 (Planck + WP + highL + BAO)
 
-WMAP 9 year parameters from Hinshaw et al. 2013, ApJS, 208, 19,
+WMAP 9 year (WMAP9) parameters from Hinshaw et al. 2013, ApJS, 208, 19,
 doi: 10.1088/0067-0049/208/2/19. Table 4 (WMAP9 + eCMB + BAO + H0)
 
-WMAP 7 year parameters from Komatsu et al. 2011, ApJS, 192, 18,
+WMAP 7 year (WMAP7) parameters from Komatsu et al. 2011, ApJS, 192, 18,
 doi: 10.1088/0067-0049/192/2/18. Table 1 (WMAP + BAO + H0 ML).
 
-WMAP 5 year parameters from Komatsu et al. 2009, ApJS, 180, 330,
+WMAP 5 year (WMAP5) parameters from Komatsu et al. 2009, ApJS, 180, 330,
 doi: 10.1088/0067-0049/180/2/330. Table 1 (WMAP + BAO + SN ML).
 
 """
-from __future__ import (absolute_import, division, print_function,
-                        unicode_literals)
-# delete these things from the namespace so we can automatically find
-# all of the parameter dictionaries below.
-del absolute_import
-del division
-del print_function
-del unicode_literals
 
 # Note: if you add a new cosmology, please also update the table
 # in the 'Built-in Cosmologies' section of astropy/docs/cosmology/index.rst
-# in addition to the list above.  You also need to add them to
-# __all__ in core.py
+# in addition to the list above.  You also need to add them to the 'available'
+# list at the bottom of this file.
+
+# Planck 2018 paper VI v2
+# Unlike Planck 2015, the paper includes massive neutrinos in Om0, which here
+# are included in m_nu.  Hence, the Om0 value differs slightly from the paper.
+Planck18_arXiv_v2 = dict(
+    Oc0=0.2607,
+    Ob0=0.04897,
+    Om0=0.30966,
+    H0=67.66,
+    n=0.9665,
+    sigma8=0.8102,
+    tau=0.0561,
+    z_reion=7.82,
+    t0=13.787,
+    Tcmb0=2.7255,
+    Neff=3.046,
+    flat=True,
+    m_nu=[0., 0., 0.06],
+    reference=("Planck Collaboration 2018, arXiv:1807.06209 v2 (Paper VI),"
+               " Table 2 (TT, TE, EE + lowE + lensing + BAO)")
+)
 
 # Planck 2015 paper XII Table 4 final column (best fit)
 Planck15 = dict(
@@ -69,7 +86,7 @@ Planck15 = dict(
     Neff=3.046,
     flat=True,
     m_nu=[0., 0., 0.06],
-    reference=("Planck Collaboration 2015, Paper XII, arXiv:1502.01589"
+    reference=("Planck Collaboration 2016, A&A, 594, A13 (Paper XIII),"
                " Table 4 (TT, TE, EE + lowP + lensing + ext)")
 )
 
@@ -88,7 +105,7 @@ Planck13 = dict(
     Neff=3.046,
     flat=True,
     m_nu=[0., 0., 0.06],
-    reference=("Planck Collaboration 2013, Paper XVI, arXiv:1303.5076"
+    reference=("Planck Collaboration 2014, A&A, 571, A16 (Paper XVI),"
                " Table 5 (Planck + WP + highL + BAO)")
 )
 
@@ -150,4 +167,6 @@ WMAP5 = dict(
                "Table 1 (WMAP + BAO + SN ML).")
 )
 
-available = tuple(k for k in locals() if not k.startswith('_'))
+# If new parameters are added, this list must be updated
+available = ['Planck18_arXiv_v2', 'Planck15', 'Planck13', 'WMAP9', 'WMAP7',
+             'WMAP5']

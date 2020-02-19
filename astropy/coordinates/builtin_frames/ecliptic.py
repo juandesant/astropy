@@ -1,19 +1,99 @@
 # -*- coding: utf-8 -*-
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
-from __future__ import (absolute_import, unicode_literals, division,
-                        print_function)
 
-from ..representation import SphericalRepresentation
-from ..baseframe import BaseCoordinateFrame, TimeFrameAttribute
-from .utils import EQUINOX_J2000
+from astropy import units as u
+from astropy.utils.decorators import format_doc
+from astropy.coordinates import representation as r
+from astropy.coordinates.baseframe import BaseCoordinateFrame, base_doc
+from astropy.coordinates.attributes import TimeAttribute, QuantityAttribute
+from .utils import EQUINOX_J2000, DEFAULT_OBSTIME
+
+__all__ = ['GeocentricMeanEcliptic', 'BarycentricMeanEcliptic',
+           'HeliocentricMeanEcliptic', 'BaseEclipticFrame',
+           'GeocentricTrueEcliptic', 'BarycentricTrueEcliptic',
+           'HeliocentricTrueEcliptic',
+           'HeliocentricEclipticIAU76', 'CustomBarycentricEcliptic']
 
 
-__all__ = ['GeocentricTrueEcliptic', 'BarycentricTrueEcliptic', 'HeliocentricTrueEcliptic']
+doc_components_ecl = """
+    lon : `~astropy.coordinates.Angle`, optional, must be keyword
+        The ecliptic longitude for this object (``lat`` must also be given and
+        ``representation`` must be None).
+    lat : `~astropy.coordinates.Angle`, optional, must be keyword
+        The ecliptic latitude for this object (``lon`` must also be given and
+        ``representation`` must be None).
+    distance : `~astropy.units.Quantity`, optional, must be keyword
+        The distance for this object from the {0}.
+        (``representation`` must be None).
+
+    pm_lon_coslat : `~astropy.coordinates.Angle`, optional, must be keyword
+        The proper motion in the ecliptic longitude (including the ``cos(lat)``
+        factor) for this object (``pm_lat`` must also be given).
+    pm_lat : `~astropy.coordinates.Angle`, optional, must be keyword
+        The proper motion in the ecliptic latitude for this object
+        (``pm_lon_coslat`` must also be given).
+    radial_velocity : :class:`~astropy.units.Quantity`, optional, must be keyword
+        The radial velocity of this object.
+"""
 
 
-class GeocentricTrueEcliptic(BaseCoordinateFrame):
+@format_doc(base_doc,
+            components=doc_components_ecl.format('specified location'),
+            footer="")
+class BaseEclipticFrame(BaseCoordinateFrame):
     """
-    Geocentric ecliptic coordinates.  These origin of the coordinates are the
+    A base class for frames that have names and conventions like that of
+    ecliptic frames.
+
+    .. warning::
+            In the current version of astropy, the ecliptic frames do not yet have
+            stringent accuracy tests.  We recommend you test to "known-good" cases
+            to ensure this frames are what you are looking for. (and then ideally
+            you would contribute these tests to Astropy!)
+    """
+
+    default_representation = r.SphericalRepresentation
+    default_differential = r.SphericalCosLatDifferential
+
+
+doc_footer_geo = """
+    Other parameters
+    ----------------
+    equinox : `~astropy.time.Time`, optional
+        The date to assume for this frame.  Determines the location of the
+        x-axis and the location of the Earth (necessary for transformation to
+        non-geocentric systems). Defaults to the 'J2000' equinox.
+    obstime : `~astropy.time.Time`, optional
+        The time at which the observation is taken.  Used for determining the
+        position of the Earth. Defaults to J2000.
+"""
+
+
+@format_doc(base_doc, components=doc_components_ecl.format('geocenter'),
+            footer=doc_footer_geo)
+class GeocentricMeanEcliptic(BaseEclipticFrame):
+    """
+    Geocentric mean ecliptic coordinates.  These origin of the coordinates are the
+    geocenter (Earth), with the x axis pointing to the *mean* (not true) equinox
+    at the time specified by the ``equinox`` attribute, and the xy-plane in the
+    plane of the ecliptic for that date.
+
+    Be aware that the definition of "geocentric" here means that this frame
+    *includes* light deflection from the sun, aberration, etc when transforming
+    to/from e.g. ICRS.
+
+    The frame attributes are listed under **Other Parameters**.
+    """
+
+    equinox = TimeAttribute(default=EQUINOX_J2000)
+    obstime = TimeAttribute(default=DEFAULT_OBSTIME)
+
+
+@format_doc(base_doc, components=doc_components_ecl.format('geocenter'),
+            footer=doc_footer_geo)
+class GeocentricTrueEcliptic(BaseEclipticFrame):
+    """
+    Geocentric true ecliptic coordinates.  These origin of the coordinates are the
     geocenter (Earth), with the x axis pointing to the *true* (not mean) equinox
     at the time specified by the ``equinox`` attribute, and the xy-plane in the
     plane of the ecliptic for that date.
@@ -22,120 +102,142 @@ class GeocentricTrueEcliptic(BaseCoordinateFrame):
     *includes* light deflection from the sun, aberration, etc when transforming
     to/from e.g. ICRS.
 
-    This frame has one frame attribute:
+    The frame attributes are listed under **Other Parameters**.
+    """
 
-    * ``equinox``
+    equinox = TimeAttribute(default=EQUINOX_J2000)
+    obstime = TimeAttribute(default=DEFAULT_OBSTIME)
+
+
+doc_footer_bary = """
+    Other parameters
+    ----------------
+    equinox : `~astropy.time.Time`, optional
         The date to assume for this frame.  Determines the location of the
-        x-axis and the location of the Earth (necessary for transformation to
-        non-geocentric systems).
+        x-axis and the location of the Earth and Sun.
+        Defaults to the 'J2000' equinox.
+"""
 
-    .. warning::
-        In the current version of astropy, the ecliptic frames do not yet have
-        stringent accuracy tests.  We recommend you test to "known-good" cases
-        to ensure this frames are what you are looking for. (and then ideally
-        you would contribute these tests to Astropy!)
 
-    Parameters
-    ----------
-    representation : `BaseRepresentation` or None
-        A representation object or None to have no data (or use the other keywords)
-    lon : `Angle`, optional, must be keyword
-        The ecliptic longitude for this object (``lat`` must also be given and
-        ``representation`` must be None).
-    lat : `Angle`, optional, must be keyword
-        The ecliptic latitude for this object (``lon`` must also be given and
-        ``representation`` must be None).
-    distance : `~astropy.units.Quantity`, optional, must be keyword
-        The Distance for this object from the geocenter.
-        (``representation`` must be None).
-    copy : bool, optional
-        If `True` (default), make copies of the input coordinate arrays.
-        Can only be passed in as a keyword argument.
+@format_doc(base_doc, components=doc_components_ecl.format("barycenter"),
+            footer=doc_footer_bary)
+class BarycentricMeanEcliptic(BaseEclipticFrame):
     """
-    default_representation = SphericalRepresentation
+    Barycentric mean ecliptic coordinates.  These origin of the coordinates are the
+    barycenter of the solar system, with the x axis pointing in the direction of
+    the *mean* (not true) equinox as at the time specified by the ``equinox``
+    attribute (as seen from Earth), and the xy-plane in the plane of the
+    ecliptic for that date.
 
-    equinox = TimeFrameAttribute(default=EQUINOX_J2000)
-
-
-class BarycentricTrueEcliptic(BaseCoordinateFrame):
+    The frame attributes are listed under **Other Parameters**.
     """
-    Barycentric ecliptic coordinates.  These origin of the coordinates are the
+
+    equinox = TimeAttribute(default=EQUINOX_J2000)
+
+
+@format_doc(base_doc, components=doc_components_ecl.format("barycenter"),
+            footer=doc_footer_bary)
+class BarycentricTrueEcliptic(BaseEclipticFrame):
+    """
+    Barycentric true ecliptic coordinates.  These origin of the coordinates are the
     barycenter of the solar system, with the x axis pointing in the direction of
     the *true* (not mean) equinox as at the time specified by the ``equinox``
     attribute (as seen from Earth), and the xy-plane in the plane of the
     ecliptic for that date.
 
-    This frame has one frame attribute:
+    The frame attributes are listed under **Other Parameters**.
+    """
 
-    * ``equinox``
+    equinox = TimeAttribute(default=EQUINOX_J2000)
+
+
+doc_footer_helio = """
+    Other parameters
+    ----------------
+    equinox : `~astropy.time.Time`, optional
         The date to assume for this frame.  Determines the location of the
         x-axis and the location of the Earth and Sun.
+        Defaults to the 'J2000' equinox.
+    obstime : `~astropy.time.Time`, optional
+        The time at which the observation is taken.  Used for determining the
+        position of the Sun. Defaults to J2000.
+"""
 
-    .. warning::
-        In the current version of astropy, the ecliptic frames do not yet have
-        stringent accuracy tests.  We recommend you test to "known-good" cases
-        to ensure this frames are what you are looking for. (and then ideally
-        you would contribute these tests to Astropy!)
 
-    Parameters
-    ----------
-    representation : `BaseRepresentation` or None
-        A representation object or None to have no data (or use the other keywords)
-    l : `Angle`, optional, must be keyword
-        The ecliptic longitude for this object (``b`` must also be given and
-        ``representation`` must be None).
-    b : `Angle`, optional, must be keyword
-        The ecliptic latitude for this object (``l`` must also be given and
-        ``representation`` must be None).
-    r : `~astropy.units.Quantity`, optional, must be keyword
-        The Distance for this object from the sun's center.
-        (``representation`` must be None).
-    copy : bool, optional
-        If `True` (default), make copies of the input coordinate arrays.
-        Can only be passed in as a keyword argument.
+@format_doc(base_doc, components=doc_components_ecl.format("sun's center"),
+            footer=doc_footer_helio)
+class HeliocentricMeanEcliptic(BaseEclipticFrame):
     """
-    default_representation = SphericalRepresentation
+    Heliocentric mean ecliptic coordinates.  These origin of the coordinates are the
+    center of the sun, with the x axis pointing in the direction of
+    the *mean* (not true) equinox as at the time specified by the ``equinox``
+    attribute (as seen from Earth), and the xy-plane in the plane of the
+    ecliptic for that date.
 
-    equinox = TimeFrameAttribute(default=EQUINOX_J2000)
+    The frame attributes are listed under **Other Parameters**.
+
+    {params}
 
 
-class HeliocentricTrueEcliptic(BaseCoordinateFrame):
     """
-    Heliocentric ecliptic coordinates.  These origin of the coordinates are the
+
+    equinox = TimeAttribute(default=EQUINOX_J2000)
+    obstime = TimeAttribute(default=DEFAULT_OBSTIME)
+
+
+@format_doc(base_doc, components=doc_components_ecl.format("sun's center"),
+            footer=doc_footer_helio)
+class HeliocentricTrueEcliptic(BaseEclipticFrame):
+    """
+    Heliocentric true ecliptic coordinates.  These origin of the coordinates are the
     center of the sun, with the x axis pointing in the direction of
     the *true* (not mean) equinox as at the time specified by the ``equinox``
     attribute (as seen from Earth), and the xy-plane in the plane of the
     ecliptic for that date.
 
-    This frame has one frame attribute:
+    The frame attributes are listed under **Other Parameters**.
 
-    * ``equinox``
-        The date to assume for this frame.  Determines the location of the
-        x-axis and the location of the Earth and Sun.
+    {params}
 
-    .. warning::
-        In the current version of astropy, the ecliptic frames do not yet have
-        stringent accuracy tests.  We recommend you test to "known-good" cases
-        to ensure this frames are what you are looking for. (and then ideally
-        you would contribute these tests to Astropy!)
 
-    Parameters
-    ----------
-    representation : `BaseRepresentation` or None
-        A representation object or None to have no data (or use the other keywords)
-    l : `Angle`, optional, must be keyword
-        The ecliptic longitude for this object (``b`` must also be given and
-        ``representation`` must be None).
-    b : `Angle`, optional, must be keyword
-        The ecliptic latitude for this object (``l`` must also be given and
-        ``representation`` must be None).
-    r : `~astropy.units.Quantity`, optional, must be keyword
-        The Distance for this object from the sun's center.
-        (``representation`` must be None).
-    copy : bool, optional
-        If `True` (default), make copies of the input coordinate arrays.
-        Can only be passed in as a keyword argument.
     """
-    default_representation = SphericalRepresentation
 
-    equinox = TimeFrameAttribute(default=EQUINOX_J2000)
+    equinox = TimeAttribute(default=EQUINOX_J2000)
+    obstime = TimeAttribute(default=DEFAULT_OBSTIME)
+
+
+@format_doc(base_doc, components=doc_components_ecl.format("sun's center"),
+            footer="")
+class HeliocentricEclipticIAU76(BaseEclipticFrame):
+    """
+    Heliocentric mean (IAU 1976) ecliptic coordinates.  These origin of the coordinates are the
+    center of the sun, with the x axis pointing in the direction of
+    the *mean* (not true) equinox of J2000, and the xy-plane in the plane of the
+    ecliptic of J2000 (according to the IAU 1976/1980 obliquity model).
+    It has, therefore, a fixed equinox and an older obliquity value
+    than the rest of the frames.
+
+    The frame attributes are listed under **Other Parameters**.
+
+    {params}
+
+
+    """
+
+    obstime = TimeAttribute(default=DEFAULT_OBSTIME)
+
+
+@format_doc(base_doc, components=doc_components_ecl.format("barycenter"),
+            footer="")
+class CustomBarycentricEcliptic(BaseEclipticFrame):
+    """
+    Barycentric ecliptic coordinates with custom obliquity.
+    These origin of the coordinates are the
+    barycenter of the solar system, with the x axis pointing in the direction of
+    the *mean* (not true) equinox of J2000, and the xy-plane in the plane of the
+    ecliptic tilted a custom obliquity angle.
+
+    The frame attributes are listed under **Other Parameters**.
+    """
+
+    obliquity = QuantityAttribute(default=84381.448 * u.arcsec, unit=u.arcsec)
