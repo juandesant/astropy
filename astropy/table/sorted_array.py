@@ -48,7 +48,7 @@ class SortedArray:
 
     @property
     def cols(self):
-        return self.data.columns.values()
+        return list(self.data.columns.values())
 
     def add(self, key, row):
         '''
@@ -66,8 +66,7 @@ class SortedArray:
         if self.unique and 0 <= pos < len(self.row_index) and \
            all(self.data[pos][i] == key[i] for i in range(len(key))):
             # already exists
-            raise ValueError('Cannot add duplicate value "{}" in a '
-                             'unique index'.format(key))
+            raise ValueError(f'Cannot add duplicate value "{key}" in a unique index')
         self.data.insert_row(pos, key)
         self.row_index = self.row_index.insert(pos, row)
 
@@ -112,8 +111,8 @@ class SortedArray:
             if exact and (t == len(key_slice) or key_slice[t] != key[i]):
                 # no match
                 return -1
-            elif t == len(key_slice) or (t == 0 and len(key_slice) > 0 and
-                                         key[i] < key_slice[0]):
+            elif t == len(key_slice) or (t == 0 and len(key_slice) > 0
+                                         and key[i] < key_slice[0]):
                 # too small or too large
                 return begin + t
             end = begin + _searchsorted(key_slice, key[i], side='right')

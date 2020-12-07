@@ -1,11 +1,8 @@
 # -*- coding: utf-8 -*-
-
-
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 """
 This is a set of regression tests for vo.
 """
-
 
 # STDLIB
 import difflib
@@ -26,7 +23,6 @@ from astropy.io.votable import tree
 from astropy.io.votable.exceptions import VOTableSpecError, VOWarning, W39
 from astropy.io.votable.xmlutil import validate_schema
 from astropy.utils.data import get_pkg_data_filename, get_pkg_data_filenames
-from astropy.tests.helper import raises, catch_warnings
 
 # Determine the kind of float formatting in this build of Python
 if hasattr(sys, 'float_repr_style'):
@@ -61,10 +57,10 @@ def test_parse_single_table2():
     assert len(table2.array.dtype.names) == 28
 
 
-@raises(IndexError)
 def test_parse_single_table3():
-    parse_single_table(get_pkg_data_filename('data/regression.xml'),
-                       table_number=3)
+    with pytest.raises(IndexError):
+        parse_single_table(get_pkg_data_filename('data/regression.xml'),
+                           table_number=3)
 
 
 def _test_regression(tmpdir, _python_based=False, binary_mode=1):
@@ -75,10 +71,10 @@ def _test_regression(tmpdir, _python_based=False, binary_mode=1):
 
     dtypes = [
         (('string test', 'string_test'), '|O8'),
-        (('fixed string test', 'string_test_2'), '|S10'),
+        (('fixed string test', 'string_test_2'), '<U10'),
         ('unicode_test', '|O8'),
         (('unicode test', 'fixed_unicode_test'), '<U10'),
-        (('string array test', 'string_array_test'), '|S4'),
+        (('string array test', 'string_array_test'), '<U4'),
         ('unsignedByte', '|u1'),
         ('short', '<i2'),
         ('int', '<i4'),
@@ -142,8 +138,7 @@ def _test_regression(tmpdir, _python_based=False, binary_mode=1):
 
     with open(
         get_pkg_data_filename(
-            'data/regression.bin.tabledata.truth.{}.xml'.format(
-                votable.version)),
+            f'data/regression.bin.tabledata.truth.{votable.version}.xml'),
             'rt', encoding='utf-8') as fd:
         truth = fd.readlines()
     with open(str(tmpdir.join("regression.bin.tabledata.xml")),
@@ -249,7 +244,7 @@ def test_select_columns_by_index():
         get_pkg_data_filename('data/regression.xml'), columns=columns).get_first_table()  # noqa
     array = table.array
     mask = table.array.mask
-    assert array['string_test'][0] == b"String & test"
+    assert array['string_test'][0] == "String & test"
     columns = ['string_test', 'unsignedByte', 'bitarray']
     for c in columns:
         assert not np.all(mask[c])
@@ -262,7 +257,7 @@ def test_select_columns_by_name():
         get_pkg_data_filename('data/regression.xml'), columns=columns).get_first_table()  # noqa
     array = table.array
     mask = table.array.mask
-    assert array['string_test'][0] == b"String & test"
+    assert array['string_test'][0] == "String & test"
     for c in columns:
         assert not np.all(mask[c])
     assert np.all(mask['unicode_test'])
@@ -280,15 +275,14 @@ class TestParse:
                           np.object_)
         assert_array_equal(
             self.array['string_test'],
-            [b'String & test', b'String &amp; test', b'XXXX',
-             b'', b''])
+            ['String & test', 'String &amp; test', 'XXXX', '', ''])
 
     def test_fixed_string_test(self):
         assert issubclass(self.array['string_test_2'].dtype.type,
-                          np.string_)
+                          np.unicode_)
         assert_array_equal(
             self.array['string_test_2'],
-            [b'Fixed stri', b'0123456789', b'XXXX', b'', b''])
+            ['Fixed stri', '0123456789', 'XXXX', '', ''])
 
     def test_unicode_test(self):
         assert issubclass(self.array['unicode_test'].dtype.type,
@@ -724,9 +718,9 @@ def test_open_files():
         parse(filename)
 
 
-@raises(VOTableSpecError)
 def test_too_many_columns():
-    parse(get_pkg_data_filename('data/too_many_columns.xml.gz'))
+    with pytest.raises(VOTableSpecError):
+        parse(get_pkg_data_filename('data/too_many_columns.xml.gz'))
 
 
 def test_build_from_scratch(tmpdir):
@@ -782,9 +776,7 @@ def test_validate(test_path_object=False):
 
     # We can't test xmllint, because we can't rely on it being on the
     # user's machine.
-    with catch_warnings():
-        result = validate(fpath,
-                          output, xmllint=False)
+    result = validate(fpath, output, xmllint=False)
 
     assert result is False
 
@@ -841,13 +833,7 @@ def test_gzip_filehandles(tmpdir):
 
 
 def test_from_scratch_example():
-    with catch_warnings(VOWarning) as warning_lines:
-        try:
-            _run_test_from_scratch_example()
-        except ValueError as e:
-            warning_lines.append(str(e))
-
-    assert len(warning_lines) == 0
+    _run_test_from_scratch_example()
 
 
 def _run_test_from_scratch_example():
@@ -957,11 +943,10 @@ def test_resource_structure():
 def test_no_resource_check():
     output = io.StringIO()
 
-    with catch_warnings():
-        # We can't test xmllint, because we can't rely on it being on the
-        # user's machine.
-        result = validate(get_pkg_data_filename('data/no_resource.xml'),
-                          output, xmllint=False)
+    # We can't test xmllint, because we can't rely on it being on the
+    # user's machine.
+    result = validate(get_pkg_data_filename('data/no_resource.xml'),
+                      output, xmllint=False)
 
     assert result is False
 

@@ -18,7 +18,8 @@ from astropy.utils.misc import dtype_bytes_or_chars
 
 __all__ = ['MergeConflictError', 'MergeConflictWarning', 'MERGE_STRATEGIES',
            'common_dtype', 'MergePlus', 'MergeNpConcatenate', 'MergeStrategy',
-           'MergeStrategyMeta', 'enable_merge_strategies', 'merge', 'MetaData']
+           'MergeStrategyMeta', 'enable_merge_strategies', 'merge', 'MetaData',
+           'MetaAttribute']
 
 
 class MergeConflictError(TypeError):
@@ -58,8 +59,7 @@ def common_dtype(arrs):
     if len(uniq_types) > 1:
         # Embed into the exception the actual list of incompatible types.
         incompat_types = [dtype(arr).name for arr in arrs]
-        tme = MergeConflictError('Arrays have incompatible types {}'
-                                 .format(incompat_types))
+        tme = MergeConflictError(f'Arrays have incompatible types {incompat_types}')
         tme._incompat_types = incompat_types
         raise tme
 
@@ -296,9 +296,7 @@ def _warn_str_func(key, left, right):
 
 
 def _error_str_func(key, left, right):
-    out = ('Cannot merge meta key {!r} '
-           'types {!r} and {!r}'
-           .format(key, type(left), type(right)))
+    out = f'Cannot merge meta key {key!r} types {type(left)!r} and {type(right)!r}'
     return out
 
 
@@ -414,3 +412,73 @@ class MetaData:
                     instance._meta = value
             else:
                 raise TypeError("meta attribute must be dict-like")
+
+
+class MetaAttribute:
+    """
+    Descriptor to define custom attribute which gets stored in the object
+    ``meta`` dict and can have a defined default.
+
+    This descriptor is intended to provide a convenient way to add attributes
+    to a subclass of a complex class such as ``Table`` or ``NDData``.
+
+    This requires that the object has an attribute ``meta`` which is a
+    dict-like object.  The value of the MetaAttribute will be stored in a
+    new dict meta['__attributes__'] that is created when required.
+
+    Classes that define MetaAttributes are encouraged to support initializing
+    the attributes via the class ``__init__``.  For example::
+
+        for attr in list(kwargs):
+            descr = getattr(self.__class__, attr, None)
+            if isinstance(descr, MetaAttribute):
+                setattr(self, attr, kwargs.pop(attr))
+
+    The name of a ``MetaAttribute`` cannot be the same as any of the following:
+
+    - Keyword argument in the owner class ``__init__``
+    - Method or attribute of the "parent class", where the parent class is
+      taken to be ``owner.__mro__[1]``.
+
+    :param default: default value
+
+    """
+    def __init__(self, default=None):
+        self.default = default
+
+    def __get__(self, instance, owner):
+        # When called without an instance, return self to allow access
+        # to descriptor attributes.
+        if instance is None:
+            return self
+
+        # Get the __attributes__ dict and create if not there already.
+        attributes = instance.meta.setdefault('__attributes__', {})
+        try:
+            value = attributes[self.name]
+        except KeyError:
+            if self.default is not None:
+                attributes[self.name] = deepcopy(self.default)
+            # Return either specified default or None
+            value = attributes.get(self.name)
+        return value
+
+    def __set__(self, instance, value):
+        # Get the __attributes__ dict and create if not there already.
+        attributes = instance.meta.setdefault('__attributes__', {})
+        attributes[self.name] = value
+
+    def __set_name__(self, owner, name):
+        import inspect
+        params = [param.name for param in inspect.signature(owner).parameters.values()
+                  if param.kind not in (inspect.Parameter.VAR_KEYWORD,
+                                        inspect.Parameter.VAR_POSITIONAL)]
+
+        # Reject names from existing params or best guess at parent class
+        if name in params or hasattr(owner.__mro__[1], name):
+            raise ValueError(f'{name} not allowed as {self.__class__.__name__}')
+
+        self.name = name
+
+    def __repr__(self):
+        return f'<{self.__class__.__name__} name={self.name} default={self.default}>'

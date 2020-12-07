@@ -16,14 +16,14 @@ import pytest
 import numpy as np
 from numpy import testing as npt
 
-from astropy.tests.helper import raises, assert_quantity_allclose as assert_allclose
+from astropy.tests.helper import assert_quantity_allclose as assert_allclose
 from astropy import units as u
 from astropy import time
 from astropy import coordinates as coords
 from astropy.units import allclose
 
 try:
-    import scipy  # pylint: disable=W0611
+    import scipy  # pylint: disable=W0611  # noqa
 except ImportError:
     HAS_SCIPY = False
 else:
@@ -78,7 +78,7 @@ def test_representations_api():
     c2 = SphericalRepresentation(lon=[8, 9]*u.hourangle, lat=[5, 6]*u.deg, distance=10*u.kpc)
     assert len(c2.distance) == 2
     # when they can't be broadcast, it is a ValueError (same as Numpy)
-    with raises(ValueError):
+    with pytest.raises(ValueError):
         c2 = UnitSphericalRepresentation(lon=[8, 9, 10]*u.hourangle, lat=[5, 6]*u.deg)
 
     # It's also possible to pass in scalar quantity lists with mixed units. These
@@ -101,7 +101,7 @@ def test_representations_api():
     assert isinstance(c1.distance, Distance)
 
     # but they are read-only, as representations are immutable once created
-    with raises(AttributeError):
+    with pytest.raises(AttributeError):
         c1.lat = Latitude(5, u.deg)
     # Note that it is still possible to modify the array in-place, but this is not
     # sanctioned by the API, as this would prevent things like caching.
@@ -111,7 +111,7 @@ def test_representations_api():
     # coordinates are defined, other conventions can be included as new classes.
     # Later there may be other conventions that we implement - for now just the
     # physics convention, as it is one of the most common cases.
-    c3 = PhysicsSphericalRepresentation(phi=120*u.deg, theta=85*u.deg, r=3*u.kpc)
+    _ = PhysicsSphericalRepresentation(phi=120*u.deg, theta=85*u.deg, r=3*u.kpc)
 
     # first dimension must be length-3 if a lone `Quantity` is passed in.
     c1 = CartesianRepresentation(np.random.randn(3, 100) * u.kpc)
@@ -170,11 +170,11 @@ def test_frame_api():
 
     # the information required to specify the frame is immutable
     J2001 = time.Time('J2001')
-    with raises(AttributeError):
+    with pytest.raises(AttributeError):
         fk5.equinox = J2001
 
     # Similar for the representation data.
-    with raises(AttributeError):
+    with pytest.raises(AttributeError):
         fk5.data = UnitSphericalRepresentation(lon=8*u.hour, lat=5*u.deg)
 
     # There is also a class-level attribute that lists the attributes needed to
@@ -224,7 +224,7 @@ def test_frame_api():
     assert coo3.separation_3d(coo4).kpc == 1.0
 
     # The next example fails because `coo1` and `coo2` don't have distances
-    with raises(ValueError):
+    with pytest.raises(ValueError):
         assert coo1.separation_3d(coo2).kpc == 1.0
 
     # repr/str also shows info, with frame and data
@@ -266,22 +266,15 @@ def test_transform_api():
     newfk5 = fk5.transform_to(fk5_J2001_frame)
     assert newfk5.equinox == J2001
 
-    # classes can also be given to `transform_to`, which then uses the defaults for
-    # the frame information:
-    samefk5 = fk5.transform_to(FK5)
-    # `fk5` was initialized using default `obstime` and `equinox`, so:
-    assert_allclose(samefk5.ra, fk5.ra, atol=1e-10*u.deg)
-    assert_allclose(samefk5.dec, fk5.dec, atol=1e-10*u.deg)
-
     # transforming to a new frame necessarily loses framespec information if that
     # information is not applicable to the new frame.  This means transforms are not
     # always round-trippable:
     fk5_2 = FK5(ra=8*u.hour, dec=5*u.deg, equinox=J2001)
-    ic_trans = fk5_2.transform_to(ICRS)
+    ic_trans = fk5_2.transform_to(ICRS())
 
     # `ic_trans` does not have an `equinox`, so now when we transform back to FK5,
     # it's a *different* RA and Dec
-    fk5_trans = ic_trans.transform_to(FK5)
+    fk5_trans = ic_trans.transform_to(FK5())
     assert not allclose(fk5_2.ra, fk5_trans.ra, rtol=0, atol=1e-10*u.deg)
 
     # But if you explicitly give the right equinox, all is fine
@@ -289,8 +282,8 @@ def test_transform_api():
     assert_allclose(fk5_2.ra, fk5_trans_2.ra, rtol=0, atol=1e-10*u.deg)
 
     # Trying to transforming a frame with no data is of course an error:
-    with raises(ValueError):
-        FK5(equinox=J2001).transform_to(ICRS)
+    with pytest.raises(ValueError):
+        FK5(equinox=J2001).transform_to(ICRS())
 
     # To actually define a new transformation, the same scheme as in the
     # 0.2/0.3 coordinates framework can be re-used - a graph of transform functions
@@ -306,8 +299,8 @@ def test_transform_api():
 
     @frame_transform_graph.transform(DynamicMatrixTransform, SomeNewSystem, FK5)
     def new_to_fk5(newobj, fk5frame):
-        ot = newobj.obstime
-        eq = fk5frame.equinox
+        _ = newobj.obstime
+        _ = fk5frame.equinox
         # ... build a *cartesian* transform matrix using `eq` that transforms from
         # the `newobj` frame as observed at `ot` to FK5 an equinox `eq`
         matrix = np.eye(3)
@@ -417,8 +410,10 @@ def test_highlevel_api():
     # assert str(m31icrs) == '<SkyCoord (ICRS) RA=10.68471 deg, Dec=41.26875 deg>'
 
     if HAS_SCIPY:
-        cat1 = coords.SkyCoord(ra=[1, 2]*u.hr, dec=[3, 4.01]*u.deg, distance=[5, 6]*u.kpc, frame='icrs')
-        cat2 = coords.SkyCoord(ra=[1, 2, 2.01]*u.hr, dec=[3, 4, 5]*u.deg, distance=[5, 200, 6]*u.kpc, frame='icrs')
+        cat1 = coords.SkyCoord(ra=[1, 2]*u.hr, dec=[3, 4.01]*u.deg,
+                               distance=[5, 6]*u.kpc, frame='icrs')
+        cat2 = coords.SkyCoord(ra=[1, 2, 2.01]*u.hr, dec=[3, 4, 5]*u.deg,
+                               distance=[5, 200, 6]*u.kpc, frame='icrs')
         idx1, sep2d1, dist3d1 = cat1.match_to_catalog_sky(cat2)
         idx2, sep2d2, dist3d2 = cat1.match_to_catalog_3d(cat2)
 
@@ -444,5 +439,5 @@ def test_highlevel_api_remote():
 
     m31fk4 = coords.SkyCoord.from_name('M31', frame='fk4')
 
-    assert m31icrs.frame != m31fk4.frame
+    assert not m31icrs.is_equivalent_frame(m31fk4)
     assert np.abs(m31icrs.ra - m31fk4.ra) > .5*u.deg

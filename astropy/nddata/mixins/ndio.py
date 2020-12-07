@@ -27,8 +27,8 @@ class NDDataRead(registry.UnifiedReadWrite):
 
     See also:
 
-    - http://docs.astropy.org/en/stable/nddata
-    - http://docs.astropy.org/en/stable/io/unified.html
+    - https://docs.astropy.org/en/stable/nddata
+    - https://docs.astropy.org/en/stable/io/unified.html
 
     Parameters
     ----------
@@ -37,6 +37,8 @@ class NDDataRead(registry.UnifiedReadWrite):
         first argument is the input filename.
     format : str, optional
         File format specifier.
+    cache : bool, optional
+        Caching behavior if file is a URL.
     **kwargs : dict, optional
         Keyword arguments passed through to data reader.
 
@@ -75,8 +77,8 @@ class NDDataWrite(registry.UnifiedReadWrite):
 
     See also:
 
-    - http://docs.astropy.org/en/stable/nddata
-    - http://docs.astropy.org/en/stable/io/unified.html
+    - https://docs.astropy.org/en/stable/nddata
+    - https://docs.astropy.org/en/stable/io/unified.html
 
     Parameters
     ----------

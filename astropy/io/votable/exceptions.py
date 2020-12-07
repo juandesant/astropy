@@ -12,8 +12,8 @@ Warnings
     tools that produced the VOTable file.
 
     To control the warnings emitted, use the standard Python
-    :mod:`warnings` module.  Most of these are of the type
-    `VOTableSpecWarning`.
+    :mod:`warnings` module and the ``astropy.io.votable.exceptions.conf.max_warnings``
+    configuration item.  Most of these are of the type `VOTableSpecWarning`.
 
 {warnings}
 
@@ -31,7 +31,6 @@ Exceptions
 {exceptions}
 """
 
-
 # STDLIB
 import io
 import re
@@ -39,17 +38,29 @@ import re
 from textwrap import dedent
 from warnings import warn
 
+from astropy import config as _config
 from astropy.utils.exceptions import AstropyWarning
 
-
 __all__ = [
-    'warn_or_raise', 'vo_raise', 'vo_reraise', 'vo_warn',
+    'Conf', 'conf', 'warn_or_raise', 'vo_raise', 'vo_reraise', 'vo_warn',
     'warn_unknown_attrs', 'parse_vowarning', 'VOWarning',
     'VOTableChangeWarning', 'VOTableSpecWarning',
     'UnimplementedWarning', 'IOWarning', 'VOTableSpecError']
 
 
-MAX_WARNINGS = 10
+# NOTE: Cannot put this in __init__.py due to circular import.
+class Conf(_config.ConfigNamespace):
+    """
+    Configuration parameters for `astropy.io.votable.exceptions`.
+    """
+    max_warnings = _config.ConfigItem(
+        10,
+        'Number of times the same type of warning is displayed '
+        'before being suppressed',
+        cfgtype='integer')
+
+
+conf = Conf()
 
 
 def _format_message(message, name, config=None, pos=None):
@@ -58,7 +69,7 @@ def _format_message(message, name, config=None, pos=None):
     if pos is None:
         pos = ('?', '?')
     filename = config.get('filename', '?')
-    return '{}:{}:{}: {}: {}'.format(filename, pos[0], pos[1], name, message)
+    return f'{filename}:{pos[0]}:{pos[1]}: {name}: {message}'
 
 
 def _suppressed_warning(warning, config, stacklevel=2):
@@ -66,8 +77,8 @@ def _suppressed_warning(warning, config, stacklevel=2):
     config.setdefault('_warning_counts', dict()).setdefault(warning_class, 0)
     config['_warning_counts'][warning_class] += 1
     message_count = config['_warning_counts'][warning_class]
-    if message_count <= MAX_WARNINGS:
-        if message_count == MAX_WARNINGS:
+    if message_count <= conf.max_warnings:
+        if message_count == conf.max_warnings:
             warning.formatted_message += \
                 ' (suppressing further warnings of this type...)'
         warn(warning, stacklevel=stacklevel+1)
@@ -141,7 +152,7 @@ def warn_unknown_attrs(element, attrs, config, pos, good_attr=[], stacklevel=1):
 
 _warning_pat = re.compile(
     r":?(?P<nline>[0-9?]+):(?P<nchar>[0-9?]+): " +
-     r"((?P<warning>[WE]\d+): )?(?P<rest>.*)$")
+    r"((?P<warning>[WE]\d+): )?(?P<rest>.*)$")
 
 
 def parse_vowarning(line):
@@ -156,8 +167,7 @@ def parse_vowarning(line):
             result['is_warning'] = (warning[0].upper() == 'W')
             result['is_exception'] = not result['is_warning']
             result['number'] = int(match.group('warning')[1:])
-            result['doc_url'] = "io/votable/api_exceptions.html#{}".format(
-                warning.lower())
+            result['doc_url'] = f"io/votable/api_exceptions.html#{warning.lower()}"
         else:
             result['is_warning'] = False
             result['is_exception'] = False
@@ -1029,9 +1039,10 @@ class W49(VOTableSpecWarning):
 
 class W50(VOTableSpecWarning):
     """
-    Invalid unit string as defined in the `Standards for Astronomical
-    Catalogues, Version 2.0
-    <http://cdsarc.u-strasbg.fr/doc/catstd-3.2.htx>`_.
+    Invalid unit string as defined in the `Units in the VO, Version 1.0
+    <https://www.ivoa.net/documents/VOUnits>`_ (VOTable version >= 1.4)
+    or `Standards for Astronomical Catalogues, Version 2.0
+    <http://cdsarc.u-strasbg.fr/doc/catstd-3.2.htx>`_ (version < 1.4).
 
     Consider passing an explicit ``unit_format`` parameter if the units
     in this file conform to another specification.
@@ -1057,7 +1068,7 @@ class W52(VOTableSpecWarning):
     """
 
     message_template = ("The BINARY2 format was introduced in VOTable 1.3, but "
-               "this file is declared as version '{}'")
+                        "this file is declared as version '{}'")
     default_args = ('1.2',)
 
 
@@ -1080,6 +1091,19 @@ class W54(VOTableSpecWarning):
         "The TIMESYS element was introduced in VOTable 1.4, but "
         "this file is declared as version '{}'")
     default_args = ('1.3',)
+
+
+class W55(VOTableSpecWarning):
+    """
+    When non-ASCII characters are detected when reading
+    a TABLEDATA value for a FIELD with ``datatype="char"``, we
+    can issue this warning.
+    """
+
+    message_template = (
+        'FIELD ({}) has datatype="char" but contains non-ASCII '
+        'value ({})')
+    default_args = ('', '')
 
 
 class E01(VOWarning, ValueError):
@@ -1448,6 +1472,26 @@ class E23(VOTableSpecWarning):
     default_args = ('x',)
 
 
+class E24(VOWarning, ValueError):
+    """
+    Non-ASCII unicode values should not be written when the FIELD ``datatype="char"``,
+    and cannot be written in BINARY or BINARY2 serialization.
+    """
+
+    message_template = (
+        'Attempt to write non-ASCII value ({}) to FIELD ({}) which '
+        'has datatype="char"')
+    default_args = ('', '')
+
+
+class E25(VOTableSpecWarning):
+    """
+    A VOTable cannot have a DATA section without any defined FIELD; DATA will be ignored.
+    """
+
+    message_template = "No FIELDs are defined; DATA section will be ignored."
+
+
 def _get_warning_and_exception_classes(prefix):
     classes = []
     for key, val in globals().items():
@@ -1465,7 +1509,7 @@ def _build_doc_string():
 
         for name, cls in classes:
             out.write(f".. _{name}:\n\n")
-            msg = "{}: {}".format(cls.__name__, cls.get_short_name())
+            msg = f"{cls.__name__}: {cls.get_short_name()}"
             if not isinstance(msg, str):
                 msg = msg.decode('utf-8')
             out.write(msg)

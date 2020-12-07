@@ -25,7 +25,8 @@ from .exceptions import (warn_or_raise, vo_warn, vo_raise, vo_reraise,
                          W13, W15, W17, W18, W19, W20, W21, W22, W26, W27, W28,
                          W29, W32, W33, W35, W36, W37, W38, W40, W41, W42, W43,
                          W44, W45, W50, W52, W53, W54, E06, E08, E09, E10, E11,
-                         E12, E13, E15, E16, E17, E18, E19, E20, E21, E22, E23)
+                         E12, E13, E15, E16, E17, E18, E19, E20, E21, E22, E23,
+                         E25)
 from . import ucd as ucd_mod
 from . import util
 from . import xmlutil
@@ -165,9 +166,12 @@ def _get_default_unit_format(config):
     """
     Get the default unit format as specified in the VOTable spec.
     """
-    # In the future, this should take into account the VOTable
-    # version.
-    return 'cds'
+    # The unit format changed between VOTable versions 1.3 and 1.4,
+    # see issue #10791.
+    if config['version_1_4_or_later']:
+        return 'vounit'
+    else:
+        return 'cds'
 
 
 def _get_unit_format(config):
@@ -1148,7 +1152,10 @@ class Field(SimpleElement, _IDProperty, _NameProperty, _XtypeProperty,
                  xtype=None,
                  config=None, pos=None, **extra):
         if config is None:
-            config = {}
+            if hasattr(votable, '_get_version_checks'):
+                config = votable._get_version_checks()
+            else:
+                config = {}
         self._config = config
         self._pos = pos
 
@@ -1531,6 +1538,10 @@ class Field(SimpleElement, _IDProperty, _NameProperty, _XtypeProperty,
         if (isinstance(self.converter, converters.FloatingPoint) and
                 self.converter.output_format != '{!r:>}'):
             column.format = self.converter.output_format
+        elif isinstance(self.converter, converters.Char):
+            column.info.meta['_votable_string_dtype'] = 'char'
+        elif isinstance(self.converter, converters.UnicodeChar):
+            column.info.meta['_votable_string_dtype'] = 'unicodeChar'
 
     @classmethod
     def from_table_column(cls, votable, column):
@@ -2011,7 +2022,7 @@ class Group(Element, _IDProperty, _NameProperty, _UtypeProperty,
         warn_unknown_attrs('GROUP', extra.keys(), config, pos)
 
     def __repr__(self):
-        return '<GROUP>... {} entries ...</GROUP>'.format(len(self._entries))
+        return f'<GROUP>... {len(self._entries)} entries ...</GROUP>'
 
     @property
     def ref(self):
@@ -2447,6 +2458,8 @@ class Table(Element, _IDProperty, _NameProperty, _UcdProperty,
             for start, tag, data, pos in iterator:
                 if start:
                     if tag == 'DATA':
+                        if len(self.fields) == 0:
+                            warn_or_raise(E25, E25, None, config, pos)
                         warn_unknown_attrs(
                             'DATA', data.keys(), config, pos)
                         break
@@ -2490,7 +2503,7 @@ class Table(Element, _IDProperty, _NameProperty, _UcdProperty,
             else:
                 raise TypeError("Invalid columns list")
 
-        if not skip_table:
+        if (not skip_table) and (len(fields) > 0):
             for start, tag, data, pos in iterator:
                 if start:
                     if tag == 'TABLEDATA':
@@ -2940,8 +2953,7 @@ class Table(Element, _IDProperty, _NameProperty, _UcdProperty,
                             assert type(chunk) == bytes
                         except Exception as e:
                             vo_reraise(
-                                e, additional="(in row {:d}, col '{}')".format(
-                                    row, fields[i].ID))
+                                e, additional=f"(in row {row:d}, col '{fields[i].ID}')")
                         data.write(chunk)
 
                 w._flush()
@@ -3499,6 +3511,18 @@ class VOTableFile(Element, _IDProperty, _DescriptionProperty):
         self.groups.append(group)
         group.parse(iterator, config)
 
+    def _get_version_checks(self):
+        config = {}
+        config['version_1_1_or_later'] = \
+            util.version_compare(self.version, '1.1') >= 0
+        config['version_1_2_or_later'] = \
+            util.version_compare(self.version, '1.2') >= 0
+        config['version_1_3_or_later'] = \
+            util.version_compare(self.version, '1.3') >= 0
+        config['version_1_4_or_later'] = \
+            util.version_compare(self.version, '1.4') >= 0
+        return config
+
     def parse(self, iterator, config):
         config['_current_table_number'] = 0
 
@@ -3532,8 +3556,7 @@ class VOTableFile(Element, _IDProperty, _DescriptionProperty):
                             ns_version = '1.3'
                         else:
                             ns_version = config['version']
-                        correct_ns = ('http://www.ivoa.net/xml/VOTable/v{}'.format(
-                                ns_version))
+                        correct_ns = f'http://www.ivoa.net/xml/VOTable/v{ns_version}'
                         if data['xmlns'] != correct_ns:
                             vo_warn(
                                 W41, (correct_ns, data['xmlns']), config, pos)
@@ -3543,14 +3566,7 @@ class VOTableFile(Element, _IDProperty, _DescriptionProperty):
                     break
                 else:
                     vo_raise(E19, (), config, pos)
-        config['version_1_1_or_later'] = \
-            util.version_compare(config['version'], '1.1') >= 0
-        config['version_1_2_or_later'] = \
-            util.version_compare(config['version'], '1.2') >= 0
-        config['version_1_3_or_later'] = \
-            util.version_compare(config['version'], '1.3') >= 0
-        config['version_1_4_or_later'] = \
-            util.version_compare(config['version'], '1.4') >= 0
+        config.update(self._get_version_checks())
 
         tag_mapping = {
             'PARAM': self._add_param,
@@ -3604,18 +3620,11 @@ class VOTableFile(Element, _IDProperty, _DescriptionProperty):
 
         kwargs = {
             'version': self.version,
-            'version_1_1_or_later':
-                util.version_compare(self.version, '1.1') >= 0,
-            'version_1_2_or_later':
-                util.version_compare(self.version, '1.2') >= 0,
-            'version_1_3_or_later':
-                util.version_compare(self.version, '1.3') >= 0,
-            'version_1_4_or_later':
-                util.version_compare(self.version, '1.4') >= 0,
             'tabledata_format':
                 tabledata_format,
             '_debug_python_based_parser': _debug_python_based_parser,
             '_group_number': 1}
+        kwargs.update(self._get_version_checks())
 
         with util.convert_to_writable_filelike(
             fd, compressed=compressed) as fd:

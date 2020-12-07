@@ -1,16 +1,16 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-
 import pytest
 import numpy as np
 
-from astropy.tests.helper import catch_warnings
 from astropy.table import Table, QTable, NdarrayMixin, Column
 from astropy.table.table_helpers import simple_table
 
 from astropy import units as u
 
-from astropy.coordinates import SkyCoord, Latitude, Longitude, Angle, EarthLocation
+from astropy.coordinates import (SkyCoord, Latitude, Longitude, Angle, EarthLocation,
+                                 SphericalRepresentation, CartesianRepresentation,
+                                 SphericalCosLatDifferential)
 from astropy.time import Time, TimeDelta
 from astropy.units.quantity import QuantityInfo
 from astropy.utils.exceptions import AstropyUserWarning
@@ -24,7 +24,7 @@ else:
     HAS_H5PY = True
 
 try:
-    import yaml
+    import yaml  # noqa
 except ImportError:
     HAS_YAML = False
 else:
@@ -49,23 +49,10 @@ def test_write_nopath(tmpdir):
     test_file = str(tmpdir.join('test.hdf5'))
     t1 = Table()
     t1.add_column(Column(name='a', data=[1, 2, 3]))
-    with pytest.raises(ValueError) as exc:
-        t1.write(test_file)
-    assert exc.value.args[0] == "table path should be set via the path= argument"
 
-
-@pytest.mark.skipif('not HAS_H5PY')
-def test_write_nopath(tmpdir):
-    test_file = str(tmpdir.join('test.hdf5'))
-    t1 = Table()
-    t1.add_column(Column(name='a', data=[1, 2, 3]))
-
-    with catch_warnings() as warns:
+    with pytest.warns(UserWarning, match="table path was not set via the path= argument"):
         t1.write(test_file)
 
-    assert np.any([str(w.message).startswith(
-        "table path was not set via the path= argument")
-                   for w in warns])
     t1 = Table.read(test_file, path='__astropy_table__')
 
 
@@ -87,9 +74,8 @@ def test_write_nopath_nonempty(tmpdir):
 def test_read_notable_nopath(tmpdir):
     test_file = str(tmpdir.join('test.hdf5'))
     h5py.File(test_file, 'w').close()  # create empty file
-    with pytest.raises(ValueError) as exc:
-        t1 = Table.read(test_file, path='/', format='hdf5')
-    assert exc.value.args[0] == 'no table found in HDF5 group /'
+    with pytest.raises(ValueError, match='no table found in HDF5 group /'):
+        Table.read(test_file, path='/', format='hdf5')
 
 
 @pytest.mark.skipif('not HAS_H5PY')
@@ -98,10 +84,7 @@ def test_read_nopath(tmpdir):
     t1 = Table()
     t1.add_column(Column(name='a', data=[1, 2, 3]))
     t1.write(test_file, path="the_table")
-    with catch_warnings(AstropyUserWarning) as warning_lines:
-        t2 = Table.read(test_file)
-        assert not np.any(["path= was not sp" in str(wl.message)
-                           for wl in warning_lines])
+    t2 = Table.read(test_file)
 
     assert np.all(t1['a'] == t2['a'])
 
@@ -325,9 +308,8 @@ def test_read_wrong_fileobj():
 
     f = FakeFile()
 
-    with pytest.raises(TypeError) as exc:
-        t1 = Table.read(f, format='hdf5')
-    assert exc.value.args[0] == 'h5py can only open regular files'
+    with pytest.raises(TypeError, match='h5py can only open regular files'):
+        Table.read(f, format='hdf5')
 
 
 @pytest.mark.skipif('not HAS_H5PY')
@@ -343,6 +325,31 @@ def test_write_fileobj(tmpdir):
 
     t2 = Table.read(test_file, path='the_table')
     assert np.all(t2['a'] == [1, 2, 3])
+
+
+@pytest.mark.skipif('not HAS_H5PY')
+def test_write_create_dataset_kwargs(tmpdir):
+
+    test_file = str(tmpdir.join('test.hdf5'))
+    the_path = 'the_table'
+
+    import h5py
+    with h5py.File(test_file, 'w') as output_file:
+        t1 = Table()
+        t1.add_column(Column(name='a', data=[1, 2, 3]))
+        t1.write(output_file, path=the_path,
+                 maxshape=(None, ))
+
+    # A roundabout way of checking this, but the table created above should be
+    # resizable if the kwarg was passed through successfully
+    t2 = Table()
+    t2.add_column(Column(name='a', data=[4, 5]))
+    with h5py.File(test_file, 'a') as output_file:
+        output_file[the_path].resize((len(t1) + len(t2), ))
+        output_file[the_path][len(t1):] = t2.as_array()
+
+    t3 = Table.read(test_file, path='the_table')
+    assert np.all(t3['a'] == [1, 2, 3, 4, 5])
 
 
 @pytest.mark.skipif('not HAS_H5PY')
@@ -549,11 +556,10 @@ def test_skip_meta(tmpdir):
     t1.meta['e'] = np.array([1, 2, 3])
     t1.meta['f'] = str
 
-    with catch_warnings() as w:
+    wtext = f"Attribute `f` of type {type(t1.meta['f'])} cannot be written to HDF5 files - skipping"
+    with pytest.warns(AstropyUserWarning, match=wtext) as w:
         t1.write(test_file, path='the_table')
     assert len(w) == 1
-    assert str(w[0].message).startswith(
-        "Attribute `f` of type {} cannot be written to HDF5 files - skipping".format(type(t1.meta['f'])))
 
 
 @pytest.mark.skipif('not HAS_H5PY or not HAS_YAML')
@@ -654,18 +660,27 @@ def assert_objects_equal(obj1, obj2, attrs, compare_class=True):
         assert np.all(a1 == a2)
 
 # Testing HDF5 table read/write with mixins.  This is mostly
-# copied from FITS mixin testing.
+# copied from FITS mixin testing, and it might be good to unify it.
 
 
 el = EarthLocation(x=1 * u.km, y=3 * u.km, z=5 * u.km)
 el2 = EarthLocation(x=[1, 2] * u.km, y=[3, 4] * u.km, z=[5, 6] * u.km)
+sr = SphericalRepresentation(
+    [0, 1]*u.deg, [2, 3]*u.deg, 1*u.kpc)
+cr = CartesianRepresentation(
+    [0, 1]*u.pc, [4, 5]*u.pc, [8, 6]*u.pc)
+sd = SphericalCosLatDifferential(
+    [0, 1]*u.mas/u.yr, [0, 1]*u.mas/u.yr, 10*u.km/u.s)
+srd = SphericalRepresentation(sr, differentials=sd)
 sc = SkyCoord([1, 2], [3, 4], unit='deg,deg', frame='fk4',
               obstime='J1990.5')
 scc = sc.copy()
 scc.representation_type = 'cartesian'
 tm = Time([2450814.5, 2450815.5], format='jd', scale='tai', location=el)
 
-
+# NOTE: in the test below the name of the column "x" for the Quantity is
+# important since it tests the fix for #10215 (namespace clash, where "x"
+# clashes with "el2.x").
 mixin_cols = {
     'tm': tm,
     'dt': TimeDelta([1, 2] * u.day),
@@ -673,7 +688,7 @@ mixin_cols = {
     'scc': scc,
     'scd': SkyCoord([1, 2], [3, 4], [5, 6], unit='deg,deg,m', frame='fk4',
                     obstime=['J1990.5', 'J1991.5']),
-    'q': [1, 2] * u.m,
+    'x': [1, 2] * u.m,
     'qdb': [10, 20] * u.dB(u.mW),
     'qdex': [4.5, 5.5] * u.dex(u.cm/u.s**2),
     'qmag': [21, 22] * u.ABmag,
@@ -681,6 +696,10 @@ mixin_cols = {
     'lon': Longitude([1, 2] * u.deg, wrap_angle=180. * u.deg),
     'ang': Angle([1, 2] * u.deg),
     'el2': el2,
+    'sr': sr,
+    'cr': cr,
+    'sd': sd,
+    'srd': srd,
 }
 
 time_attrs = ['value', 'shape', 'format', 'scale', 'location']
@@ -692,7 +711,7 @@ compare_attrs = {
     'sc': ['ra', 'dec', 'representation_type', 'frame.name'],
     'scc': ['x', 'y', 'z', 'representation_type', 'frame.name'],
     'scd': ['ra', 'dec', 'distance', 'representation_type', 'frame.name'],
-    'q': ['value', 'unit'],
+    'x': ['value', 'unit'],
     'qdb': ['value', 'unit'],
     'qdex': ['value', 'unit'],
     'qmag': ['value', 'unit'],
@@ -701,6 +720,11 @@ compare_attrs = {
     'ang': ['value', 'unit'],
     'el2': ['x', 'y', 'z', 'ellipsoid'],
     'nd': ['x', 'y', 'z'],
+    'sr': ['lon', 'lat', 'distance'],
+    'cr': ['x', 'y', 'z'],
+    'sd': ['d_lon_coslat', 'd_lat', 'd_distance'],
+    'srd': ['lon', 'lat', 'distance', 'differentials.s.d_lon_coslat',
+            'differentials.s.d_lat', 'differentials.s.d_distance'],
 }
 
 
@@ -750,11 +774,11 @@ def test_hdf5_mixins_as_one(table_cls, tmpdir):
     names = sorted(mixin_cols)
 
     serialized_names = ['ang',
+                        'cr.x', 'cr.y', 'cr.z',
                         'dt.jd1', 'dt.jd2',
                         'el2.x', 'el2.y', 'el2.z',
                         'lat',
                         'lon',
-                        'q',
                         'qdb',
                         'qdex',
                         'qmag',
@@ -762,7 +786,14 @@ def test_hdf5_mixins_as_one(table_cls, tmpdir):
                         'scc.x', 'scc.y', 'scc.z',
                         'scd.ra', 'scd.dec', 'scd.distance',
                         'scd.obstime.jd1', 'scd.obstime.jd2',
+                        'sd.d_lon_coslat', 'sd.d_lat', 'sd.d_distance',
+                        'sr.lon', 'sr.lat', 'sr.distance',
+                        'srd.lon', 'srd.lat', 'srd.distance',
+                        'srd.differentials.s.d_lon_coslat',
+                        'srd.differentials.s.d_lat',
+                        'srd.differentials.s.d_distance',
                         'tm.jd1', 'tm.jd2',
+                        'x',
                         ]
 
     t = table_cls([mixin_cols[name] for name in names], names=names)
@@ -823,11 +854,10 @@ def test_warn_for_dropped_info_attributes(tmpdir):
     filename = str(tmpdir.join('test.hdf5'))
     t = Table([[1, 2]])
     t['col0'].info.description = 'hello'
-    with catch_warnings() as warns:
+    with pytest.warns(AstropyUserWarning, match=r"table contains column\(s\) "
+                      r"with defined 'unit'") as warns:
         t.write(filename, path='root', serialize_meta=False)
     assert len(warns) == 1
-    assert str(warns[0].message).startswith(
-        "table contains column(s) with defined 'unit'")
 
 
 @pytest.mark.skipif('HAS_YAML or not HAS_H5PY')

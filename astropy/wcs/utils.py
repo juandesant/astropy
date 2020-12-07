@@ -3,10 +3,10 @@
 import numpy as np
 
 from astropy import units as u
-from astropy.utils.misc import unbroadcast
+from astropy.utils import unbroadcast
 import copy
 
-from .wcs import WCS, WCSSUB_LONGITUDE, WCSSUB_LATITUDE, WCSSUB_CELESTIAL
+from .wcs import WCS, WCSSUB_LONGITUDE, WCSSUB_LATITUDE
 
 __doctest_skip__ = ['wcs_to_celestial_frame', 'celestial_frame_to_wcs']
 
@@ -293,7 +293,7 @@ def proj_plane_pixel_scales(wcs):
     For a WCS returns pixel scales along each axis of the image pixel at
     the ``CRPIX`` location once it is projected onto the
     "plane of intermediate world coordinates" as defined in
-    `Greisen & Calabretta 2002, A&A, 395, 1061 <http://adsabs.harvard.edu/abs/2002A%26A...395.1061G>`_.
+    `Greisen & Calabretta 2002, A&A, 395, 1061 <https://ui.adsabs.harvard.edu/abs/2002A%26A...395.1061G>`_.
 
     .. note::
         This function is concerned **only** about the transformation
@@ -337,7 +337,7 @@ def proj_plane_pixel_area(wcs):
     For a **celestial** WCS (see `astropy.wcs.WCS.celestial`) returns pixel
     area of the image pixel at the ``CRPIX`` location once it is projected
     onto the "plane of intermediate world coordinates" as defined in
-    `Greisen & Calabretta 2002, A&A, 395, 1061 <http://adsabs.harvard.edu/abs/2002A%26A...395.1061G>`_.
+    `Greisen & Calabretta 2002, A&A, 395, 1061 <https://ui.adsabs.harvard.edu/abs/2002A%26A...395.1061G>`_.
 
     .. note::
         This function is concerned **only** about the transformation
@@ -398,7 +398,7 @@ def is_proj_plane_distorted(wcs, maxerr=1.0e-5):
     For a WCS returns `False` if square image (detector) pixels stay square
     when projected onto the "plane of intermediate world coordinates"
     as defined in
-    `Greisen & Calabretta 2002, A&A, 395, 1061 <http://adsabs.harvard.edu/abs/2002A%26A...395.1061G>`_.
+    `Greisen & Calabretta 2002, A&A, 395, 1061 <https://ui.adsabs.harvard.edu/abs/2002A%26A...395.1061G>`_.
     It will return `True` if transformation from image (detector) coordinates
     to the focal plane coordinates is non-orthogonal or if WCS contains
     non-linear (e.g., SIP) distortions.
@@ -890,7 +890,13 @@ def _linear_wcs_fit(params, lon, lat, x, y, w_obj):
     w_obj.wcs.cd = ((cd[0], cd[1]), (cd[2], cd[3]))
     w_obj.wcs.crpix = crpix
     lon2, lat2 = w_obj.wcs_pix2world(x, y, 0)
-    resids = np.concatenate((lon-lon2, lat-lat2))
+
+    lat_resids = lat - lat2
+    lon_resids = lon - lon2
+    # In case the longitude has wrapped around
+    lon_resids = np.mod(lon_resids - 180.0, 360.0) - 180.0
+
+    resids = np.concatenate((lon_resids * np.cos(np.radians(lat)), lat_resids))
 
     return resids
 
@@ -911,7 +917,7 @@ def _sip_fit(params, lon, lat, u, v, w_obj, order, coeff_names):
         WCS object
     """
 
-    from ..modeling.models import SIP, InverseSIP   # here to avoid circular import
+    from ..modeling.models import SIP   # here to avoid circular import
 
     # unpack params
     crpix = params[0:2]
@@ -939,9 +945,6 @@ def _sip_fit(params, lon, lat, u, v, w_obj, order, coeff_names):
     x, y = np.dot(w_obj.wcs.cd, (x-w_obj.wcs.crpix[0], y-w_obj.wcs.crpix[1]))
 
     resids = np.concatenate((x-xo, y-yo))
-    # to avoid bad restuls if near 360 -> 0 degree crossover
-    resids[resids > 180] = 360 - resids[resids > 180]
-    resids[resids < -180] = 360 + resids[resids < -180]
 
     return resids
 
@@ -1012,8 +1015,8 @@ def fit_wcs_from_points(xy, world_coords, proj_point='center',
     from .wcs import Sip
     from scipy.optimize import least_squares
 
+    xp, yp = xy
     try:
-        xp, yp = xy
         lon, lat = world_coords.data.lon.deg, world_coords.data.lat.deg
     except AttributeError:
         unit_sph =  world_coords.unit_spherical
@@ -1053,7 +1056,7 @@ def fit_wcs_from_points(xy, world_coords, proj_point='center',
         raise ValueError("sip_degree must be None, or integer.")
 
     # set pixel_shape to span of input points
-    wcs.pixel_shape = (xp.max()-xp.min(), yp.max()-yp.min())
+    wcs.pixel_shape = (xp.max()+1-xp.min(), yp.max()+1-yp.min())
 
     # determine CRVAL from input
     close = lambda l, p: p[np.argmin(np.abs(l))]
@@ -1074,9 +1077,18 @@ def fit_wcs_from_points(xy, world_coords, proj_point='center',
     # fit linear terms, assign to wcs
     # use (1, 0, 0, 1) as initial guess, in case input wcs was passed in
     # and cd terms are way off.
+    # Use bounds to require that the fit center pixel is on the input image
+    xpmin, xpmax, ypmin, ypmax = xp.min(), xp.max(), yp.min(), yp.max()
+    if xpmin == xpmax:
+        xpmin, xpmax = xpmin - 0.5, xpmax + 0.5
+    if ypmin == ypmax:
+        ypmin, ypmax = ypmin - 0.5, ypmax + 0.5
+
     p0 = np.concatenate([wcs.wcs.cd.flatten(), wcs.wcs.crpix.flatten()])
     fit = least_squares(_linear_wcs_fit, p0,
-                        args=(lon, lat, xp, yp, wcs))
+                        args=(lon, lat, xp, yp, wcs),
+                        bounds=[[-np.inf, -np.inf, -np.inf, -np.inf, xpmin, ypmin],
+                                [ np.inf, np.inf, np.inf, np.inf, xpmax, ypmax]])
     wcs.wcs.crpix = np.array(fit.x[4:6])
     wcs.wcs.cd = np.array(fit.x[0:4].reshape((2, 2)))
 
@@ -1086,14 +1098,16 @@ def fit_wcs_from_points(xy, world_coords, proj_point='center',
         if '-SIP' not in wcs.wcs.ctype[0]:
             wcs.wcs.ctype = [x + '-SIP' for x in wcs.wcs.ctype]
 
-        coef_names = ['{0}_{1}'.format(i, j) for i in range(degree+1)
+        coef_names = [f'{i}_{j}' for i in range(degree+1)
                       for j in range(degree+1) if (i+j) < (degree+1) and
                       (i+j) > 1]
         p0 = np.concatenate((np.array(wcs.wcs.crpix), wcs.wcs.cd.flatten(),
                              np.zeros(2*len(coef_names))))
 
         fit = least_squares(_sip_fit, p0,
-                            args=(lon, lat, xp, yp, wcs, degree, coef_names))
+                            args=(lon, lat, xp, yp, wcs, degree, coef_names),
+                            bounds=[[xpmin, ypmin] + [-np.inf]*(4 + 2*len(coef_names)),
+                                    [xpmax, ypmax] + [np.inf]*(4 + 2*len(coef_names))])
         coef_fit = (list(fit.x[6:6+len(coef_names)]),
                     list(fit.x[6+len(coef_names):]))
 

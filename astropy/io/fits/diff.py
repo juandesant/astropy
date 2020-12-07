@@ -10,6 +10,7 @@ import glob
 import io
 import operator
 import os.path
+import pathlib
 import textwrap
 
 from collections import defaultdict
@@ -268,7 +269,7 @@ class FITSDiff(_BaseDiff):
             whitespace (default: True).
         """
 
-        if isinstance(a, str):
+        if isinstance(a, (str, pathlib.Path)):
             try:
                 a = fitsopen(a)
             except Exception as exc:
@@ -278,7 +279,7 @@ class FITSDiff(_BaseDiff):
         else:
             close_a = False
 
-        if isinstance(b, str):
+        if isinstance(b, (str, pathlib.Path)):
             try:
                 b = fitsopen(b)
             except Exception as exc:
@@ -326,13 +327,11 @@ class FITSDiff(_BaseDiff):
         # Record filenames for use later in _report
         self.filenamea = self.a.filename()
         if not self.filenamea:
-            self.filenamea = '<{} object at {:#x}>'.format(
-                self.a.__class__.__name__, id(self.a))
+            self.filenamea = f'<{self.a.__class__.__name__} object at {id(self.a):#x}>'
 
         self.filenameb = self.b.filename()
         if not self.filenameb:
-            self.filenameb = '<{} object at {:#x}>'.format(
-                self.b.__class__.__name__, id(self.b))
+            self.filenameb = f'<{self.b.__class__.__name__} object at {id(self.b):#x}>'
 
         if self.ignore_hdus:
             self.a = HDUList([h for h in self.a if h.name not in self.ignore_hdus])
@@ -355,7 +354,10 @@ class FITSDiff(_BaseDiff):
             hdu_diff = HDUDiff.fromdiff(self, self.a[idx], self.b[idx])
 
             if not hdu_diff.identical:
-                self.diff_hdus.append((idx, hdu_diff))
+                if self.a[idx].name == self.b[idx].name and self.a[idx].ver == self.b[idx].ver:
+                    self.diff_hdus.append((idx, hdu_diff, self.a[idx].name, self.a[idx].ver))
+                else:
+                    self.diff_hdus.append((idx, hdu_diff, "", self.a[idx].ver))
 
     def _report(self):
         wrapper = textwrap.TextWrapper(initial_indent='  ',
@@ -367,8 +369,7 @@ class FITSDiff(_BaseDiff):
 
         if self.ignore_hdus:
             ignore_hdus = ' '.join(sorted(self.ignore_hdus))
-            self._writeln(' HDU(s) not to be compared:\n{}'
-                          .format(wrapper.fill(ignore_hdus)))
+            self._writeln(f' HDU(s) not to be compared:\n{wrapper.fill(ignore_hdus)}')
 
         if self.ignore_hdu_patterns:
             ignore_hdu_patterns = ' '.join(sorted(self.ignore_hdu_patterns))
@@ -398,8 +399,8 @@ class FITSDiff(_BaseDiff):
         if self.diff_hdu_count:
             self._fileobj.write('\n')
             self._writeln('Files contain different numbers of HDUs:')
-            self._writeln(' a: {}'.format(self.diff_hdu_count[0]))
-            self._writeln(' b: {}'.format(self.diff_hdu_count[1]))
+            self._writeln(f' a: {self.diff_hdu_count[0]}')
+            self._writeln(f' b: {self.diff_hdu_count[1]}')
 
             if not self.diff_hdus:
                 self._writeln('No differences found between common HDUs.')
@@ -409,14 +410,17 @@ class FITSDiff(_BaseDiff):
             self._writeln('No differences found.')
             return
 
-        for idx, hdu_diff in self.diff_hdus:
+        for idx, hdu_diff, extname, extver in self.diff_hdus:
             # print out the extension heading
             if idx == 0:
                 self._fileobj.write('\n')
                 self._writeln('Primary HDU:')
             else:
                 self._fileobj.write('\n')
-                self._writeln(f'Extension HDU {idx}:')
+                if extname:
+                    self._writeln(f'Extension HDU {idx} ({extname}, {extver}):')
+                else:
+                    self._writeln(f'Extension HDU {idx}:')
             hdu_diff.report(self._fileobj, indent=self._indent + 1)
 
 
@@ -552,16 +556,28 @@ class HDUDiff(_BaseDiff):
         elif self.a.is_image and self.b.is_image:
             self.diff_data = ImageDataDiff.fromdiff(self, self.a.data,
                                                     self.b.data)
+            # Clean up references to (possibly) memmapped arrays so they can
+            # be closed by .close()
+            self.diff_data.a = None
+            self.diff_data.b = None
         elif (isinstance(self.a, _TableLikeHDU) and
               isinstance(self.b, _TableLikeHDU)):
             # TODO: Replace this if/when _BaseHDU grows a .is_table property
             self.diff_data = TableDataDiff.fromdiff(self, self.a.data,
                                                     self.b.data)
+            # Clean up references to (possibly) memmapped arrays so they can
+            # be closed by .close()
+            self.diff_data.a = None
+            self.diff_data.b = None
         elif not self.diff_extension_types:
             # Don't diff the data for unequal extension types that are not
             # recognized image or table types
             self.diff_data = RawDataDiff.fromdiff(self, self.a.data,
                                                   self.b.data)
+            # Clean up references to (possibly) memmapped arrays so they can
+            # be closed by .close()
+            self.diff_data.a = None
+            self.diff_data.b = None
 
     def _report(self):
         if self.identical:
@@ -860,28 +876,25 @@ class HeaderDiff(_BaseDiff):
     def _report(self):
         if self.diff_keyword_count:
             self._writeln(' Headers have different number of cards:')
-            self._writeln('  a: {}'.format(self.diff_keyword_count[0]))
-            self._writeln('  b: {}'.format(self.diff_keyword_count[1]))
+            self._writeln(f'  a: {self.diff_keyword_count[0]}')
+            self._writeln(f'  b: {self.diff_keyword_count[1]}')
         if self.diff_keywords:
             for keyword in self.diff_keywords[0]:
                 if keyword in Card._commentary_keywords:
                     val = self.a[keyword][0]
                 else:
                     val = self.a[keyword]
-                self._writeln(' Extra keyword {!r:8} in a: {!r}'.format(
-                                keyword, val))
+                self._writeln(f' Extra keyword {keyword!r:8} in a: {val!r}')
             for keyword in self.diff_keywords[1]:
                 if keyword in Card._commentary_keywords:
                     val = self.b[keyword][0]
                 else:
                     val = self.b[keyword]
-                self._writeln(' Extra keyword {!r:8} in b: {!r}'.format(
-                                keyword, val))
+                self._writeln(f' Extra keyword {keyword!r:8} in b: {val!r}')
 
         if self.diff_duplicate_keywords:
             for keyword, count in sorted(self.diff_duplicate_keywords.items()):
-                self._writeln(' Inconsistent duplicates of keyword {!r:8}:'
-                              .format(keyword))
+                self._writeln(f' Inconsistent duplicates of keyword {keyword!r:8}:')
                 self._writeln('  Occurs {} time(s) in a, {} times in (b)'
                               .format(*count))
 
@@ -1107,8 +1120,8 @@ class RawDataDiff(ImageDataDiff):
     def _report(self):
         if self.diff_dimensions:
             self._writeln(' Data sizes differ:')
-            self._writeln('  a: {} bytes'.format(self.diff_dimensions[0]))
-            self._writeln('  b: {} bytes'.format(self.diff_dimensions[1]))
+            self._writeln(f'  a: {self.diff_dimensions[0]} bytes')
+            self._writeln(f'  b: {self.diff_dimensions[1]} bytes')
             # For now we don't do any further comparison if the dimensions
             # differ; though in the future it might be nice to be able to
             # compare at least where the images intersect
@@ -1389,34 +1402,31 @@ class TableDataDiff(_BaseDiff):
     def _report(self):
         if self.diff_column_count:
             self._writeln(' Tables have different number of columns:')
-            self._writeln('  a: {}'.format(self.diff_column_count[0]))
-            self._writeln('  b: {}'.format(self.diff_column_count[1]))
+            self._writeln(f'  a: {self.diff_column_count[0]}')
+            self._writeln(f'  b: {self.diff_column_count[1]}')
 
         if self.diff_column_names:
             # Show columns with names unique to either table
             for name in self.diff_column_names[0]:
                 format = self.diff_columns[0][name.lower()].format
-                self._writeln(' Extra column {} of format {} in a'.format(
-                                name, format))
+                self._writeln(f' Extra column {name} of format {format} in a')
             for name in self.diff_column_names[1]:
                 format = self.diff_columns[1][name.lower()].format
-                self._writeln(' Extra column {} of format {} in b'.format(
-                                name, format))
+                self._writeln(f' Extra column {name} of format {format} in b')
 
         col_attrs = dict(_COL_ATTRS)
         # Now go through each table again and show columns with common
         # names but other property differences...
         for col_attr, vals in self.diff_column_attributes:
             name, attr = col_attr
-            self._writeln(' Column {} has different {}:'.format(
-                    name, col_attrs[attr]))
+            self._writeln(f' Column {name} has different {col_attrs[attr]}:')
             report_diff_values(vals[0], vals[1], fileobj=self._fileobj,
                                indent_width=self._indent + 1)
 
         if self.diff_rows:
             self._writeln(' Table rows differ:')
-            self._writeln('  a: {}'.format(self.diff_rows[0]))
-            self._writeln('  b: {}'.format(self.diff_rows[1]))
+            self._writeln(f'  a: {self.diff_rows[0]}')
+            self._writeln(f'  b: {self.diff_rows[1]}')
             self._writeln(' No further data comparison performed.')
             return
 
@@ -1455,7 +1465,7 @@ def report_diff_keyword_attr(fileobj, attr, diffs, keyword, ind=0):
             if idx == 0:
                 dup = ''
             else:
-                dup = '[{}]'.format(idx + 1)
+                dup = f'[{idx + 1}]'
             fileobj.write(
                 fixed_width_indent(' Keyword {:8}{} has different {}:\n'
                                    .format(keyword, dup, attr), ind))

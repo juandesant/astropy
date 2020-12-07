@@ -55,7 +55,7 @@ def test_skyoffset_functional_ra():
         actual_xyz = actual.cartesian.xyz
 
         # back to ICRS
-        roundtrip = actual.transform_to(ICRS)
+        roundtrip = actual.transform_to(ICRS())
         roundtrip_xyz = roundtrip.cartesian.xyz
 
         # Verify
@@ -99,7 +99,7 @@ def test_skyoffset_functional_dec():
         actual_xyz = actual.cartesian.xyz
 
         # back to ICRS
-        roundtrip = actual.transform_to(ICRS)
+        roundtrip = actual.transform_to(ICRS())
 
         # Verify
         assert_allclose(actual_xyz, expected_xyz, atol=1E-5*u.kpc)
@@ -145,7 +145,7 @@ def test_skyoffset_functional_ra_dec():
             actual_xyz = actual.cartesian.xyz
 
             # back to ICRS
-            roundtrip = actual.transform_to(ICRS)
+            roundtrip = actual.transform_to(ICRS())
 
             # Verify
             assert_allclose(actual_xyz, expected_xyz, atol=1E-5*u.kpc)
@@ -207,7 +207,6 @@ def test_m31_coord_transforms(fromsys, tosys, fromcoo, tocoo):
                     [1.0*u.deg, 1.0*u.deg], atol=convert_precision)
 
 
-@pytest.mark.remote_data
 def test_altaz_attribute_transforms():
     """Test transforms between AltAz frames with different attributes."""
     el1 = EarthLocation(0*u.deg, 0*u.deg, 0*u.m)
@@ -289,6 +288,15 @@ def test_skyoffset_lonwrap():
     origin = ICRS(45*u.deg, 45*u.deg)
     sc = SkyCoord(190*u.deg, -45*u.deg, frame=SkyOffsetFrame(origin=origin))
     assert sc.lon < 180 * u.deg
+
+    sc2 = SkyCoord(-10*u.deg, -45*u.deg, frame=SkyOffsetFrame(origin=origin))
+    assert sc2.lon < 180 * u.deg
+
+    sc3 = sc.realize_frame(sc.represent_as('cartesian'))
+    assert sc3.lon < 180 * u.deg
+
+    sc4 = sc2.realize_frame(sc2.represent_as('cartesian'))
+    assert sc4.lon < 180 * u.deg
 
 
 def test_skyoffset_velocity():

@@ -67,7 +67,14 @@ section on `Representations`_. First, some imports::
   >>> import astropy.units as u
   >>> import numpy as np
 
-The coordinate values and frame specification can now be provided using
+Examples
+--------
+
+..
+  EXAMPLE START
+  Initializing SkyCoord Objects Using Spherical Coordinates
+
+The coordinate values and frame specification can be provided using
 positional and keyword arguments. First we show positional arguments for
 RA and Dec::
 
@@ -135,6 +142,9 @@ have certain default attribute values. For instance, the
 not explicitly set. If the coordinate above were created with
 ``c = FK4(1 * u.deg, 2 * u.deg, equinox='B1960')`` then creating a |SkyCoord|
 with a different ``equinox`` would raise an exception.
+
+..
+  EXAMPLE END
 
 Initialization Syntax
 ---------------------
@@ -291,7 +301,16 @@ Array Operations
 
 It is possible to store arrays of coordinates in a |SkyCoord| object, and
 manipulations done in this way will be orders of magnitude faster than
-looping over a list of individual |SkyCoord| objects::
+looping over a list of individual |SkyCoord| objects.
+
+Examples
+--------
+
+..
+  EXAMPLE START
+  Storing Arrays of Coordinates in a SkyCoord Object
+
+To store arrays of coordinates in a |SkyCoord| object::
 
   >>> ra = np.linspace(0, 36000, 1001) * u.deg
   >>> dec = np.linspace(-90, 90, 1001) * u.deg
@@ -304,9 +323,22 @@ looping over a list of individual |SkyCoord| objects::
   >>> timeit sc_gal = sc.galactic  # doctest: +SKIP
   100 loops, best of 3: 21.8 ms per loop
 
+..
+  EXAMPLE END
+
+..
+  EXAMPLE START
+  Array Operations Using SkyCoord
+
 In addition to vectorized transformations, you can do the usual array slicing,
 dicing, and selection using the same methods and attributes that you use for
-`~numpy.ndarray` instances::
+`~numpy.ndarray` instances.  Similarly, on ``numpy`` version 1.17 or later,
+corresponding functions as well as others that affect the shape, such as
+`~numpy.atleast_1d` and `~numpy.rollaxis`, work as expected.  (The relevant
+functions have to be explicitly enabled in ``astropy`` source code; let us
+know if a ``numpy`` function is not supported that you think should work.)::
+
+.. doctest-requires:: numpy>=1.17
 
   >>> north_mask = sc.dec > 0
   >>> sc_north = sc[north_mask]
@@ -315,29 +347,111 @@ dicing, and selection using the same methods and attributes that you use for
   >>> sc[2:4]  # doctest: +FLOAT_CMP
   <SkyCoord (ICRS): (ra, dec) in deg
       [( 72., -89.64), (108., -89.46)]>
-  >>> sc[500]  # doctest: +FLOAT_CMP
+  >>> sc[500]
   <SkyCoord (ICRS): (ra, dec) in deg
       (0., 0.)>
-  >>> sc[0:-1:100].reshape(2, 5)  # doctest: +FLOAT_CMP
+  >>> sc[0:-1:100].reshape(2, 5)
   <SkyCoord (ICRS): (ra, dec) in deg
       [[(0., -90.), (0., -72.), (0., -54.), (0., -36.), (0., -18.)],
        [(0.,   0.), (0.,  18.), (0.,  36.), (0.,  54.), (0.,  72.)]]>
+  >>> np.roll(sc[::100], 1)
+  <SkyCoord (ICRS): (ra, dec) in deg
+      [(0.,  90.), (0., -90.), (0., -72.), (0., -54.), (0., -36.),
+       (0., -18.), (0.,   0.), (0.,  18.), (0.,  36.), (0.,  54.),
+       (0.,  72.)]>
 
 Note that similarly to the `~numpy.ndarray` methods, all but ``flatten`` try to
 use new views of the data, with the data copied only if that is impossible
 (as discussed, for example, in the documentation for NumPy
 :func:`~numpy.reshape`).
 
+..
+  EXAMPLE END
+
+.. _astropy-coordinates-modifying-in-place:
+
+Modifying Coordinate Objects In-place
+-------------------------------------
+
+Coordinate values in a array-valued |SkyCoord| object can be modified in-place
+(added in astropy 4.1). This requires that the new values be set from an
+another |SkyCoord| object that is equivalent in all ways except for the actual
+coordinate data values. In this way, no frame transformations are required and
+the item setting operation is extremely robust.
+
+Specifically, the right hand ``value`` must be strictly consistent with the
+object being modified:
+
+- Identical class
+- Equivalent frames (`~astropy.coordinates.BaseCoordinateFrame.is_equivalent_frame`)
+- Identical representation_types
+- Identical representation differentials keys
+- Identical frame attributes
+- Identical "extra" frame attributes (e.g., ``obstime`` for an ICRS coord)
+
+..
+  EXAMPLE START
+  Modifying an Array of Coordinates in a SkyCoord Object
+
+To modify an array of coordinates in a |SkyCoord| object use the same
+syntax for a numpy array::
+
+  >>> sc1 = SkyCoord([1, 2] * u.deg, [3, 4] * u.deg)
+  >>> sc2 = SkyCoord(10 * u.deg, 20 * u.deg)
+  >>> sc1[0] = sc2
+  >>> sc1
+  <SkyCoord (ICRS): (ra, dec) in deg
+      [(10., 20.), ( 2.,  4.)]>
+
+..
+  EXAMPLE END
+
+..
+  EXAMPLE START
+  Inserting Coordinates into a SkyCoord Object
+
+You can insert a scalar or array-valued |SkyCoord| object into another
+compatible |SkyCoord| object::
+
+  >>> sc1 = SkyCoord([1, 2] * u.deg, [3, 4] * u.deg)
+  >>> sc2 = SkyCoord(10 * u.deg, 20 * u.deg)
+  >>> sc1.insert(1, sc2)
+  <SkyCoord (ICRS): (ra, dec) in deg
+      [( 1.,  3.), (10., 20.), ( 2.,  4.)]>
+
+..
+  EXAMPLE END
+
+With the ability to modify a |SkyCoord| object in-place, all of the
+:ref:`table_operations` such as joining, stacking, and inserting are
+functional with |SkyCoord| mixin columns (so long as no masking is required).
+
+These methods are relatively slow because they require setting from an
+existing |SkyCoord| object and they perform extensive validation to ensure
+that the operation is valid. For some applications it may be necessary to
+take a different lower-level approach which is described in the section
+:ref:`astropy-coordinates-fast-in-place`.
+
+.. warning::
+
+  You may be tempted to try an apparently obvious way of modifying a coordinate
+  object in place by updating the component attributes directly, for example
+  ``sc1.ra[1] = 40 * u.deg``. However, while this will *appear* to give a correct
+  result it does not actually modify the underlying representation data. This
+  is related to the current implementation of performance-based caching.
+  The current cache implementation is similarly unable to handle in-place changes
+  to the representation (``.data``) or frame attributes such as ``.obstime``.
+
 
 Attributes
-===========
+==========
 
 The |SkyCoord| object has a number of useful attributes which come in handy.
 By digging through these we will learn a little bit about |SkyCoord| and how it
 works.
 
 To begin, one of the most important tools for
-learning about attributes and methods of objects is "TAB-discovery". From
+learning about attributes and methods of objects is "TAB-discovery." From
 within IPython you can type an object name, the period, and then the <TAB> key
 to see what is available. This can often be faster than reading the
 documentation::
@@ -418,10 +532,10 @@ coordinates. How does the object know what to call its values? The answer
 lies in some less obvious attributes::
 
   >>> sc_gal.representation_component_names
-  OrderedDict([('l', 'lon'), ('b', 'lat'), ('distance', 'distance')])
+  {'l': 'lon', 'b': 'lat', 'distance': 'distance'}
 
   >>> sc_gal.representation_component_units
-  OrderedDict([('l', Unit("deg")), ('b', Unit("deg"))])
+  {'l': Unit("deg"), 'b': Unit("deg")}
 
   >>> sc_gal.representation_type
   <class 'astropy.coordinates.representation.SphericalRepresentation'>
@@ -437,7 +551,7 @@ additional attributes that are required to fully define the frame::
 
   >>> sc_fk4 = SkyCoord(1, 2, frame='fk4', unit='deg')
   >>> sc_fk4.get_frame_attr_names()
-  OrderedDict([('equinox', <Time object: scale='tt' format='byear_str' value=B1950.000>), ('obstime', None)])
+  {'equinox': <Time object: scale='tt' format='byear_str' value=B1950.000>, 'obstime': None}
 
 The key values correspond to the defaults if no explicit value is provided by
 the user. This example shows that the `~astropy.coordinates.FK4` frame has two
@@ -508,7 +622,16 @@ another frame. You can do this in a few different ways: if you only want the
 default version of that frame, you can use attribute-style access (as mentioned
 previously). For more control, you can use the
 `~astropy.coordinates.SkyCoord.transform_to` method, which accepts a frame
-name, frame class, frame instance, or |SkyCoord|::
+name, frame class, frame instance, or |SkyCoord|.
+
+Examples
+--------
+
+..
+  EXAMPLE START
+  Transforming Between Frames
+
+To transform from one frame to another::
 
   >>> from astropy.coordinates import FK5
   >>> sc = SkyCoord(1, 2, frame='icrs', unit='deg')
@@ -532,6 +655,9 @@ coordinates are in the exact same reference frame::
   <SkyCoord (FK4: equinox=B1960.000, obstime=J1978.123): (ra, dec) in deg
       (0.48726331, 1.77731617)>
 
+..
+  EXAMPLE END
+
 .. _astropy-skycoord-representations:
 
 Representations
@@ -551,7 +677,16 @@ Initialization
 Most of what you need to know can be inferred from the examples below and
 by extrapolating the previous documentation for spherical representations.
 Initialization requires setting the ``representation_type`` keyword and
-supplying the corresponding components for that representation::
+supplying the corresponding components for that representation.
+
+Examples
+^^^^^^^^
+
+..
+  EXAMPLE START
+  Initialization of a SkyCoord Object Using Different Representations
+
+To initialize an object using a representation type other than spherical::
 
     >>> c = SkyCoord(x=1, y=2, z=3, unit='kpc', representation_type='cartesian')
     >>> c  # doctest: +FLOAT_CMP
@@ -592,6 +727,9 @@ In this case, the ``keyword_args`` now includes the element
 ``representation_type=REPRESENTATION``. In the above description, elements in
 all capital letters (e.g., ``FRAME``) describe a user input of that element
 type. Elements in square brackets are optional.
+
+..
+  EXAMPLE END
 
 **COMP1**, **COMP2**, **COMP3**
 
@@ -699,10 +837,10 @@ names for that frame to the component name on the representation class::
     >>> icrs.representation_type
     <class 'astropy.coordinates.representation.SphericalRepresentation'>
     >>> icrs.representation_component_names
-    OrderedDict([('ra', 'lon'), ('dec', 'lat'), ('distance', 'distance')])
+    {'ra': 'lon', 'dec': 'lat', 'distance': 'distance'}
 
 Changing Representation
---------------------------
+-----------------------
 
 The representation of the coordinate object can be changed, as shown
 below. This actually does *nothing* to the object internal data which
@@ -715,7 +853,17 @@ data in two ways:
 
 Setting the ``representation_type`` thus changes a *property* of the
 object (how it appears) without changing the intrinsic object itself
-which represents a point in 3D space::
+which represents a point in 3D space.
+
+Examples
+^^^^^^^^
+
+..
+  EXAMPLE START
+  Changing the Representation of a Coordinate Object
+
+To change the representation of a coordinate object by setting the
+``representation_type`` ::
 
     >>> c = SkyCoord(x=1, y=2, z=3, unit='kpc', representation_type='cartesian')
     >>> c  # doctest: +FLOAT_CMP
@@ -760,16 +908,22 @@ state of the |SkyCoord| object, you should instead use the
     >>> c.representation_type
     <class 'astropy.coordinates.representation.SphericalRepresentation'>
 
+..
+  EXAMPLE END
 
 Example 1: Plotting random data in Aitoff projection
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..
+  EXAMPLE START
+  Plotting Random Data in Aitoff Projection
 
 This is an example of how to make a plot in the Aitoff projection using data
 in a |SkyCoord| object. Here, a randomly generated data set will be used.
 
 First we need to import the required packages. We use
 `matplotlib <https://matplotlib.org/>`_ here for
-plotting and `numpy <https://www.numpy.org/>`_  to get the value of pi and to
+plotting and `numpy <https://numpy.org/>`_  to get the value of pi and to
 generate our random data.
 
     >>> from astropy import units as u
@@ -823,7 +977,7 @@ its usual position to avoid overlap with the axis labels.
 
     # First we need to import the required packages. We use
     # `matplotlib <https://matplotlib.org/>`_ here for
-    # plotting and `numpy <https://www.numpy.org/>`_  to get the value of pi and to
+    # plotting and `numpy <https://numpy.org/>`_  to get the value of pi and to
     # generate our random data.
     from astropy import units as u
     from astropy.coordinates import SkyCoord
@@ -859,10 +1013,15 @@ its usual position to avoid overlap with the axis labels.
     plt.subplots_adjust(top=0.95, bottom=0.0)
     plt.show()
 
-
+..
+  EXAMPLE END
 
 Example 2: Plotting star positions in bulge and disk
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+..
+  EXAMPLE START
+  Plotting Star Positions in Bulge and Disk
 
 This is a more realistic example of how to make a plot in the Aitoff projection
 using data in a |SkyCoord| object. Here, a randomly generated data set
@@ -949,9 +1108,102 @@ We use the same plotting setup as in the last example:
     plt.subplots_adjust(top=0.95,bottom=0.0)
     plt.show()
 
+..
+  EXAMPLE END
+
+.. _coordinates-skycoord-comparing:
+
+Comparing SkyCoord Objects
+==========================
+
+There are two primary ways to compare |SkyCoord| objects to each other. First is
+checking if the coordinates are within a specified distance of each other. This
+is what most users should do in their science or processing analysis work
+because it allows for a tolerance due to floating point representation issues.
+The second is checking for exact equivalence of two objects down to the bit,
+which is most useful for developers writing tests.
+
+The example below illustrates the floating point issue using the exact
+equality comparison, where we do a roundtrip transformation
+FK4 => ICRS => FK4 and then compare::
+
+  >>> sc1 = SkyCoord(1*u.deg, 2*u.deg, frame='fk4')
+  >>> sc1.icrs.fk4 == sc1
+  False
+
+Matching Within Tolerance
+-------------------------
+
+To test if coordinates are within a certain angular distance of one other, use the
+`~astropy.coordinates.SkyCoord.separation` method::
+
+  >>> sc1.icrs.fk4.separation(sc1).to(u.arcsec)  # doctest: +SKIP
+  <Angle 7.98873629e-13 arcsec>
+  >>> sc1.icrs.fk4.separation(sc1) < 1e-9 * u.arcsec
+  True
+
+Exact Equality
+--------------
+
+Astropy also provides an exact equality operator for coordinates.
+For example, when comparing, e.g., two |SkyCoord| objects::
+
+    >>> left_skycoord == right_skycoord  # doctest: +SKIP
+
+the right object must be strictly consistent with the left object for
+comparison:
+
+- Identical class
+- Equivalent frames (`~astropy.coordinates.BaseCoordinateFrame.is_equivalent_frame`)
+- Identical representation_types
+- Identical representation differentials keys
+- Identical frame attributes
+- Identical "extra" frame attributes (e.g., ``obstime`` for an ICRS coord)
+
+In the first example we show simple comparisons using array-valued coordinates::
+
+  >>> sc1 = SkyCoord([1, 2]*u.deg, [3, 4]*u.deg)
+  >>> sc2 = SkyCoord([1, 20]*u.deg, [3, 4]*u.deg)
+
+  >>> sc1 == sc2  # Array-valued comparison
+  array([ True, False])
+  >>> sc2 == sc2[1]  # Broadcasting comparison with a scalar
+  array([False,  True])
+  >>> sc2[0] == sc2[1]  # Scalar to scalar comparison
+  False
+  >>> sc1 != sc2  # Not equal
+  array([False,  True])
+
+In addition to numerically comparing the representation component data (which
+may include velocities), the equality comparison includes strict tests that all
+of the frame attributes like ``equinox`` or ``obstime`` are exactly equal.  Any
+mismatch in attributes will result in an exception being raised.  For example::
+
+  >>> sc1 = SkyCoord([1, 2]*u.deg, [3, 4]*u.deg)
+  >>> sc2 = SkyCoord([1, 20]*u.deg, [3, 4]*u.deg, obstime='2020-01-01')
+  >>> sc1 == sc2  # doctest: +SKIP
+  ...
+  ValueError: cannot compare: extra frame attribute 'obstime' is not equivalent
+   (perhaps compare the frames directly to avoid this exception)
+
+In this example the ``obstime`` attribute is a so-called "extra" frame attribute
+that does not apply directly to the ICRS coordinate frame. So we could compare
+with the following, this time using the ``!=`` operator for variety::
+
+  >>> sc1.frame != sc2.frame
+  array([False, True])
+
+One slightly special case is comparing two frames that both have no data, where
+the return value is the same as ``frame1.is_equivalent_frame(frame2)``. For
+example::
+
+  >>> from astropy.coordinates import FK4
+  >>> FK4() == FK4(obstime='2020-01-01')
+  False
+
 
 Convenience Methods
-====================
+===================
 
 A number of convenience methods are available, and you are encouraged to read
 the available docstrings below:

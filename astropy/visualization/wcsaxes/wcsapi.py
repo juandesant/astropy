@@ -35,7 +35,7 @@ def transform_coord_meta_from_wcs(wcs, frame_class, slices=None):
                              "has pixel dimensions (should be {})"
                              .format(wcs.pixel_n_dim))
 
-    is_fits_wcs = isinstance(wcs, WCS)
+    is_fits_wcs = isinstance(wcs, WCS) or (isinstance(wcs, SlicedLowLevelWCS) and isinstance(wcs._wcs, WCS))
 
     coord_meta = {}
     coord_meta['name'] = []
@@ -114,10 +114,16 @@ def transform_coord_meta_from_wcs(wcs, frame_class, slices=None):
             if name[0] == name[1]:
                 name = name[0:1]
             if axis_type:
-                name.insert(0, axis_type)
+                if axis_type not in name:
+                    name.insert(0, axis_type)
+            if wcs.world_axis_names and wcs.world_axis_names[idx]:
+                if wcs.world_axis_names[idx] not in name:
+                    name.append(wcs.world_axis_names[idx])
             name = tuple(name) if len(name) > 1 else name[0]
         else:
             name = axis_type or ''
+            if wcs.world_axis_names:
+                name = (name, wcs.world_axis_names[idx]) if wcs.world_axis_names[idx] else name
 
         coord_meta['name'].append(name)
 
@@ -352,19 +358,6 @@ class WCSPixel2WorldTransform(CurvedTransform):
 
         if self.wcs.world_n_dim == 1:
             world = [world]
-
-        # At the moment, one has to manually check that the transformation
-        # round-trips, otherwise it should be considered invalid.
-        pixel_check = self.wcs.world_to_pixel_values(*world)
-        if self.wcs.pixel_n_dim == 1:
-            pixel_check = [pixel_check]
-
-        with np.errstate(invalid='ignore'):
-            invalid = np.zeros(len(pixel[0]), dtype=bool)
-            for ipix in range(len(pixel)):
-                invalid |= np.abs(pixel_check[ipix] - pixel[ipix]) > 1.
-            for iwrl in range(len(world)):
-                world[iwrl][invalid] = np.nan
 
         world = np.array(world).T
 

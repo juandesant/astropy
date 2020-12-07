@@ -70,7 +70,7 @@ The first argument to the |read| function can be the name of a file, a string
 representation of a table, or a list of table lines. The return value
 (``data`` in this case) is a :ref:`Table <astropy-table>` object.
 
-By default, |read| will try to `guess the table format <#guess-table-format>`_
+By default, |read| will try to :ref:`guess the table format <guess_formats>`
 by trying all of the `supported formats`_.
 
 .. Warning::
@@ -84,7 +84,7 @@ tables, you may need to give `astropy.io.ascii` additional hints about
 the format.
 
 Examples
---------
+^^^^^^^^
 
 ..
   EXAMPLE START
@@ -141,7 +141,7 @@ The |write| function provides a way to write a data table as a formatted ASCII
 table.
 
 Examples
---------
+^^^^^^^^
 
 ..
   EXAMPLE START

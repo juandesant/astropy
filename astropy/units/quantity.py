@@ -20,7 +20,6 @@ from .core import (Unit, dimensionless_unscaled, get_current_unit_registry,
                    UnitBase, UnitsError, UnitConversionError, UnitTypeError)
 from .utils import is_effectively_unity
 from .format.latex import Latex
-from astropy.utils.compat import NUMPY_LT_1_17
 from astropy.utils.compat.misc import override__dir__
 from astropy.utils.exceptions import AstropyDeprecationWarning, AstropyWarning
 from astropy.utils.misc import isiterable
@@ -214,7 +213,7 @@ class QuantityInfo(QuantityInfoBase):
 class Quantity(np.ndarray):
     """A `~astropy.units.Quantity` represents a number with some associated unit.
 
-    See also: http://docs.astropy.org/en/stable/units/quantity.html
+    See also: https://docs.astropy.org/en/stable/units/quantity.html
 
     Parameters
     ----------
@@ -271,7 +270,7 @@ class Quantity(np.ndarray):
     Notes
     -----
     Quantities can also be created by multiplying a number or array with a
-    :class:`~astropy.units.Unit`. See http://docs.astropy.org/en/latest/units/
+    :class:`~astropy.units.Unit`. See https://docs.astropy.org/en/latest/units/
 
     """
     # Need to set a class-level default for _equivalencies, or
@@ -305,12 +304,8 @@ class Quantity(np.ndarray):
                                                isinstance(value, cls)):
                 value = value.view(cls)
 
-            if dtype is None:
-                if not copy:
-                    return value
-
-                if value.dtype.kind in 'iu':
-                    dtype = float
+            if dtype is None and value.dtype.kind in 'iu':
+                dtype = float
 
             return np.array(value, dtype=dtype, copy=copy, order=order,
                             subok=True, ndmin=ndmin)
@@ -431,8 +426,9 @@ class Quantity(np.ndarray):
             return self._new_view(obj)
 
         raise NotImplementedError('__array_wrap__ should not be used '
-                                  'with a context any more, since we require '
-                                  'numpy >=1.16.  Please raise an issue on '
+                                  'with a context any more since all use '
+                                  'should go through array_function. '
+                                  'Please raise an issue on '
                                   'https://github.com/astropy/astropy')
 
     def __array_ufunc__(self, function, method, *inputs, **kwargs):
@@ -664,7 +660,7 @@ class Quantity(np.ndarray):
         return self.unit.to(unit, self.view(np.ndarray),
                             equivalencies=equivalencies)
 
-    def to(self, unit, equivalencies=[]):
+    def to(self, unit, equivalencies=[], copy=True):
         """
         Return a new `~astropy.units.Quantity` object with the specified unit.
 
@@ -683,6 +679,10 @@ class Quantity(np.ndarray):
             If `None`, no equivalencies will be applied at all, not even any
             set globally or within a context.
 
+        copy : bool, optional
+            If `True` (default), then the value is copied.  Otherwise, a copy
+            will only be made if necessary.
+
         See also
         --------
         to_value : get the numerical value in a given unit.
@@ -690,7 +690,14 @@ class Quantity(np.ndarray):
         # We don't use `to_value` below since we always want to make a copy
         # and don't want to slow down this method (esp. the scalar case).
         unit = Unit(unit)
-        return self._new_view(self._to_value(unit, equivalencies), unit)
+        if copy:
+            # Avoid using to_value to ensure that we make a copy. We also
+            # don't want to slow down this method (esp. the scalar case).
+            value = self._to_value(unit, equivalencies)
+        else:
+            # to_value only copies if necessary
+            value = self.to_value(unit, equivalencies)
+        return self._new_view(value, unit)
 
     def to_value(self, unit=None, equivalencies=[]):
         """
@@ -830,9 +837,7 @@ class Quantity(np.ndarray):
         """
         if not self._include_easy_conversion_members:
             raise AttributeError(
-                "'{}' object has no '{}' member".format(
-                    self.__class__.__name__,
-                    attr))
+                f"'{self.__class__.__name__}' object has no '{attr}' member")
 
         def get_virtual_unit_attribute():
             registry = get_current_unit_registry().registry
@@ -850,8 +855,7 @@ class Quantity(np.ndarray):
 
         if value is None:
             raise AttributeError(
-                "{} instance has no attribute '{}'".format(
-                    self.__class__.__name__, attr))
+                f"{self.__class__.__name__} instance has no attribute '{attr}'")
         else:
             return value
 
@@ -1173,8 +1177,7 @@ class Quantity(np.ndarray):
         # with array2string
         pops = np.get_printoptions()
 
-        format_spec = '.{}g'.format(
-            precision if precision is not None else pops['precision'])
+        format_spec = f".{precision if precision is not None else pops['precision']}g"
 
         def float_formatter(value):
             return Latex.format_exponential_notation(value,
@@ -1318,14 +1321,14 @@ class Quantity(np.ndarray):
 
     # These functions need to be overridden to take into account the units
     # Array conversion
-    # http://docs.scipy.org/doc/numpy/reference/arrays.ndarray.html#array-conversion
+    # https://numpy.org/doc/stable/reference/arrays.ndarray.html#array-conversion
 
     def item(self, *args):
         return self._new_view(super().item(*args))
 
     def tolist(self):
         raise NotImplementedError("cannot make a list of Quantities.  Get "
-                                  "list of values with q.value.list()")
+                                  "list of values with q.value.tolist()")
 
     def _to_own_unit(self, value, check_precision=True):
         try:
@@ -1378,6 +1381,10 @@ class Quantity(np.ndarray):
     def tostring(self, order='C'):
         raise NotImplementedError("cannot write Quantities to string.  Write "
                                   "array with q.value.tostring(...).")
+
+    def tobytes(self, order='C'):
+        raise NotImplementedError("cannot write Quantities to string.  Write "
+                                  "array with q.value.tobytes(...).")
 
     def tofile(self, fid, sep="", format="%s"):
         raise NotImplementedError("cannot write Quantities to file.  Write "
@@ -1596,11 +1603,6 @@ class Quantity(np.ndarray):
         result = function(*args, **kwargs)
         return self._result_as_quantity(result, unit, out)
 
-    if NUMPY_LT_1_17:
-        def clip(self, a_min, a_max, out=None):
-            return self._wrap_function(np.clip, self._to_own_unit(a_min),
-                                       self._to_own_unit(a_max), out=out)
-
     def trace(self, offset=0, axis1=0, axis2=1, dtype=None, out=None):
         return self._wrap_function(np.trace, offset, axis1, axis2, dtype,
                                    out=out)
@@ -1761,7 +1763,11 @@ def isclose(a, b, rtol=1.e-5, atol=None, equal_nan=False, **kwargs):
     Notes
     -----
     This is a :class:`~astropy.units.Quantity`-aware version of
-    :func:`numpy.isclose`.
+    :func:`numpy.isclose`. However, this differs from the `numpy` function in
+    that the default for the absolute tolerance here is zero instead of
+    ``atol=1e-8`` in `numpy`, as there is no natural way to set a default
+    *absolute* tolerance given two inputs that may have differently scaled
+    units.
 
     Raises
     ------
@@ -1801,7 +1807,11 @@ def allclose(a, b, rtol=1.e-5, atol=None, equal_nan=False, **kwargs) -> bool:
     Notes
     -----
     This is a :class:`~astropy.units.Quantity`-aware version of
-    :func:`numpy.allclose`.
+    :func:`numpy.allclose`. However, this differs from the `numpy` function in
+    that the default for the absolute tolerance here is zero instead of
+    ``atol=1e-8`` in `numpy`, as there is no natural way to set a default
+    *absolute* tolerance given two inputs that may have differently scaled
+    units.
 
     Raises
     ------

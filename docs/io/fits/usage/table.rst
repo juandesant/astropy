@@ -76,7 +76,7 @@ Like images, the ``.data`` attribute of a table HDU contains the data of the
 table.
 
 Example
--------
+^^^^^^^
 
 ..
   EXAMPLE START
@@ -134,7 +134,7 @@ Like image data, we can use the same "mask array" idea to pick out desired
 records from a table and make a new table out of it.
 
 Examples
---------
+^^^^^^^^
 
 ..
   EXAMPLE START
@@ -168,7 +168,7 @@ Merging Tables
 Merging different tables is very convenient in ``astropy``.
 
 Examples
---------
+^^^^^^^^
 
 ..
   EXAMPLE START
@@ -226,7 +226,7 @@ Appending one table after another is slightly trickier, since the two tables
 may have different field attributes.
 
 Examples
---------
+^^^^^^^^
 
 ..
   EXAMPLE START
@@ -288,10 +288,10 @@ name and format. Here is a summary of all allowed formats for a binary table:
     B                        Unsigned byte                   1
     I                        16-bit integer                  2
     J                        32-bit integer                  4
-    K                        64-bit integer                  4
+    K                        64-bit integer                  8
     A                        character                       1
-    E                        single precision floating point 4
-    D                        double precision floating point 8
+    E                        single precision float (32-bit) 4
+    D                        double precision float (64-bit) 8
     C                        single precision complex        8
     M                        double precision complex        16
     P                        array descriptor                8
@@ -331,7 +331,7 @@ header keywords and descriptions:
     array                                 the data of the column
 
 Examples
---------
+^^^^^^^^
 
 ..
   EXAMPLE START
@@ -467,7 +467,7 @@ FITS Tables with Time Columns
 =============================
 
 The `FITS Time standard paper
-<http://adsabs.harvard.edu/abs/2015A%26A...574A..36R/>`_ defines the formats
+<https://ui.adsabs.harvard.edu/abs/2015A%26A...574A..36R/>`_ defines the formats
 and keywords used to represent timing information in FITS files. The ``astropy``
 FITS package provides support for reading and writing native
 `~astropy.time.Time` columns and objects using this format. This is done
@@ -510,7 +510,7 @@ approach that ``astropy`` takes in some detail.
 
 To create FITS columns which adhere to the FITS Time standard, we have taken
 into account the following important points stated in the `FITS Time paper
-<http://adsabs.harvard.edu/abs/2015A%26A...574A..36R/>`_.
+<https://ui.adsabs.harvard.edu/abs/2015A%26A...574A..36R/>`_.
 
 The strategy used to store `~astropy.time.Time` columns in FITS tables is to
 create a `~astropy.io.fits.Header` with the appropriate time coordinate

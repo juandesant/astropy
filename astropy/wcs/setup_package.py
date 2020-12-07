@@ -8,15 +8,15 @@ import shutil
 import sys
 from collections import defaultdict
 
-from distutils.core import Extension
-from distutils.dep_util import newer_group
+from setuptools import Extension
+from setuptools.dep_util import newer_group
 
 import numpy
 
 from extension_helpers import import_file, write_if_different, get_compiler, pkg_config
 
 WCSROOT = os.path.relpath(os.path.dirname(__file__))
-WCSVERSION = "7.1.0"
+WCSVERSION = "7.3.0"
 
 
 def b(s):
@@ -136,7 +136,7 @@ its contents, edit astropy/wcs/docstrings.py
 """)
     for key in keys:
         val = docs[key]
-        h_file.write('extern char doc_{}[{}];\n'.format(key, len(val)))
+        h_file.write(f'extern char doc_{key}[{len(val)}];\n')
     h_file.write("\n#endif\n\n")
 
     write_if_different(
@@ -160,7 +160,7 @@ MSVC, do not support string literals greater than 256 characters.
 """)
     for key in keys:
         val = docs[key]
-        c_file.write('char doc_{0}[{1}] = {{\n'.format(key, len(val)))
+        c_file.write(f'char doc_{key}[{len(val)}] = {{\n')
         for i in range(0, len(val), 12):
             section = val[i:i+12]
             c_file.write('    ')
@@ -191,7 +191,8 @@ def get_wcslib_cfg(cfg, wcslib_files, include_paths):
         wcsconfig_h_path = join(WCSROOT, 'include', 'wcsconfig.h')
         if os.path.exists(wcsconfig_h_path):
             os.unlink(wcsconfig_h_path)
-        cfg.update(pkg_config(['wcslib'], ['wcs']))
+        for k, v in pkg_config(['wcslib'], ['wcs']).items():
+            cfg[k].extend(v)
     else:
         write_wcsconfig_h(include_paths)
 
@@ -289,6 +290,7 @@ def get_extensions():
         'unit_list_proxy.c',
         'util.c',
         'wcslib_wrap.c',
+        'wcslib_auxprm_wrap.c',
         'wcslib_tabprm_wrap.c',
         'wcslib_wtbarr_wrap.c'
     ]

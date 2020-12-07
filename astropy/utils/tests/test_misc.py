@@ -85,40 +85,12 @@ def test_JsonCustomEncoder():
     assert newd == tmpd
 
 
-@pytest.mark.filterwarnings("ignore")
-def test_inherit_docstrings():
-    class Base(metaclass=misc.InheritDocstrings):
-        def __call__(self, *args):
-            "FOO"
-            pass
-
-        @property
-        def bar(self):
-            "BAR"
-            pass
-
-    class Subclass(Base):
-        def __call__(self, *args):
-            pass
-
-        @property
-        def bar(self):
-            return 42
-
-    if Base.__call__.__doc__ is not None:
-        # TODO: Maybe if __doc__ is None this test should be skipped instead?
-        assert Subclass.__call__.__doc__ == "FOO"
-
-    if Base.bar.__doc__ is not None:
-        assert Subclass.bar.__doc__ == "BAR"
-
-
 def test_set_locale():
     # First, test if the required locales are available
     current = locale.setlocale(locale.LC_ALL)
     try:
-        locale.setlocale(locale.LC_ALL, 'en_US')
-        locale.setlocale(locale.LC_ALL, 'de_DE')
+        locale.setlocale(locale.LC_ALL, 'en_US.utf8')
+        locale.setlocale(locale.LC_ALL, 'fr_FR.utf8')
     except locale.Error as e:
         pytest.skip(f'Locale error: {e}')
     finally:
@@ -127,11 +99,11 @@ def test_set_locale():
     date = datetime(2000, 10, 1, 0, 0, 0)
     day_mon = date.strftime('%a, %b')
 
-    with misc._set_locale('en_US'):
+    with misc._set_locale('en_US.utf8'):
         assert date.strftime('%a, %b') == 'Sun, Oct'
 
-    with misc._set_locale('de_DE'):
-        assert date.strftime('%a, %b') == 'So, Okt'
+    with misc._set_locale('fr_FR.utf8'):
+        assert date.strftime('%a, %b') == 'dim., oct.'
 
     # Back to original
     assert date.strftime('%a, %b') == day_mon
@@ -140,33 +112,9 @@ def test_set_locale():
         assert date.strftime('%a, %b') == day_mon
 
 
-def test_check_broadcast():
-    assert misc.check_broadcast((10, 1), (3,)) == (10, 3)
-    assert misc.check_broadcast((10, 1), (3,), (4, 1, 1, 3)) == (4, 1, 10, 3)
-    with pytest.raises(ValueError):
-        misc.check_broadcast((10, 2), (3,))
-
-    with pytest.raises(ValueError):
-        misc.check_broadcast((10, 1), (3,), (4, 1, 2, 3))
-
-
 def test_dtype_bytes_or_chars():
     assert misc.dtype_bytes_or_chars(np.dtype(np.float64)) == 8
     assert misc.dtype_bytes_or_chars(np.dtype(object)) is None
     assert misc.dtype_bytes_or_chars(np.dtype(np.int32)) == 4
     assert misc.dtype_bytes_or_chars(np.array(b'12345').dtype) == 5
     assert misc.dtype_bytes_or_chars(np.array('12345').dtype) == 5
-
-
-def test_unbroadcast():
-
-    x = np.array([1, 2, 3])
-    y = np.broadcast_to(x, (2, 4, 3))
-    z = misc.unbroadcast(y)
-    assert z.shape == (3,)
-    np.testing.assert_equal(z, x)
-
-    x = np.ones((3, 5))
-    y = np.broadcast_to(x, (5, 3, 5))
-    z = misc.unbroadcast(y)
-    assert z.shape == (3, 5)

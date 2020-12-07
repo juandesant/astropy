@@ -173,6 +173,7 @@ def spectral_density(wav, factor=None):
     la_f_la = nu_f_nu
     phot_f_la = astrophys.photon / (si.cm ** 2 * si.s * si.AA)
     phot_f_nu = astrophys.photon / (si.cm ** 2 * si.s * si.Hz)
+    la_phot_f_la = astrophys.photon / (si.cm ** 2 * si.s)
 
     # luminosity density
     L_nu = cgs.erg / si.s / si.Hz
@@ -270,6 +271,8 @@ def spectral_density(wav, factor=None):
         (phot_f_la, phot_f_nu, converter_phot_f_la_phot_f_nu, iconverter_phot_f_la_phot_f_nu),
         (phot_f_nu, f_nu, converter_phot_f_nu_to_f_nu, iconverter_phot_f_nu_to_f_nu),
         (phot_f_nu, f_la, converter_phot_f_nu_to_f_la, iconverter_phot_f_nu_to_f_la),
+        # integrated flux
+        (la_phot_f_la, la_f_la, converter_phot_f_la_to_f_la, iconverter_phot_f_la_to_f_la),
         # luminosity
         (L_la, L_nu, converter, iconverter),
         (L_nu, nu_L_nu, converter_L_nu_to_nu_L_nu, iconverter_L_nu_to_nu_L_nu),
@@ -316,7 +319,7 @@ def doppler_radio(rest):
 
     References
     ----------
-    `NRAO site defining the conventions <http://www.gb.nrao.edu/~fghigo/gbtdoc/doppler.html>`_
+    `NRAO site defining the conventions <https://www.gb.nrao.edu/~fghigo/gbtdoc/doppler.html>`_
 
     Examples
     --------
@@ -381,7 +384,7 @@ def doppler_optical(rest):
 
     References
     ----------
-    `NRAO site defining the conventions <http://www.gb.nrao.edu/~fghigo/gbtdoc/doppler.html>`_
+    `NRAO site defining the conventions <https://www.gb.nrao.edu/~fghigo/gbtdoc/doppler.html>`_
 
     Examples
     --------
@@ -447,7 +450,7 @@ def doppler_relativistic(rest):
 
     References
     ----------
-    `NRAO site defining the conventions <http://www.gb.nrao.edu/~fghigo/gbtdoc/doppler.html>`_
+    `NRAO site defining the conventions <https://www.gb.nrao.edu/~fghigo/gbtdoc/doppler.html>`_
 
     Examples
     --------
@@ -741,24 +744,29 @@ def assert_is_spectral_unit(value):
 
 def pixel_scale(pixscale):
     """
-    Convert between pixel distances (in units of ``pix``) and angular units,
+    Convert between pixel distances (in units of ``pix``) and other units,
     given a particular ``pixscale``.
 
     Parameters
     ----------
     pixscale : `~astropy.units.Quantity`
-        The pixel scale either in units of angle/pixel or pixel/angle.
+        The pixel scale either in units of <unit>/pixel or pixel/<unit>.
     """
-    if pixscale.unit.is_equivalent(si.arcsec/astrophys.pix):
-        pixscale_val = pixscale.to_value(si.radian/astrophys.pix)
-    elif pixscale.unit.is_equivalent(astrophys.pix/si.arcsec):
-        pixscale_val = (1/pixscale).to_value(si.radian/astrophys.pix)
-    else:
-        raise UnitsError("The pixel scale must be in angle/pixel or "
-                         "pixel/angle")
 
-    return Equivalency([(astrophys.pix, si.radian,
-                         lambda px: px*pixscale_val, lambda rad: rad/pixscale_val)],
+    decomposed = pixscale.unit.decompose()
+    dimensions = dict(zip(decomposed.bases, decomposed.powers))
+    pix_power = dimensions.get(astrophys.pix, 0)
+
+    if pix_power == -1:
+        physical_unit = Unit(pixscale * astrophys.pix)
+    elif pix_power == 1:
+        physical_unit = Unit(astrophys.pix / pixscale)
+    else:
+        raise UnitsError(
+                "The pixel scale unit must have"
+                " pixel dimensionality of 1 or -1.")
+
+    return Equivalency([(astrophys.pix, physical_unit)],
                        "pixel_scale", {'pixscale': pixscale})
 
 

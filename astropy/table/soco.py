@@ -72,6 +72,7 @@ class SCEngine:
     unique : bool (defaults to False)
         Whether the values of the index must be unique
     '''
+
     def __init__(self, data, row_index, unique=False):
         node_keys = map(tuple, data)
         self._nodes = SortedList(starmap(Node, zip(node_keys, row_index)))
@@ -167,4 +168,4 @@ class SCEngine:
         self._nodes.update(nodes)
 
     def __repr__(self):
-        return '{!r}'.format(list(self._nodes))
+        return f'{list(self._nodes)!r}'

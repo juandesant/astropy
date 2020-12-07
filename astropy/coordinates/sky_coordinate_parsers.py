@@ -191,8 +191,7 @@ def _get_frame_without_data(args, kwargs):
     # By now, frame_cls should be set - if it's not, something went wrong
     if not issubclass(frame_cls, BaseCoordinateFrame):
         # We should hopefully never get here...
-        raise ValueError('Frame class has unexpected type: {}'
-                         .format(frame_cls.__name__))
+        raise ValueError(f'Frame class has unexpected type: {frame_cls.__name__}')
 
     for attr in frame_cls.frame_attributes:
         if attr in kwargs:
@@ -588,7 +587,17 @@ def _get_representation_attrs(frame, units, kwargs):
     for frame_attr_name, repr_attr_class, unit in zip(frame_attr_names, repr_attr_classes, units):
         value = kwargs.pop(frame_attr_name, None)
         if value is not None:
-            valid_kwargs[frame_attr_name] = repr_attr_class(value, unit=unit)
+            try:
+                valid_kwargs[frame_attr_name] = repr_attr_class(value, unit=unit)
+            except u.UnitConversionError as err:
+                error_message = (
+                    f"Unit '{unit}' ({unit.physical_type}) could not be applied to '{frame_attr_name}'. "
+                    "This can occur when passing units for some coordinate components "
+                    "when other components are specified as Quantity objects. "
+                    "Either pass a list of units for all components (and unit-less coordinate data), "
+                    "or pass Quantities for all components."
+                )
+                raise u.UnitConversionError(error_message) from err
 
     # also check the differentials.  They aren't included in the units keyword,
     # so we only look for the names.
@@ -643,15 +652,11 @@ def _parse_ra_dec(coord_str):
         if match_j:
             coord = match_j.groups()
             if len(coord[0].split('.')[0]) == 7:
-                coord = ('{} {} {}'.
-                         format(coord[0][0:3], coord[0][3:5], coord[0][5:]),
-                         '{} {} {}'.
-                         format(coord[1][0:3], coord[1][3:5], coord[1][5:]))
+                coord = (f'{coord[0][0:3]} {coord[0][3:5]} {coord[0][5:]}',
+                         f'{coord[1][0:3]} {coord[1][3:5]} {coord[1][5:]}')
             else:
-                coord = ('{} {} {}'.
-                         format(coord[0][0:2], coord[0][2:4], coord[0][4:]),
-                         '{} {} {}'.
-                         format(coord[1][0:3], coord[1][3:5], coord[1][5:]))
+                coord = (f'{coord[0][0:2]} {coord[0][2:4]} {coord[0][4:]}',
+                         f'{coord[1][0:3]} {coord[1][3:5]} {coord[1][5:]}')
         else:
             coord = PLUS_MINUS_RE.split(coord_str)
             coord = (coord[0], ' '.join(coord[1:]))

@@ -119,9 +119,8 @@ errors should follow these rules:
 * For informational and debugging messages, one should always use
   ``log.info(message)`` and ``log.debug(message)``.
 
-The logging system uses the built-in Python `logging
-<https://docs.python.org/3/library/logging.html>`_ module. The logger can
-be imported using::
+The logging system uses the built-in Python :py:mod:`logging`
+module. The logger can be imported using::
 
     from astropy import log
 
@@ -267,8 +266,7 @@ The following example class shows a way to implement this::
 
         def __repr__(self):
             # Return unicode object containing no non-ASCII characters
-            return '<FloatList [{0}]>'.format(', '.join(
-                str(x) for x in self.x))
+            return f'<FloatList [{", ".join(str(x) for x in self.x)}]>'
 
         def __bytes__(self):
             return b'|'.join(bytes(x) for x in self.x)
@@ -348,7 +346,7 @@ Properties vs. get\_/set\_
 This example shows a sample class illustrating the guideline regarding the use
 of properties as opposed to getter/setter methods.
 
-Let's assuming you've defined a ``':class:`Star`'`` class and create an instance
+Let's assuming you've defined a ``Star`` class and create an instance
 like this::
 
     >>> s = Star(B=5.48, V=4.83)
@@ -520,9 +518,8 @@ might read::
         # the class is defined here
         pass
 
-This ensures that ``from submodule import *`` only imports ``':func:`foo'``
-and ``':class:`AClass'``, but not ``':class:`numpy.array'`` or
-``':func:`numpy.linspace'``.
+This ensures that ``from submodule import *`` only imports ``foo`` and
+``AClass``, but not `numpy.array` or `numpy.linspace`.
 
 
 Additional Resources
@@ -535,7 +532,7 @@ Further tips and hints relating to the coding guidelines are included below.
 
     codeguide_emacs
 
-.. _Numpy: https://www.numpy.org/
+.. _Numpy: https://numpy.org/
 .. _Scipy: https://www.scipy.org/
 .. _matplotlib: https://matplotlib.org/
 .. _Cython: https://cython.org/

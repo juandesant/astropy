@@ -172,7 +172,7 @@ Regular expression for valid table column names.  See FITS Standard v3.0 section
 TDEF_RE = re.compile(r'(?P<label>^T[A-Z]*)(?P<num>[1-9][0-9 ]*$)')
 
 # table dimension keyword regular expression (fairly flexible with whitespace)
-TDIM_RE = re.compile(r'\(\s*(?P<dims>(?:\d+,\s*)+\s*\d+)\s*\)\s*')
+TDIM_RE = re.compile(r'\(\s*(?P<dims>(?:\d+\s*)(?:,\s*\d+\s*)*\s*)\)\s*')
 
 # value for ASCII table cell with value = TNULL
 # this can be reset by user.
@@ -319,6 +319,10 @@ class _AsciiColumnFormat(_BaseColumnFormat):
         self = super().__new__(cls, format)
         self.format, self.width, self.precision = \
             _parse_ascii_tformat(format, strict)
+
+        # If no width has been specified, set the dtype here to default as well
+        if format == self.format:
+            self.recformat = ASCII2NUMPY[format]
 
         # This is to support handling logical (boolean) data from binary tables
         # in an ASCII table
@@ -963,8 +967,22 @@ class Column(NotifierMixin):
         valid = {}
         invalid = {}
 
-        format, recformat = cls._determine_formats(format, start, dim, ascii)
-        valid.update(format=format, recformat=recformat)
+        try:
+            format, recformat = cls._determine_formats(format, start, dim, ascii)
+            valid.update(format=format, recformat=recformat)
+        except (ValueError, VerifyError) as err:
+            msg = (
+                f'Column format option (TFORMn) failed verification: {err!s} '
+                'The invalid value will be ignored for the purpose of '
+                'formatting the data in this column.')
+            invalid['format'] = (format, msg)
+        except AttributeError as err:
+            msg = (
+                f'Column format option (TFORMn) must be a string with a valid '
+                f'FITS table format (got {format!s}: {err!s}). '
+                'The invalid value will be ignored for the purpose of '
+                'formatting the data in this column.')
+            invalid['format'] = (format, msg)
 
         # Currently we don't have any validation for name, unit, bscale, or
         # bzero so include those by default
@@ -1020,9 +1038,9 @@ class Column(NotifierMixin):
             msg = None
             if not isinstance(disp, str):
                 msg = (
-                    'Column disp option (TDISPn) must be a string (got {!r}).'
-                    'The invalid value will be ignored for the purpose of '
-                    'formatting the data in this column.'.format(disp))
+                    f'Column disp option (TDISPn) must be a string (got '
+                    f'{disp!r}). The invalid value will be ignored for the '
+                    'purpose of formatting the data in this column.')
 
             elif (isinstance(format, _AsciiColumnFormat) and
                     disp[0].upper() == 'L'):
@@ -1035,7 +1053,15 @@ class Column(NotifierMixin):
                     "column.")
 
             if msg is None:
-                valid['disp'] = disp
+                try:
+                    _parse_tdisp_format(disp)
+                    valid['disp'] = disp
+                except VerifyError as err:
+                    msg = (
+                        f'Column disp option (TDISPn) failed verification: '
+                        f'{err!s} The invalid value will be ignored for the '
+                        'purpose of formatting the data in this column.')
+                    invalid['disp'] = (disp, msg)
             else:
                 invalid['disp'] = (disp, msg)
 
@@ -1399,8 +1425,7 @@ class ColDefs(NotifierMixin):
     def _init_from_sequence(self, columns):
         for idx, col in enumerate(columns):
             if not isinstance(col, Column):
-                raise TypeError('Element {} in the ColDefs input is not a '
-                                'Column.'.format(idx))
+                raise TypeError(f'Element {idx} in the ColDefs input is not a Column.')
 
         self._init_from_coldefs(columns)
 
@@ -1414,12 +1439,12 @@ class ColDefs(NotifierMixin):
             # Determine the appropriate dimensions for items in the column
             # (typically just 1D)
             dim = array.dtype[idx].shape[::-1]
-            if dim and (len(dim) > 1 or 'A' in format):
+            if dim and (len(dim) > 0 or 'A' in format):
                 if 'A' in format:
                     # n x m string arrays must include the max string
                     # length in their dimensions (e.g. l x n x m)
                     dim = (array.dtype[idx].base.itemsize,) + dim
-                dim = repr(dim).replace(' ', '')
+                dim = '(' + ','.join(str(d) for d in dim) + ')'
             else:
                 dim = None
 
@@ -1445,16 +1470,17 @@ class ColDefs(NotifierMixin):
         # go through header keywords to pick out column definition keywords
         # definition dictionaries for each field
         col_keywords = [{} for i in range(nfields)]
-        for keyword, value in hdr.items():
+        for keyword in hdr:
             key = TDEF_RE.match(keyword)
             try:
-                keyword = key.group('label')
+                label = key.group('label')
             except Exception:
                 continue  # skip if there is no match
-            if keyword in KEYWORD_NAMES:
+            if label in KEYWORD_NAMES:
                 col = int(key.group('num'))
                 if 0 < col <= nfields:
-                    attr = KEYWORD_TO_ATTRIBUTE[keyword]
+                    attr = KEYWORD_TO_ATTRIBUTE[label]
+                    value = hdr[keyword]
                     if attr == 'format':
                         # Go ahead and convert the format value to the
                         # appropriate ColumnFormat container now
@@ -1467,7 +1493,7 @@ class ColDefs(NotifierMixin):
             valid_kwargs, invalid_kwargs = Column._verify_keywords(**kwargs)
             for val in invalid_kwargs.values():
                 warnings.warn(
-                    'Invalid keyword for column {}: {}'.format(idx + 1, val[1]),
+                    f'Invalid keyword for column {idx + 1}: {val[1]}',
                     VerifyWarning)
             # Special cases for recformat and dim
             # TODO: Try to eliminate the need for these special cases
@@ -1838,7 +1864,7 @@ class ColDefs(NotifierMixin):
                                  "definitions.\n".format(attr))
                     continue
                 output.write(f"{attr}:\n")
-                output.write('    {}\n'.format(getattr(self, attr + 's')))
+                output.write(f"    {getattr(self, attr + 's')}\n")
             else:
                 ret[attr] = getattr(self, attr + 's')
 
@@ -2237,7 +2263,6 @@ def _parse_tdim(tdim):
     """Parse the ``TDIM`` value into a tuple (may return an empty tuple if
     the value ``TDIM`` value is empty or invalid).
     """
-
     m = tdim and TDIM_RE.match(tdim)
     if m:
         dims = m.group('dims')
@@ -2447,9 +2472,13 @@ def _convert_ascii_format(format, reverse=False):
 
         # The following logic is taken from CFITSIO:
         # For integers, if the width <= 4 we can safely use 16-bit ints for all
+        # values, if width >= 10 we may need to accomodate 64-bit ints.
         # values [for the non-standard J format code just always force 64-bit]
-        if format == 'I' and width <= 4:
-            recformat = 'i2'
+        if format == 'I':
+            if width <= 4:
+                recformat = 'i2'
+            elif width > 9:
+                recformat = 'i8'
         elif format == 'A':
             recformat += str(width)
 
@@ -2483,7 +2512,8 @@ def _parse_tdisp_format(tdisp):
 
     # Use appropriate regex for format type
     tdisp = tdisp.strip()
-    fmt_key = tdisp[0] if tdisp[0] != 'E' or tdisp[1] not in 'NS' else tdisp[:2]
+    fmt_key = tdisp[0] if tdisp[0] != 'E' or (
+        len(tdisp) > 1 and tdisp[1] not in 'NS') else tdisp[:2]
     try:
         tdisp_re = TDISP_RE_DICT[fmt_key]
     except KeyError:

@@ -1,14 +1,13 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
+
 """
 This module contains functions for serializing core astropy objects via the
 YAML protocol.
-
 It provides functions `~astropy.io.misc.yaml.dump`,
 `~astropy.io.misc.yaml.load`, and `~astropy.io.misc.yaml.load_all` which
 call the corresponding functions in `PyYaml <https://pyyaml.org>`_ but use the
 `~astropy.io.misc.yaml.AstropyDumper` and `~astropy.io.misc.yaml.AstropyLoader`
 classes to define custom YAML tags for the following astropy classes:
-
 - `astropy.units.Unit`
 - `astropy.units.Quantity`
 - `astropy.time.Time`
@@ -20,23 +19,18 @@ classes to define custom YAML tags for the following astropy classes:
 - `astropy.coordinates.EarthLocation`
 - `astropy.table.SerializedColumn`
 
-.. Note ::
-
-   This module requires PyYaml version 3.12 or later.
+.. note:: This module requires PyYaml version 3.13 or later.
 
 Example
 =======
 ::
-
   >>> from astropy.io.misc import yaml
   >>> import astropy.units as u
   >>> from astropy.time import Time
   >>> from astropy.coordinates import EarthLocation
-
   >>> t = Time(2457389.0, format='mjd',
   ...          location=EarthLocation(1000, 2000, 3000, unit=u.km))
   >>> td = yaml.dump(t)
-
   >>> print(td)
   !astropy.time.Time
   format: mjd
@@ -57,17 +51,15 @@ Example
   out_subfmt: '*'
   precision: 3
   scale: utc
-
   >>> ty = yaml.load(td)
   >>> ty
   <Time object: scale='utc' format='mjd' value=2457389.0>
-
   >>> ty.location  # doctest: +FLOAT_CMP
   <EarthLocation (1000., 2000., 3000.) km>
 """
 
-
 import base64
+
 import numpy as np
 
 from astropy.time import Time, TimeDelta
@@ -76,17 +68,17 @@ from astropy import coordinates as coords
 from astropy.utils import minversion
 from astropy.table import SerializedColumn
 
-
 try:
     import yaml
 except ImportError:
-    raise ImportError('`import yaml` failed, PyYAML package is required for YAML')
-
-
-YAML_LT_3_12 = not minversion(yaml, '3.12')
+    raise ImportError('The PyYAML package is required for astropy.io.misc.yaml and must be 3.13 or later')
+else:
+    if not minversion(yaml, '3.13'):
+        raise ImportError('The PyYAML package is required for astropy.io.misc.yaml and must be 3.13 or later')
 
 
 __all__ = ['AstropyLoader', 'AstropyDumper', 'load', 'load_all', 'dump']
+__doctest_requires__ = {'*': ['yaml']}
 
 
 def _unit_representer(dumper, obj):
@@ -141,7 +133,7 @@ def _ndarray_representer(dumper, obj):
     else:
         order = 'C'
 
-    data_b64 = base64.b64encode(obj.tostring())
+    data_b64 = base64.b64encode(obj.tobytes())
 
     out = dict(buffer=data_b64,
                dtype=str(obj.dtype),
@@ -187,9 +179,9 @@ def _skycoord_constructor(loader, node):
 # Straight from yaml's Representer
 def _complex_representer(self, data):
     if data.imag == 0.0:
-        data = '%r' % data.real
+        data = f'{data.real!r}'
     elif data.real == 0.0:
-        data = '%rj' % data.imag
+        data = f'{data.imag!r}j'
     elif data.imag > 0:
         data = f'{data.real!r}+{data.imag!r}j'
     else:
@@ -236,17 +228,6 @@ class AstropyDumper(yaml.SafeDumper):
     def _represent_tuple(self, data):
         return self.represent_sequence('tag:yaml.org,2002:python/tuple', data)
 
-    if YAML_LT_3_12:
-        # pre-3.12, ignore-aliases could not deal with ndarray, so we backport
-        # the more recent ignore_alises definition.
-        def ignore_aliases(self, data):
-            if data is None:
-                return True
-            if isinstance(data, tuple) and data == ():
-                return True
-            if isinstance(data, (str, bool, int, float)):
-                return True
-
 
 AstropyDumper.add_multi_representer(u.UnitBase, _unit_representer)
 AstropyDumper.add_multi_representer(u.FunctionUnitBase, _unit_representer)
@@ -258,45 +239,52 @@ AstropyDumper.add_representer(coords.SkyCoord, _skycoord_representer)
 AstropyDumper.add_representer(SerializedColumn, _serialized_column_representer)
 
 # Numpy dtypes
-AstropyDumper.add_representer(np.bool_,
-                              yaml.representer.SafeRepresenter.represent_bool)
+AstropyDumper.add_representer(np.bool_, yaml.representer.SafeRepresenter.represent_bool)
 for np_type in [np.int_, np.intc, np.intp, np.int8, np.int16, np.int32,
                 np.int64, np.uint8, np.uint16, np.uint32, np.uint64]:
     AstropyDumper.add_representer(np_type,
-                                 yaml.representer.SafeRepresenter.represent_int)
+                                    yaml.representer.SafeRepresenter.represent_int)
 for np_type in [np.float_, np.float16, np.float32, np.float64,
                 np.longdouble]:
     AstropyDumper.add_representer(np_type,
-                                 yaml.representer.SafeRepresenter.represent_float)
+                                    yaml.representer.SafeRepresenter.represent_float)
 for np_type in [np.complex_, complex, np.complex64, np.complex128]:
-    AstropyDumper.add_representer(np_type,
-                                 _complex_representer)
+    AstropyDumper.add_representer(np_type, _complex_representer)
 
 AstropyLoader.add_constructor('tag:yaml.org,2002:python/complex',
-                              _complex_constructor)
+                                _complex_constructor)
 AstropyLoader.add_constructor('tag:yaml.org,2002:python/tuple',
-                              AstropyLoader._construct_python_tuple)
+                                AstropyLoader._construct_python_tuple)
 AstropyLoader.add_constructor('tag:yaml.org,2002:python/unicode',
-                              AstropyLoader._construct_python_unicode)
+                                AstropyLoader._construct_python_unicode)
 AstropyLoader.add_constructor('!astropy.units.Unit', _unit_constructor)
 AstropyLoader.add_constructor('!numpy.ndarray', _ndarray_constructor)
 AstropyLoader.add_constructor('!astropy.time.Time', _time_constructor)
 AstropyLoader.add_constructor('!astropy.time.TimeDelta', _timedelta_constructor)
 AstropyLoader.add_constructor('!astropy.coordinates.sky_coordinate.SkyCoord',
-                              _skycoord_constructor)
+                                _skycoord_constructor)
 AstropyLoader.add_constructor('!astropy.table.SerializedColumn',
-                              _serialized_column_constructor)
+                                _serialized_column_constructor)
 
 for cls, tag in ((u.Quantity, '!astropy.units.Quantity'),
-                 (u.Magnitude, '!astropy.units.Magnitude'),
-                 (u.Dex, '!astropy.units.Dex'),
-                 (u.Decibel, '!astropy.units.Decibel'),
-                 (coords.Angle, '!astropy.coordinates.Angle'),
-                 (coords.Latitude, '!astropy.coordinates.Latitude'),
-                 (coords.Longitude, '!astropy.coordinates.Longitude'),
-                 (coords.EarthLocation, '!astropy.coordinates.earth.EarthLocation')):
+                    (u.Magnitude, '!astropy.units.Magnitude'),
+                    (u.Dex, '!astropy.units.Dex'),
+                    (u.Decibel, '!astropy.units.Decibel'),
+                    (coords.Angle, '!astropy.coordinates.Angle'),
+                    (coords.Latitude, '!astropy.coordinates.Latitude'),
+                    (coords.Longitude, '!astropy.coordinates.Longitude'),
+                    (coords.EarthLocation, '!astropy.coordinates.earth.EarthLocation')):
     AstropyDumper.add_multi_representer(cls, _quantity_representer(tag))
     AstropyLoader.add_constructor(tag, _quantity_constructor(cls))
+
+for cls in (list(coords.representation.REPRESENTATION_CLASSES.values())
+            + list(coords.representation.DIFFERENTIAL_CLASSES.values())):
+    name = cls.__name__
+    # Add representations/differentials defined in astropy.
+    if name in coords.representation.__all__:
+        tag = '!astropy.coordinates.' + name
+        AstropyDumper.add_multi_representer(cls, _quantity_representer(tag))
+        AstropyLoader.add_constructor(tag, _quantity_constructor(cls))
 
 
 def load(stream):

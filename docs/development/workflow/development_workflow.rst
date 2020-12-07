@@ -31,12 +31,13 @@ development version or stable version is the active one.
 up. It is well worth your time.
 
 Not sure what your first contribution should be? Take a look at the `Astropy
-issue list`_ and grab one labeled "package-novice". These issues are the
-most accessible ones if you are not familiar with the Astropy source
-code. Issues labeled as "effort-low" are expected to take a few hours (at
-most) to address, while the "effort-medium" ones may take a few days. The
-developers are friendly and want you to help, so don't be shy about asking
-questions on the `astropy-dev mailing list`_.
+issue list`_ and grab one labeled `"package-novice" <https://github.com/astropy/astropy/issues?q=is%3Aissue+is%3Aopen+label%3Apackage-novice>`_.
+These issues are the most accessible ones if you are not familiar with the
+Astropy source code. Issues labeled as `"effort-low" <https://github.com/astropy/astropy/issues?q=is%3Aissue+is%3Aopen+label%3Aeffort-low>`_
+are expected to take a few hours (at most) to address, while the
+`"effort-medium" <https://github.com/astropy/astropy/issues?q=is%3Aissue+is%3Aopen+label%3Aeffort-medium>`_
+ones may take a few days. The developers are friendly and want you to help, so
+don't be shy about asking questions on the `astropy-dev mailing list`_.
 
 New to `git`_?
 **************
@@ -87,9 +88,10 @@ The naming scheme used by `git`_ will also be used here. A plain branch name,
 like ``master`` means a branch in your local copy of Astropy. A branch on a
 remote, like ``astropy`` , is labeled by that remote, ``astropy/master``.
 
-This duplication of names can get very confusing for maintainers when trying
-to merge code contributions into the official master branch,
-``astropy/master``. As a result, you should never do any work in your master
+This duplication of names can get very confusing when working with pull
+requests, especially when the official master branch, ``astropy/master``,
+changes due to other contributions before your contributions are merged in.
+As a result, you should never do any work in your master
 branch, ``master``. Always work on a branch instead.
 
 Essential `git`_ commands
@@ -250,17 +252,20 @@ setup in this section will make that easier.
 Install your branch
 *******************
 
-Ideally you should set up a python virtual environment just for this fix;
+Ideally you should set up a Python virtual environment just for this fix;
 instructions for doing to are at :ref:`virtual_envs`. Doing so ensures you
-will not corrupt your main astropy install and makes it very easy to recover
+will not corrupt your main ``astropy`` install and makes it very easy to recover
 from mistakes.
 
-Once you have activated that environment you need to install the version of
-Astropy you are working on. Do that with:
+Once you have activated that environment, you need to install the version of
+``astropy`` you are working on. Do that with:
 
 .. code-block:: bash
 
     pip install -e .
+
+For more details on building ``astropy`` from source, see
+:ref:`dev-build-astropy-subpkg`.
 
 .. _edit-flow:
 
@@ -313,7 +318,7 @@ In more detail
    For more details on running tests, please see :ref:`testing-guidelines`.
 
 #. Make sure your code includes appropriate docstrings, in the
-   [numpydoc format](https://numpydoc.readthedocs.io/en/latest/format.html).
+   `Numpydoc format`_.
    If appropriate, as when you are adding a new feature,
    you should update the appropriate documentation in the ``docs`` directory;
    a detailed description is in :ref:`documentation-guidelines`.
@@ -331,7 +336,7 @@ In more detail
 #. Add tests of your new code, if appropriate. Some changes (e.g. to
    documentation) do not need tests. Detailed instructions are at
    :ref:`writing-tests`, but if you have no experience writing tests or
-   with the `py.test`_ testing framework submit your changes without adding
+   with the `pytest`_ testing framework submit your changes without adding
    tests, but mention in the pull request that you have not written tests.
    An example of writing a test is in
    :ref:`astropy-fix-add-tests`.
@@ -416,6 +421,13 @@ it into Astropy:
    If you don't think your request is ready to be merged, just say so in your
    pull request message.  This is still a good way to start a preliminary
    code review.
+
+   You may also opt to open a work-in-progress pull request.
+   If you do so, instead of clicking "Create pull request", click on the small
+   down arrow next to it and select "Create draft pull request". This will let
+   the maintainers know that your work is not ready for a full review nor to be
+   merged yet. In addition, if your commits are not ready for CI testing, you
+   should also use ``[ci skip]`` or ``[skip ci]`` directive in your commit message.
 
 .. _revise and push:
 
@@ -544,3 +556,4 @@ can delete any backup branches that may have been created::
 .. _git book: https://git-scm.com/book/
 .. _Astropy issue list: https://github.com/astropy/astropy/issues
 .. _git choose-your-own-adventure: http://sethrobertson.github.io/GitFixUm/fixup.html
+.. _Numpydoc format: https://numpydoc.readthedocs.io/en/latest/format.html

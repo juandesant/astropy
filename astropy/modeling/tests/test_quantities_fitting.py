@@ -6,12 +6,14 @@ Tests that relate to fitting models with quantity parameters
 import numpy as np
 import pytest
 
-from astropy.modeling import models
 from astropy import units as u
 from astropy.units import UnitsError
 from astropy.tests.helper import assert_quantity_allclose
 from astropy.utils import NumpyRNGContext
 from astropy.modeling import fitting
+from astropy.modeling import models
+from astropy.modeling.core import Fittable1DModel
+from astropy.modeling.parameters import Parameter
 
 try:
     from scipy import optimize  # noqa
@@ -40,14 +42,50 @@ def _fake_gaussian_data():
     return x, y
 
 
-bad_compound_models_no_units = [
+compound_models_no_units = [
+    models.Linear1D() + models.Gaussian1D() + models.Gaussian1D(),
     models.Linear1D() + models.Gaussian1D() | models.Scale(),
-    models.Linear1D() + models.Gaussian1D() | models.Shift()
+    models.Linear1D() + models.Gaussian1D() | models.Shift(),
 ]
 
-compound_models_no_units = [
-    models.Linear1D() + models.Gaussian1D() + models.Gaussian1D()
-]
+
+class  CustomInputNamesModel(Fittable1DModel):
+
+    n_inputs = 1
+    n_outputs = 1
+
+    a = Parameter(default=1.0)
+    b = Parameter(default=1.0)
+
+    def __init__(self, a=a, b=b):
+        super().__init__(a=a, b=b)
+        self.inputs = ('inn',)
+        self.outputs = ('out',)
+
+    @staticmethod
+    def evaluate(inn, a, b):
+        return a * inn + b
+
+    @property
+    def input_units(self):
+        if self.a.unit is None and self.b.unit is None:
+            return None
+        else:
+            return {'inn': self.b.unit / self.a.unit}
+
+    def _parameter_units_for_data_units(self, inputs_unit, outputs_unit):
+        return {'a': outputs_unit['out'] / inputs_unit['inn'],
+                'b': outputs_unit['out']
+               }
+
+
+def models_with_custom_names():
+    line = models.Linear1D(1 * u.m / u.s, 2 * u.m)
+    line.inputs = ('inn',)
+    line.outputs = ('out',)
+
+    custom_names_model = CustomInputNamesModel(1 * u.m / u.s, 2 * u.m)
+    return [line, custom_names_model]
 
 
 @pytest.mark.skipif('not HAS_SCIPY')
@@ -182,7 +220,9 @@ def test_compound_without_units(model):
     assert isinstance(z, np.ndarray)
 
 
-@pytest.mark.skipif('not HAS_SCIPY')
+# FIXME: See https://github.com/astropy/astropy/issues/10675
+# @pytest.mark.skipif('not HAS_SCIPY')
+@pytest.mark.skip(reason='Flaky and ill-conditioned')
 def test_compound_fitting_with_units():
     x = np.linspace(-5, 5, 15) * u.Angstrom
     y = np.linspace(-5, 5, 15) * u.Angstrom
@@ -204,14 +244,30 @@ def test_compound_fitting_with_units():
     assert isinstance(res(x, y), np.ndarray)
     assert all([res[i]._has_units for i in range(2)])
 
+    # A case of a mixture of models with and without units
+    model = models.BlackBody(temperature=3000 * u.K) * models.Const1D(amplitude=1.0)
+    x = np.linspace(1, 3, 10000) * u.micron
+
+    with NumpyRNGContext(12345):
+        n = np.random.normal(3)
+
+    y = model(x)
+    res = fitter(model, x, y * (1 + n))
+    # The large rtol here is due to different results on linux and macosx, likely
+    # the model is ill-conditioned.
+    np.testing.assert_allclose(res.parameters, [3000, 2.1433621e+00, 2.647347e+00], rtol=0.4)
+
 
 @pytest.mark.skipif('not HAS_SCIPY')
-@pytest.mark.parametrize('model', bad_compound_models_no_units)
-def test_bad_compound_without_units(model):
-    with pytest.raises(ValueError):
-        x = np.linspace(-5, 5, 10) * u.Angstrom
-        with NumpyRNGContext(12345):
-            y = np.random.sample(10)
+@pytest.mark.filterwarnings(r'ignore:Model is linear in parameters*')
+@pytest.mark.parametrize('model', models_with_custom_names())
+def test_fitting_custom_names(model):
+    """ Tests fitting of models with custom inputs and outsputs names."""
 
-        fitter = fitting.LevMarLSQFitter()
-        res_fit = fitter(model, x, y * u.Hz)
+    x = np.linspace(0, 10, 100) * u.s
+    y = model(x)
+    fitter = fitting.LevMarLSQFitter()
+    new_model = fitter(model, x, y)
+    for param_name in model.param_names:
+        assert_quantity_allclose(getattr(new_model, param_name).quantity,
+                                 getattr(model, param_name).quantity)

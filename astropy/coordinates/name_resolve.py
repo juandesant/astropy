@@ -20,6 +20,7 @@ import urllib.error
 from astropy import units as u
 from .sky_coordinate import SkyCoord
 from astropy.utils import data
+from astropy.utils.data import download_file, get_file_contents
 from astropy.utils.state import ScienceState
 
 __all__ = ["get_icrs_coordinates"]
@@ -77,7 +78,7 @@ def _parse_response(resp_data):
     """
 
     pattr = re.compile(r"%J\s*([0-9\.]+)\s*([\+\-\.0-9]+)")
-    matched = pattr.search(resp_data.decode('utf-8'))
+    matched = pattr.search(resp_data)
 
     if matched is None:
         return None, None
@@ -86,7 +87,7 @@ def _parse_response(resp_data):
         return ra, dec
 
 
-def get_icrs_coordinates(name, parse=False):
+def get_icrs_coordinates(name, parse=False, cache=False):
     """
     Retrieve an ICRS object by using an online name resolving service to
     retrieve coordinates for the specified name. By default, this will
@@ -114,6 +115,10 @@ def get_icrs_coordinates(name, parse=False):
         in this way may differ from the database coordinates by a few
         deci-arcseconds, so only use this option if you do not need
         sub-arcsecond accuracy for coordinates.
+    cache : bool, str, optional
+        Determines whether to cache the results or not. Passed through to
+        `~astropy.utils.data.download_file`, so pass "update" to update the
+        cached value.
 
     Returns
     -------
@@ -155,9 +160,8 @@ def get_icrs_coordinates(name, parse=False):
     exceptions = []
     for url in urls:
         try:
-            # Retrieve ascii name resolve data from CDS
-            resp = urllib.request.urlopen(url, timeout=data.conf.remote_timeout)
-            resp_data = resp.read()
+            resp_data = get_file_contents(
+                download_file(url, cache=cache, show_progress=False))
             break
         except urllib.error.URLError as e:
             exceptions.append(e)
@@ -166,8 +170,8 @@ def get_icrs_coordinates(name, parse=False):
             # There are some cases where urllib2 does not catch socket.timeout
             # especially while receiving response data on an already previously
             # working request
-            e.reason = "Request took longer than the allowed {:.1f} " \
-                       "seconds".format(data.conf.remote_timeout)
+            e.reason = ("Request took longer than the allowed "
+                        f"{data.conf.remote_timeout:.1f} seconds")
             exceptions.append(e)
             continue
 
@@ -177,16 +181,15 @@ def get_icrs_coordinates(name, parse=False):
                     for url, e in zip(urls, exceptions)]
         raise NameResolveError("All Sesame queries failed. Unable to "
                                "retrieve coordinates. See errors per URL "
-                               "below: \n {}".format("\n".join(messages)))
+                               f"below: \n {os.linesep.join(messages)}")
 
     ra, dec = _parse_response(resp_data)
 
-    if ra is None and dec is None:
+    if ra is None or dec is None:
         if db == "A":
-            err = f"Unable to find coordinates for name '{name}'"
+            err = f"Unable to find coordinates for name '{name}' using {url}"
         else:
-            err = "Unable to find coordinates for name '{}' in database {}"\
-                  .format(name, database)
+            err = f"Unable to find coordinates for name '{name}' in database {database} using {url}"
 
         raise NameResolveError(err)
 

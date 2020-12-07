@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
+r"""
 ==========================================================
 Create a new coordinate class (for the Sagittarius stream)
 ==========================================================
@@ -30,7 +30,7 @@ See Also
   https://arxiv.org/abs/astro-ph/0304198
 * Law & Majewski 2010, "The Sagittarius Dwarf Galaxy: A Model for Evolution in a
   Triaxial Milky Way Halo", https://arxiv.org/abs/1003.1132
-* David Law's Sgr info page http://www.stsci.edu/~dlaw/Sgr/
+* David Law's Sgr info page https://www.stsci.edu/~dlaw/Sgr/
 
 
 *By: Adrian Price-Whelan, Erik Tollerud*
@@ -67,9 +67,9 @@ class Sagittarius(coord.BaseCoordinateFrame):
     """
     A Heliocentric spherical coordinate system defined by the orbit
     of the Sagittarius dwarf galaxy, as described in
-        http://adsabs.harvard.edu/abs/2003ApJ...599.1082M
+        https://ui.adsabs.harvard.edu/abs/2003ApJ...599.1082M
     and further explained in
-        http://www.stsci.edu/~dlaw/Sgr/.
+        https://www.stsci.edu/~dlaw/Sgr/.
 
     Parameters
     ----------
@@ -168,7 +168,7 @@ def sgr_to_galactic():
 # transform to `~astropy.coordinates.Galactic`). For example, to transform from
 # ICRS coordinates to ``Sagittarius``, we would do:
 
-icrs = coord.ICRS(280.161732*u.degree, 11.91934*u.degree)
+icrs = coord.SkyCoord(280.161732*u.degree, 11.91934*u.degree, frame='icrs')
 sgr = icrs.transform_to(Sagittarius)
 print(sgr)
 
@@ -176,8 +176,8 @@ print(sgr)
 # Or, to transform from the ``Sagittarius`` frame to ICRS coordinates (in this
 # case, a line along the ``Sagittarius`` x-y plane):
 
-sgr = Sagittarius(Lambda=np.linspace(0, 2*np.pi, 128)*u.radian,
-                  Beta=np.zeros(128)*u.radian)
+sgr = coord.SkyCoord(Lambda=np.linspace(0, 2*np.pi, 128)*u.radian,
+                     Beta=np.zeros(128)*u.radian, frame='sagittarius')
 icrs = sgr.transform_to(coord.ICRS)
 print(icrs)
 
@@ -203,10 +203,11 @@ plt.show()
 # transformation of velocity components is therefore natively supported as
 # well:
 
-sgr = Sagittarius(Lambda=np.linspace(0, 2*np.pi, 128)*u.radian,
-                  Beta=np.zeros(128)*u.radian,
-                  pm_Lambda_cosBeta=np.random.uniform(-5, 5, 128)*u.mas/u.yr,
-                  pm_Beta=np.zeros(128)*u.mas/u.yr)
+sgr = coord.SkyCoord(Lambda=np.linspace(0, 2*np.pi, 128)*u.radian,
+                     Beta=np.zeros(128)*u.radian,
+                     pm_Lambda_cosBeta=np.random.uniform(-5, 5, 128)*u.mas/u.yr,
+                     pm_Beta=np.zeros(128)*u.mas/u.yr,
+                     frame='sagittarius')
 icrs = sgr.transform_to(coord.ICRS)
 print(icrs)
 
@@ -217,20 +218,20 @@ axes[0].plot(sgr.Lambda.degree,
              sgr.pm_Lambda_cosBeta.value,
              linestyle='none', marker='.')
 axes[0].set_xlabel(r"$\Lambda$ [deg]")
-axes[0].set_ylabel(r"$\mu_\Lambda \, \cos B$ [{0}]"
-                   .format(sgr.pm_Lambda_cosBeta.unit.to_string('latex_inline')))
+axes[0].set_ylabel(
+    fr"$\mu_\Lambda \, \cos B$ [{sgr.pm_Lambda_cosBeta.unit.to_string('latex_inline')}]")
 
 axes[1].set_title("ICRS")
 axes[1].plot(icrs.ra.degree, icrs.pm_ra_cosdec.value,
              linestyle='none', marker='.')
-axes[1].set_ylabel(r"$\mu_\alpha \, \cos\delta$ [{0}]"
-                   .format(icrs.pm_ra_cosdec.unit.to_string('latex_inline')))
+axes[1].set_ylabel(
+    fr"$\mu_\alpha \, \cos\delta$ [{icrs.pm_ra_cosdec.unit.to_string('latex_inline')}]")
 
 axes[2].set_title("ICRS")
 axes[2].plot(icrs.ra.degree, icrs.pm_dec.value,
              linestyle='none', marker='.')
 axes[2].set_xlabel("RA [deg]")
-axes[2].set_ylabel(r"$\mu_\delta$ [{0}]"
-                   .format(icrs.pm_dec.unit.to_string('latex_inline')))
+axes[2].set_ylabel(
+    fr"$\mu_\delta$ [{icrs.pm_dec.unit.to_string('latex_inline')}]")
 
 plt.show()

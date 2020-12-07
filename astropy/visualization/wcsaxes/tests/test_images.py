@@ -16,7 +16,7 @@ from astropy.tests.image_tests import IMAGE_REFERENCE_DIR
 from astropy.utils.data import get_pkg_data_filename
 from astropy.visualization.wcsaxes import WCSAxes
 from astropy.visualization.wcsaxes.frame import EllipticalFrame
-from astropy.visualization.wcsaxes.patches import SphericalCircle
+from astropy.visualization.wcsaxes.patches import Quadrangle, SphericalCircle
 from astropy.wcs import WCS
 
 
@@ -25,21 +25,19 @@ class BaseImageTests:
     @classmethod
     def setup_class(cls):
 
-        cls._data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), 'data'))
-
-        msx_header = os.path.join(cls._data_dir, 'msx_header')
+        msx_header = get_pkg_data_filename('data/msx_header')
         cls.msx_header = fits.Header.fromtextfile(msx_header)
 
-        rosat_header = os.path.join(cls._data_dir, 'rosat_header')
+        rosat_header = get_pkg_data_filename('data/rosat_header')
         cls.rosat_header = fits.Header.fromtextfile(rosat_header)
 
-        twoMASS_k_header = os.path.join(cls._data_dir, '2MASS_k_header')
+        twoMASS_k_header = get_pkg_data_filename('data/2MASS_k_header')
         cls.twoMASS_k_header = fits.Header.fromtextfile(twoMASS_k_header)
 
-        cube_header = os.path.join(cls._data_dir, 'cube_header')
+        cube_header = get_pkg_data_filename('data/cube_header')
         cls.cube_header = fits.Header.fromtextfile(cube_header)
 
-        slice_header = os.path.join(cls._data_dir, 'slice_header')
+        slice_header = get_pkg_data_filename('data/slice_header')
         cls.slice_header = fits.Header.fromtextfile(slice_header)
 
     def teardown_method(self, method):
@@ -669,6 +667,34 @@ class TestBasic(BaseImageTests):
         r = SphericalCircle((266.4 * u.deg, -29.1 * u.deg), 0.15 * u.degree,
                             edgecolor='purple', facecolor='none',
                             transform=ax.get_transform('fk5'))
+        ax.add_patch(r)
+
+        ax.coords[0].set_ticklabel_visible(False)
+        ax.coords[1].set_ticklabel_visible(False)
+
+        return fig
+
+    @pytest.mark.remote_data(source='astropy')
+    @pytest.mark.mpl_image_compare(baseline_dir=IMAGE_REFERENCE_DIR,
+                                   tolerance=0, style={})
+    def test_quadrangle(self, tmpdir):
+        # Test that Quadrangle can have curved edges while Rectangle does not
+        wcs = WCS(self.msx_header)
+        fig = plt.figure(figsize=(3, 3))
+        ax = fig.add_axes([0.25, 0.25, 0.5, 0.5], projection=wcs, aspect='equal')
+        ax.set_xlim(0, 10000)
+        ax.set_ylim(-10000, 0)
+
+        # Add a quadrangle patch (100 degrees by 20 degrees)
+        q = Quadrangle((255, -70)*u.deg, 100*u.deg, 20*u.deg,
+                       label='Quadrangle', edgecolor='blue', facecolor='none',
+                       transform=ax.get_transform('icrs'))
+        ax.add_patch(q)
+
+        # Add a rectangle patch (100 degrees by 20 degrees)
+        r = Rectangle((255, -70), 100, 20,
+                       label='Rectangle', edgecolor='red', facecolor='none', linestyle='--',
+                       transform=ax.get_transform('icrs'))
         ax.add_patch(r)
 
         ax.coords[0].set_ticklabel_visible(False)

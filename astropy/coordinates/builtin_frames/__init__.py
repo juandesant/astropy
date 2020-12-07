@@ -30,13 +30,14 @@ from .fk5 import FK5
 from .fk4 import FK4, FK4NoETerms
 from .galactic import Galactic
 from .galactocentric import Galactocentric, galactocentric_frame_defaults
-from .lsr import LSR, GalacticLSR
 from .supergalactic import Supergalactic
 from .altaz import AltAz
 from .gcrs import GCRS, PrecessedGeocentric
 from .cirs import CIRS
 from .itrs import ITRS
 from .hcrs import HCRS
+from .equatorial import TEME, TETE
+
 from .ecliptic import *  # there are a lot of these so we don't list them all explicitly
 from .skyoffset import SkyOffsetFrame
 # need to import transformations so that they get registered in the graph
@@ -46,8 +47,13 @@ from . import galactic_transforms
 from . import supergalactic_transforms
 from . import icrs_cirs_transforms
 from . import cirs_observed_transforms
+from . import icrs_observed_transforms
 from . import intermediate_rotation_transforms
 from . import ecliptic_transforms
+
+# Import this after importing other frames, since this requires various
+# transformtions to set up the LSR frames
+from .lsr import LSR, GalacticLSR, LSRK, LSRD
 
 from astropy.coordinates.baseframe import frame_transform_graph
 
@@ -55,12 +61,12 @@ from astropy.coordinates.baseframe import frame_transform_graph
 # get included
 __all__ = ['ICRS', 'FK5', 'FK4', 'FK4NoETerms', 'Galactic', 'Galactocentric',
            'galactocentric_frame_defaults',
-           'Supergalactic', 'AltAz', 'GCRS', 'CIRS', 'ITRS', 'HCRS',
-           'PrecessedGeocentric', 'GeocentricMeanEcliptic',
+           'Supergalactic', 'AltAz', 'GCRS', 'CIRS', 'ITRS', 'HCRS', 'TEME',
+           'TETE', 'PrecessedGeocentric', 'GeocentricMeanEcliptic',
            'BarycentricMeanEcliptic', 'HeliocentricMeanEcliptic',
            'GeocentricTrueEcliptic', 'BarycentricTrueEcliptic',
            'HeliocentricTrueEcliptic',
-           'SkyOffsetFrame', 'GalacticLSR', 'LSR',
+           'SkyOffsetFrame', 'GalacticLSR', 'LSR', 'LSRK', 'LSRD',
            'BaseEclipticFrame', 'BaseRADecFrame', 'make_transform_graph_docs',
            'HeliocentricEclipticIAU76', 'CustomBarycentricEcliptic']
 
@@ -115,23 +121,24 @@ def make_transform_graph_docs(transform_graph):
     from astropy.coordinates.transformations import trans_to_color
     html_list_items = []
     for cls, color in trans_to_color.items():
-        block = """
+        block = f"""
             <li style='list-style: none;'>
                 <p style="font-size: 12px;line-height: 24px;font-weight: normal;color: #848484;padding: 0;margin: 0;">
-                    <b>{}:</b>
-                    <span style="font-size: 24px; color: {};"><b>➝</b></span>
+                    <b>{cls.__name__}:</b>
+                    <span style="font-size: 24px; color: {color};"><b>➝</b></span>
                 </p>
             </li>
-        """.format(cls.__name__, color)
+        """
         html_list_items.append(block)
 
-    graph_legend = """
+    nl = '\n'
+    graph_legend = f"""
     .. raw:: html
 
         <ul>
-            {}
+            {nl.join(html_list_items)}
         </ul>
-    """.format("\n".join(html_list_items))
+    """
     docstr = docstr + dedent(graph_legend)
 
     return docstr

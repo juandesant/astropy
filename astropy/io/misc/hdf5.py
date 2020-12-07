@@ -12,7 +12,7 @@ import numpy as np
 
 # NOTE: Do not import anything from astropy.table here.
 # https://github.com/astropy/astropy/issues/6604
-from astropy.utils.exceptions import AstropyUserWarning, AstropyDeprecationWarning
+from astropy.utils.exceptions import AstropyUserWarning
 
 HDF5_SIGNATURE = b'\x89HDF\r\n\x1a\n'
 META_KEY = '__table_column_meta__'
@@ -68,8 +68,8 @@ def read_table_hdf5(input, path=None, character_as_bytes=True):
 
     Parameters
     ----------
-    input : str or :class:`h5py:File` or :class:`h5py:Group` or
-        :class:`h5py:Dataset` If a string, the filename to read the table from.
+    input : str or :class:`h5py.File` or :class:`h5py.Group` or
+        :class:`h5py.Dataset` If a string, the filename to read the table from.
         If an h5py object, either the file or the group object to read the
         table from.
     path : str
@@ -112,8 +112,7 @@ def read_table_hdf5(input, path=None, character_as_bytes=True):
             arrays = _find_all_structured_arrays(input)
 
             if len(arrays) == 0:
-                raise ValueError("no table found in HDF5 group {}".
-                                 format(path))
+                raise ValueError(f"no table found in HDF5 group {path}")
             elif len(arrays) > 0:
                 path = arrays[0] if path is None else path + '/' + arrays[0]
                 if len(arrays) > 1:
@@ -204,7 +203,7 @@ def _encode_mixins(tbl):
     # YAML bit, for backward compatibility (i.e. not requiring YAML to write
     # Quantity).
     try:
-        import yaml
+        import yaml  # noqa
     except ImportError:
         for col in tbl.itercols():
             if (has_info_class(col, MixinInfo) and
@@ -222,7 +221,8 @@ def _encode_mixins(tbl):
 
 
 def write_table_hdf5(table, output, path=None, compression=False,
-                     append=False, overwrite=False, serialize_meta=False):
+                     append=False, overwrite=False, serialize_meta=False,
+                     **create_dataset_kwargs):
     """
     Write a Table object to an HDF5 file
 
@@ -232,7 +232,7 @@ def write_table_hdf5(table, output, path=None, compression=False,
     ----------
     table : `~astropy.table.Table`
         Data table that is to be written to file.
-    output : str or :class:`h5py:File` or :class:`h5py:Group`
+    output : str or :class:`h5py.File` or :class:`h5py.Group`
         If a string, the filename to write the table to. If an h5py object,
         either the file or the group object to write the table to.
     path : str
@@ -251,6 +251,9 @@ def write_table_hdf5(table, output, path=None, compression=False,
         Whether to overwrite any existing file without warning.
         If ``append=True`` and ``overwrite=True`` then only the dataset will be
         replaced; the file/group will not be overwritten.
+    **create_dataset_kwargs
+        Additional keyword arguments are passed to
+        ``h5py.File.create_dataset()`` or ``h5py.Group.create_dataset()``.
     """
 
     from astropy.table import meta
@@ -349,9 +352,11 @@ def write_table_hdf5(table, output, path=None, compression=False,
         if compression is True:
             compression = 'gzip'
         dset = output_group.create_dataset(name, data=table.as_array(),
-                                           compression=compression)
+                                           compression=compression,
+                                           **create_dataset_kwargs)
     else:
-        dset = output_group.create_dataset(name, data=table.as_array())
+        dset = output_group.create_dataset(name, data=table.as_array(),
+                                           **create_dataset_kwargs)
 
     if serialize_meta:
         header_yaml = meta.get_yaml_from_table(table)

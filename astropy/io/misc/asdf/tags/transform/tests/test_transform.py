@@ -1,15 +1,15 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 # -*- coding: utf-8 -*-
 
-import warnings
-from distutils.version import LooseVersion
-
 import pytest
+
+asdf = pytest.importorskip('asdf')
+
+import warnings
+
+from packaging.version import Version
 import numpy as np
 
-from astropy import __minimum_asdf_version__
-
-asdf = pytest.importorskip('asdf', minversion=__minimum_asdf_version__)
 from asdf import util
 from asdf.tests import helpers
 from asdf import AsdfFile
@@ -52,8 +52,41 @@ test_models = [
     astmodels.RotateCelestial2Native(5.63*u.deg, -72.5*u.deg, 180*u.deg),
     astmodels.RotationSequence3D([1.2, 2.3, 3.4, .3], 'xyzx'),
     astmodels.SphericalRotationSequence([1.2, 2.3, 3.4, .3], 'xyzy'),
-    custom_and_analytical_inverse(),
-]
+    astmodels.AiryDisk2D(amplitude=10., x_0=0.5, y_0=1.5),
+    astmodels.Box1D(amplitude=10., x_0=0.5, width=5.),
+    astmodels.Box2D(amplitude=10., x_0=0.5, x_width=5., y_0=1.5, y_width=7.),
+    astmodels.Const1D(amplitude=5.),
+    astmodels.Const2D(amplitude=5.),
+    astmodels.Disk2D(amplitude=10., x_0=0.5, y_0=1.5, R_0=5.),
+    astmodels.Ellipse2D(amplitude=10., x_0=0.5, y_0=1.5, a=2., b=4., theta=0.1),
+    astmodels.Exponential1D(amplitude=10., tau=3.5),
+    astmodels.Gaussian1D(amplitude=10., mean=5., stddev=3.),
+    astmodels.Gaussian2D(amplitude=10., x_mean=5., y_mean=5., x_stddev=3., y_stddev=3.),
+    astmodels.KingProjectedAnalytic1D(amplitude=10., r_core=5., r_tide=2.),
+    astmodels.Logarithmic1D(amplitude=10., tau=3.5),
+    astmodels.Lorentz1D(amplitude=10., x_0=0.5, fwhm=2.5),
+    astmodels.Moffat1D(amplitude=10., x_0=0.5, gamma=1.2, alpha=2.5),
+    astmodels.Moffat2D(amplitude=10., x_0=0.5, y_0=1.5, gamma=1.2, alpha=2.5),
+    astmodels.Planar2D(slope_x=0.5, slope_y=1.2, intercept=2.5),
+    astmodels.RedshiftScaleFactor(z=2.5),
+    astmodels.RickerWavelet1D(amplitude=10., x_0=0.5, sigma=1.2),
+    astmodels.RickerWavelet2D(amplitude=10., x_0=0.5, y_0=1.5, sigma=1.2),
+    astmodels.Ring2D(amplitude=10., x_0=0.5, y_0=1.5, r_in=5., width=10.),
+    astmodels.Sersic1D(amplitude=10., r_eff=1., n=4.),
+    astmodels.Sersic2D(amplitude=10., r_eff=1., n=4., x_0=0.5, y_0=1.5, ellip=0.0, theta=0.0),
+    astmodels.Sine1D(amplitude=10., frequency=0.5, phase=1.),
+    astmodels.Trapezoid1D(amplitude=10., x_0=0.5, width=5., slope=1.),
+    astmodels.TrapezoidDisk2D(amplitude=10., x_0=0.5, y_0=1.5, R_0=5., slope=1.),
+    astmodels.Voigt1D(x_0=0.55, amplitude_L=10., fwhm_L=0.5, fwhm_G=0.9),
+    astmodels.BlackBody(scale=10.0, temperature=6000.*u.K),
+    astmodels.Drude1D(amplitude=10.0, x_0=0.5, fwhm=2.5),
+    astmodels.Plummer1D(mass=10.0, r_plum=5.0),
+    astmodels.BrokenPowerLaw1D(amplitude=10, x_break=0.5, alpha_1=2.0, alpha_2=3.5),
+    astmodels.ExponentialCutoffPowerLaw1D(10, 0.5, 2.0, 7.),
+    astmodels.LogParabola1D(amplitude=10, x_0=0.5, alpha=2., beta=3.,),
+    astmodels.PowerLaw1D(amplitude=10., x_0=0.5, alpha=2.0),
+    astmodels.SmoothlyBrokenPowerLaw1D(amplitude=10., x_break=5.0, alpha_1=2.0, alpha_2=3.0, delta=0.5),
+    custom_and_analytical_inverse()]
 
 
 math_models = []
@@ -63,6 +96,12 @@ for kl in astmodels.math.__all__:
     math_models.append(klass())
 
 test_models.extend(math_models)
+
+test_models_with_constraints = [astmodels.Legendre2D(x_degree=1, y_degree=1,
+                                c0_0=1, c0_1=2, c1_0=3,
+                                fixed={'c1_0': True, 'c0_1': True},
+                                bounds={'c0_0': (-10, 10)})]
+test_models.extend(test_models_with_constraints)
 
 
 def test_transforms_compound(tmpdir):
@@ -98,8 +137,8 @@ def test_inverse_transforms(tmpdir):
 @pytest.mark.parametrize(('model'), test_models)
 def test_single_model(tmpdir, model):
     with warnings.catch_warnings():
-        # Some schema files are missing from asdf<=2.4.2 which causes warnings
-        if LooseVersion(asdf.__version__) <= '2.4.2':
+        # Some schema files are missing from asdf<=2.6.0 which causes warnings
+        if Version(asdf.__version__) <= Version('2.6.0'):
             warnings.filterwarnings('ignore', 'Unable to locate schema file')
         tree = {'single_model': model}
         helpers.assert_roundtrip_tree(tree, tmpdir)
@@ -145,8 +184,11 @@ def test_generic_projections(tmpdir):
             'backward': util.resolve_name(
                 f'astropy.modeling.projections.Pix2Sky_{name}')()
         }
-
-        helpers.assert_roundtrip_tree(tree, tmpdir)
+        with warnings.catch_warnings():
+            # Some schema files are missing from asdf<=2.4.2 which causes warnings
+            if Version(asdf.__version__) <= Version('2.5.1'):
+                warnings.filterwarnings('ignore', 'Unable to locate schema file')
+            helpers.assert_roundtrip_tree(tree, tmpdir)
 
 
 def test_tabular_model(tmpdir):
@@ -170,6 +212,29 @@ def test_bounding_box(tmpdir):
     model.bounding_box = ((1, 3), (2, 4))
     tree = {'model': model}
     helpers.assert_roundtrip_tree(tree, tmpdir)
+
+
+@pytest.mark.parametrize("standard_version", asdf.versioning.supported_versions)
+def test_const1d(tmpdir, standard_version):
+    helpers.assert_roundtrip_tree(
+        {"model": astmodels.Const1D(amplitude=5.)},
+        tmpdir,
+        init_options={"version": standard_version}
+    )
+
+
+@pytest.mark.parametrize("standard_version", asdf.versioning.supported_versions)
+@pytest.mark.parametrize("model", [
+    astmodels.Polynomial1D(1, c0=5, c1=17),
+    astmodels.Polynomial1D(1, c0=5, c1=17, domain=[-5, 4], window=[-2, 3]),
+    astmodels.Polynomial2D(2, c0_0=3, c1_0=5, c0_1=7),
+    astmodels.Polynomial2D(
+        2, c0_0=3, c1_0=5, c0_1=7, x_domain=[-2, 2], y_domain=[-4, 4],
+        x_window=[-6, 6], y_window=[-8, 8]
+    ),
+])
+def test_polynomial(tmpdir, standard_version, model):
+    helpers.assert_roundtrip_tree({"model": model}, tmpdir, init_options={"version": standard_version})
 
 
 def test_domain_orthopoly(tmpdir):
@@ -237,7 +302,7 @@ def test_fix_inputs(tmpdir):
 
     with warnings.catch_warnings():
         # Some schema files are missing from asdf<=2.4.2 which causes warnings
-        if LooseVersion(asdf.__version__) <= '2.5.1':
+        if Version(asdf.__version__) <= Version('2.5.1'):
             warnings.filterwarnings('ignore', 'Unable to locate schema file')
 
         model = astmodels.Pix2Sky_TAN() | astmodels.Rotation2D()
@@ -278,3 +343,30 @@ def test_custom_and_analytical(model, tmpdir):
     fa.write_to(file_path)
     with asdf.open(file_path) as f:
         assert f.tree['model'].inverse is not None
+
+
+def test_deserialize_compound_user_inverse(tmpdir):
+    """
+    Confirm that we are able to correctly reconstruct a
+    compound model with a user inverse set on one of its
+    component models.
+
+    Due to code in TransformType that facilitates circular
+    inverses, the user inverse of the component model is
+    not available at the time that the CompoundModel is
+    constructed.
+    """
+
+    yaml = """
+model: !transform/concatenate-1.2.0
+  forward:
+  - !transform/shift-1.2.0
+    inverse: !transform/shift-1.2.0 {offset: 5.0}
+    offset: -10.0
+  - !transform/shift-1.2.0 {offset: -20.0}
+  """
+    buff = helpers.yaml_to_asdf(yaml)
+    with asdf.open(buff) as af:
+        model = af["model"]
+        assert model.has_inverse()
+        assert model.inverse(-5, -20) == (0, 0)

@@ -15,7 +15,7 @@ __all__ = ['get_config_dir', 'get_cache_dir', 'set_temp_config',
 
 
 def _find_home():
-    """ Locates and return the home directory (or best approximation) on this
+    """Locates and return the home directory (or best approximation) on this
     system.
 
     Raises
@@ -25,54 +25,51 @@ def _find_home():
         Astropy on some obscure platform that doesn't have standard home
         directories.
     """
-
-    # First find the home directory - this is inspired by the scheme ipython
-    # uses to identify "home"
-    if os.name == 'posix':
+    try:
+        homedir = os.path.expanduser('~')
+    except Exception:
         # Linux, Unix, AIX, OS X
-        if 'HOME' in os.environ:
-            homedir = os.environ['HOME']
-        else:
-            raise OSError('Could not find unix home directory to search for '
-                          'astropy config dir')
-    elif os.name == 'nt':  # This is for all modern Windows (NT or after)
-        if 'MSYSTEM' in os.environ and os.environ.get('HOME'):
-            # Likely using an msys shell; use whatever it is using for its
-            # $HOME directory
-            homedir = os.environ['HOME']
-        # Next try for a network home
-        elif 'HOMESHARE' in os.environ:
-            homedir = os.environ['HOMESHARE']
-        # See if there's a local home
-        elif 'HOMEDRIVE' in os.environ and 'HOMEPATH' in os.environ:
-            homedir = os.path.join(os.environ['HOMEDRIVE'],
-                                   os.environ['HOMEPATH'])
-        # Maybe a user profile?
-        elif 'USERPROFILE' in os.environ:
-            homedir = os.path.join(os.environ['USERPROFILE'])
-        else:
-            try:
-                import winreg as wreg
-                shell_folders = r'Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders'
-                key = wreg.OpenKey(wreg.HKEY_CURRENT_USER, shell_folders)
+        if os.name == 'posix':
+            if 'HOME' in os.environ:
+                homedir = os.environ['HOME']
+            else:
+                raise OSError('Could not find unix home directory to search for '
+                              'astropy config dir')
+        elif os.name == 'nt':  # This is for all modern Windows (NT or after)
+            if 'MSYSTEM' in os.environ and os.environ.get('HOME'):
+                # Likely using an msys shell; use whatever it is using for its
+                # $HOME directory
+                homedir = os.environ['HOME']
+            # See if there's a local home
+            elif 'HOMEDRIVE' in os.environ and 'HOMEPATH' in os.environ:
+                homedir = os.path.join(os.environ['HOMEDRIVE'],
+                                       os.environ['HOMEPATH'])
+            # Maybe a user profile?
+            elif 'USERPROFILE' in os.environ:
+                homedir = os.path.join(os.environ['USERPROFILE'])
+            else:
+                try:
+                    import winreg as wreg
+                    shell_folders = r'Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders'  # noqa: E501
+                    key = wreg.OpenKey(wreg.HKEY_CURRENT_USER, shell_folders)
 
-                homedir = wreg.QueryValueEx(key, 'Personal')[0]
-                key.Close()
-            except Exception:
-                # As a final possible resort, see if HOME is present
-                if 'HOME' in os.environ:
-                    homedir = os.environ['HOME']
-                else:
-                    raise OSError('Could not find windows home directory to '
-                                  'search for astropy config dir')
-    else:
-        # for other platforms, try HOME, although it probably isn't there
-        if 'HOME' in os.environ:
-            homedir = os.environ['HOME']
+                    homedir = wreg.QueryValueEx(key, 'Personal')[0]
+                    key.Close()
+                except Exception:
+                    # As a final possible resort, see if HOME is present
+                    if 'HOME' in os.environ:
+                        homedir = os.environ['HOME']
+                    else:
+                        raise OSError('Could not find windows home directory to '
+                                      'search for astropy config dir')
         else:
-            raise OSError('Could not find a home directory to search for '
-                          'astropy config dir - are you on an unsupported '
-                          'platform?')
+            # for other platforms, try HOME, although it probably isn't there
+            if 'HOME' in os.environ:
+                homedir = os.environ['HOME']
+            else:
+                raise OSError('Could not find a home directory to search for '
+                              'astropy config dir - are you on an unsupported '
+                              'platform?')
     return homedir
 
 
@@ -241,18 +238,20 @@ class set_temp_config(_SetTempPath):
 
     def __enter__(self):
         # Special case for the config case, where we need to reset all the
-        # cached config objects
+        # cached config objects.  We do keep the cache, since some of it
+        # may have been set programmatically rather than be stored in the
+        # config file (e.g., iers.conf.auto_download=Fase for our tests).
         from .configuration import _cfgobjs
-
-        path = super().__enter__()
+        self._cfgobjs_copy = _cfgobjs.copy()
         _cfgobjs.clear()
-        return path
+        return super().__enter__()
 
     def __exit__(self, *args):
         from .configuration import _cfgobjs
-
-        super().__exit__(*args)
         _cfgobjs.clear()
+        _cfgobjs.update(self._cfgobjs_copy)
+        del self._cfgobjs_copy
+        super().__exit__(*args)
 
 
 class set_temp_cache(_SetTempPath):
@@ -288,8 +287,8 @@ class set_temp_cache(_SetTempPath):
 
 
 def _find_or_create_root_dir(dirnm, linkto, pkgname='astropy'):
-    innerdir = os.path.join(_find_home(), '.{}'.format(pkgname))
-    maindir = os.path.join(_find_home(), '.{}'.format(pkgname), dirnm)
+    innerdir = os.path.join(_find_home(), f'.{pkgname}')
+    maindir = os.path.join(_find_home(), f'.{pkgname}', dirnm)
 
     if not os.path.exists(maindir):
         # first create .astropy dir if needed

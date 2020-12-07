@@ -4,7 +4,6 @@
 import numpy as np
 from numpy.testing import assert_array_equal
 
-from asdf import yamlutil
 from asdf.versioning import AsdfSpec
 
 from astropy import time
@@ -13,9 +12,9 @@ from astropy.units import Quantity
 from astropy.coordinates import EarthLocation
 from astropy.io.misc.asdf.types import AstropyAsdfType
 
+__all__ = ['TimeType']
 
 _guessable_formats = set(['iso', 'byear', 'jyear', 'yday'])
-
 
 _astropy_format_to_asdf_format = {
     'isot': 'iso',
@@ -61,7 +60,7 @@ class TimeType(AstropyAsdfType):
         if node.scale == 'utc' and guessable_format and node.isscalar:
             return node.value
 
-        d = {'value': yamlutil.custom_tree_to_tagged_tree(node.value, ctx)}
+        d = {'value': node.value}
 
         if not guessable_format:
             d['format'] = fmt
@@ -76,15 +75,20 @@ class TimeType(AstropyAsdfType):
             # This code does get tested in CI, but we don't run a coverage test
             if cls.version == '1.0.0': # pragma: no cover
                 unit = node.location.unit
-                d['location'] = { 'x': x, 'y': y, 'z': z, 'unit': unit }
+                d['location'] = {
+                    'x': x.value,
+                    'y': y.value,
+                    'z': z.value,
+                    'unit': unit
+                }
             else:
                 d['location'] = {
                     # It seems like EarthLocations can be represented either in
                     # terms of Cartesian coordinates or latitude and longitude, so
                     # we rather arbitrarily choose the former for our representation
-                    'x': yamlutil.custom_tree_to_tagged_tree(x, ctx),
-                    'y': yamlutil.custom_tree_to_tagged_tree(y, ctx),
-                    'z': yamlutil.custom_tree_to_tagged_tree(z, ctx)
+                    'x': x,
+                    'y': y,
+                    'z': z
                 }
 
         return d

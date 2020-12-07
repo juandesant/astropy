@@ -162,7 +162,7 @@ transformations.  For example::
   >>> t = Time('2010:001')
   >>> iers_b = iers.IERS_B.open()
   >>> iers_b.ut1_utc(t)  # doctest: +FLOAT_CMP
-  <Quantity 0.1140827 s>
+  <Quantity 0.114033 s>
   >>> iers.earth_orientation_table.set(iers_b)
   <ScienceState earth_orientation_table: <IERS_B length=...>...>
   >>> t.ut1.iso
@@ -183,14 +183,14 @@ To reset to the default, pass in `None` (which is equivalent to passing in
 ``iers.IERS_Auto.open()``)::
 
   >>> iers.earth_orientation_table.set(None)  # doctest: +REMOTE_DATA
-  <ScienceState earth_orientation_table: <IERS_Auto length=...>...>
+  <ScienceState earth_orientation_table: <IERS...>...>
 
 To see the internal IERS data that gets used in astropy you can do the
 following::
 
   >>> dat = iers.earth_orientation_table.get()  # doctest: +REMOTE_DATA
   >>> type(dat)  # doctest: +REMOTE_DATA
-  <class 'astropy.utils.iers.iers.IERS_Auto'>
+  <class 'astropy.utils.iers.iers.IERS...'>
   >>> dat  # doctest: +SKIP
   <IERS_Auto length=16196>
    year month  day    MJD   PolPMFlag_A ... UT1Flag    PM_x     PM_y   PolPMFlag

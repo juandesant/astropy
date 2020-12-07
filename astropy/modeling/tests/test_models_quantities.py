@@ -1,6 +1,5 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 # pylint: disable=invalid-name, no-member
-from collections import OrderedDict
 
 import pytest
 import numpy as np
@@ -162,7 +161,7 @@ POWERLAW_MODELS = [
  'bounding_box': False},
 {'class': SmoothlyBrokenPowerLaw1D,
  'parameters': {'amplitude': 5 * u.kg, 'x_break': 10 * u.cm, 'alpha_1': 1, 'alpha_2': -1, 'delta': 1},
- 'evaluation': [(1 * u.m, 15.125 * u.kg), (1 * u.cm, 15.125 * u.kg)],
+ 'evaluation': [(1 * u.cm, 15.125 * u.kg), (1 * u.m, 15.125 * u.kg)],
  'bounding_box': False},
 {'class': ExponentialCutoffPowerLaw1D,
  'parameters': {'amplitude': 5 * u.kg, 'x_0': 10 * u.cm, 'alpha': 1, 'x_cutoff': 1 * u.m},
@@ -217,9 +216,9 @@ def test_models_evaluate_without_units(model):
     m = model['class'](**model['parameters'])
     for args in model['evaluation']:
         if len(args) == 2:
-            kwargs = OrderedDict(zip(('x', 'y'), args))
+            kwargs = dict(zip(('x', 'y'), args))
         else:
-            kwargs = OrderedDict(zip(('x', 'y', 'z'), args))
+            kwargs = dict(zip(('x', 'y', 'z'), args))
             if kwargs['x'].unit.is_equivalent(kwargs['y'].unit):
                 kwargs['x'] = kwargs['x'].to(kwargs['y'].unit)
         mnu = m.without_units_for_data(**kwargs)

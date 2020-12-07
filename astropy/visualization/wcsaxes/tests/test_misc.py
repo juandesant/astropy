@@ -1,9 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-import os
-import warnings
-from distutils.version import LooseVersion
-
+from packaging.version import Version
 import pytest
 import numpy as np
 import matplotlib
@@ -14,25 +11,25 @@ from astropy import units as u
 from astropy.wcs import WCS
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
-from astropy.tests.helper import catch_warnings
-from astropy.tests.image_tests import ignore_matplotlibrc
+
+from astropy.utils.data import get_pkg_data_filename
 
 from astropy.visualization.wcsaxes.core import WCSAxes
-from astropy.visualization.wcsaxes.frame import RectangularFrame, RectangularFrame1D
+from astropy.visualization.wcsaxes.frame import (
+    EllipticalFrame, RectangularFrame, RectangularFrame1D)
 from astropy.visualization.wcsaxes.utils import get_coord_meta
 from astropy.visualization.wcsaxes.transforms import CurvedTransform
 
-MATPLOTLIB_LT_21 = LooseVersion(matplotlib.__version__) < LooseVersion("2.1")
-
-DATA = os.path.abspath(os.path.join(os.path.dirname(__file__), 'data'))
+ft_version = Version(matplotlib.ft2font.__freetype_version__)
+FREETYPE_261 = ft_version == Version("2.6.1")
+TEX_UNAVAILABLE = not matplotlib.checkdep_usetex(True)
 
 
 def teardown_function(function):
     plt.close('all')
 
 
-@ignore_matplotlibrc
-def test_grid_regression():
+def test_grid_regression(ignore_matplotlibrc):
     # Regression test for a bug that meant that if the rc parameter
     # axes.grid was set to True, WCSAxes would crash upon initalization.
     plt.rc('axes', grid=True)
@@ -40,8 +37,7 @@ def test_grid_regression():
     WCSAxes(fig, [0.1, 0.1, 0.8, 0.8])
 
 
-@ignore_matplotlibrc
-def test_format_coord_regression(tmpdir):
+def test_format_coord_regression(ignore_matplotlibrc, tmpdir):
     # Regression test for a bug that meant that if format_coord was called by
     # Matplotlib before the axes were drawn, an error occurred.
     fig = plt.figure(figsize=(3, 3))
@@ -74,29 +70,30 @@ COORDSYS= 'icrs    '
 """, sep='\n')
 
 
-@ignore_matplotlibrc
 @pytest.mark.parametrize('grid_type', ['lines', 'contours'])
-def test_no_numpy_warnings(tmpdir, grid_type):
-
-    # Make sure that no warnings are raised if some pixels are outside WCS
-    # (since this is normal)
-
+def test_no_numpy_warnings(ignore_matplotlibrc, tmpdir, grid_type):
     ax = plt.subplot(1, 1, 1, projection=WCS(TARGET_HEADER))
     ax.imshow(np.zeros((100, 200)))
     ax.coords.grid(color='white', grid_type=grid_type)
 
-    with catch_warnings(RuntimeWarning) as ws:
+    with pytest.warns(None) as warning_lines:
         plt.savefig(tmpdir.join('test.png').strpath)
 
-    # For debugging
-    for w in ws:
-        print(w)
+    # There should be no warnings raised if some pixels are outside WCS
+    # (since this is normal).
+    # BUT catch_warning was ignoring some warnings before, so now we
+    # have to catch it. Otherwise, the pytest filterwarnings=error
+    # setting in setup.cfg will fail this test.
+    # There are actually multiple warnings but they are all similar.
+    for w in warning_lines:
+        w_msg = str(w.message)
+        assert ('converting a masked element to nan' in w_msg or
+                'No contour levels were found within the data range' in w_msg or
+                'np.asscalar(a) is deprecated since NumPy v1.16' in w_msg or
+                'PY_SSIZE_T_CLEAN will be required' in w_msg)
 
-    assert len(ws) == 0
 
-
-@ignore_matplotlibrc
-def test_invalid_frame_overlay():
+def test_invalid_frame_overlay(ignore_matplotlibrc):
 
     # Make sure a nice error is returned if a frame doesn't exist
     ax = plt.subplot(1, 1, 1, projection=WCS(TARGET_HEADER))
@@ -109,10 +106,9 @@ def test_invalid_frame_overlay():
     assert exc.value.args[0] == 'Unknown frame: banana'
 
 
-@ignore_matplotlibrc
-def test_plot_coord_transform():
+def test_plot_coord_transform(ignore_matplotlibrc):
 
-    twoMASS_k_header = os.path.join(DATA, '2MASS_k_header')
+    twoMASS_k_header = get_pkg_data_filename('data/2MASS_k_header')
     twoMASS_k_header = fits.Header.fromtextfile(twoMASS_k_header)
     fig = plt.figure(figsize=(6, 6))
     ax = fig.add_axes([0.15, 0.15, 0.8, 0.8],
@@ -126,8 +122,7 @@ def test_plot_coord_transform():
         ax.plot_coord(c, 'o', transform=ax.get_transform('galactic'))
 
 
-@ignore_matplotlibrc
-def test_set_label_properties():
+def test_set_label_properties(ignore_matplotlibrc):
 
     # Regression test to make sure that arguments passed to
     # set_xlabel/set_ylabel are passed to the underlying coordinate helpers
@@ -172,8 +167,7 @@ CRPIX3  =                241.0
 """, sep='\n')
 
 
-@ignore_matplotlibrc
-def test_slicing_warnings(tmpdir):
+def test_slicing_warnings(ignore_matplotlibrc, tmpdir):
 
     # Regression test to make sure that no warnings are emitted by the tick
     # locator for the sliced axis when slicing a cube.
@@ -187,14 +181,12 @@ def test_slicing_warnings(tmpdir):
     wcs3d.wcs.cdelt = [6.25, 6.25, 23]
     wcs3d.wcs.crval = [0., 0., 1.]
 
-    with warnings.catch_warnings(record=True) as warning_lines:
-        warnings.resetwarnings()
+    with pytest.warns(None) as warning_lines:
         plt.subplot(1, 1, 1, projection=wcs3d, slices=('x', 'y', 1))
         plt.savefig(tmpdir.join('test.png').strpath)
 
     # For easy debugging if there are indeed warnings
     for warning in warning_lines:
-        print(warning)
         # https://github.com/astropy/astropy/issues/9690
         if 'PY_SSIZE_T_CLEAN' not in str(warning.message):
             raise AssertionError(f'Unexpected warning: {warning}')
@@ -203,14 +195,12 @@ def test_slicing_warnings(tmpdir):
 
     wcs3d = WCS(GAL_HEADER)
 
-    with warnings.catch_warnings(record=True) as warning_lines:
-        warnings.resetwarnings()
+    with pytest.warns(None) as warning_lines:
         plt.subplot(1, 1, 1, projection=wcs3d, slices=('x', 'y', 2))
         plt.savefig(tmpdir.join('test.png').strpath)
 
     # For easy debugging if there are indeed warnings
     for warning in warning_lines:
-        print(warning)
         # https://github.com/astropy/astropy/issues/9690
         if 'PY_SSIZE_T_CLEAN' not in str(warning.message):
             raise AssertionError(f'Unexpected warning: {warning}')
@@ -312,7 +302,6 @@ def test_contour_return():
     assert isinstance(cset, QuadContourSet)
 
 
-@pytest.mark.skipif('MATPLOTLIB_LT_21')
 def test_contour_empty():
 
     # Regression test for a bug that caused contour to crash if no contours
@@ -325,8 +314,7 @@ def test_contour_empty():
         ax.contour(np.zeros((4, 4)), transform=ax.get_transform('world'))
 
 
-@ignore_matplotlibrc
-def test_iterate_coords(tmpdir):
+def test_iterate_coords(ignore_matplotlibrc, tmpdir):
 
     # Regression test for a bug that caused ax.coords to return too few axes
 
@@ -342,8 +330,7 @@ def test_iterate_coords(tmpdir):
     x, y, z = ax.coords
 
 
-@ignore_matplotlibrc
-def test_invalid_slices_errors():
+def test_invalid_slices_errors(ignore_matplotlibrc):
 
     # Make sure that users get a clear message when specifying a WCS with
     # >2 dimensions without giving the 'slices' argument, or if the 'slices'
@@ -413,8 +400,7 @@ EXPECTED_REPR_2 = """
  """.strip()
 
 
-@ignore_matplotlibrc
-def test_repr():
+def test_repr(ignore_matplotlibrc):
 
     # Unit test to make sure __repr__ looks as expected
 
@@ -446,3 +432,86 @@ def test_time_wcs(time_spectral_wcs_2d):
     # with a time axis.
 
     plt.subplot(projection=time_spectral_wcs_2d)
+
+
+@pytest.mark.skipif('TEX_UNAVAILABLE')
+def test_simplify_labels_usetex(ignore_matplotlibrc, tmpdir):
+    """Regression test for https://github.com/astropy/astropy/issues/8004."""
+    plt.rc('text', usetex=True)
+
+    header = {
+        'NAXIS': 2,
+        'NAXIS1': 360,
+        'NAXIS2': 180,
+        'CRPIX1': 180.5,
+        'CRPIX2': 90.5,
+        'CRVAL1': 180.0,
+        'CRVAL2': 0.0,
+        'CDELT1': -2 * np.sqrt(2) / np.pi,
+        'CDELT2': 2 * np.sqrt(2) / np.pi,
+        'CTYPE1': 'RA---MOL',
+        'CTYPE2': 'DEC--MOL',
+        'RADESYS': 'ICRS'}
+
+    wcs = WCS(header)
+    fig, ax = plt.subplots(
+        subplot_kw=dict(frame_class=EllipticalFrame, projection=wcs))
+    ax.set_xlim(-0.5, header['NAXIS1'] - 0.5)
+    ax.set_ylim(-0.5, header['NAXIS2'] - 0.5)
+    ax.coords[0].set_ticklabel(exclude_overlapping=True)
+    ax.coords[1].set_ticklabel(exclude_overlapping=True)
+    ax.coords[0].set_ticks(spacing=45 * u.deg)
+    ax.coords[1].set_ticks(spacing=30 * u.deg)
+    ax.grid()
+
+    fig.savefig(tmpdir / 'plot.png')
+
+
+@pytest.mark.parametrize('frame_class', [RectangularFrame, EllipticalFrame])
+def test_set_labels_with_coords(ignore_matplotlibrc, frame_class):
+    """Test if ``axis.set_xlabel()`` calls the correct ``coords[i]_set_axislabel()`` in a
+    WCS plot. Regression test for https://github.com/astropy/astropy/issues/10435.
+    """
+
+    labels = ['RA', 'Declination']
+    header = {
+        'NAXIS': 2,
+        'NAXIS1': 360,
+        'NAXIS2': 180,
+        'CRPIX1': 180.5,
+        'CRPIX2': 90.5,
+        'CRVAL1': 180.0,
+        'CRVAL2': 0.0,
+        'CDELT1': -2 * np.sqrt(2) / np.pi,
+        'CDELT2': 2 * np.sqrt(2) / np.pi,
+        'CTYPE1': 'RA---AIT',
+        'CTYPE2': 'DEC--AIT'}
+
+    wcs = WCS(header)
+    fig, ax = plt.subplots(
+        subplot_kw=dict(frame_class=frame_class, projection=wcs))
+    ax.set_xlabel(labels[0])
+    ax.set_ylabel(labels[1])
+
+    assert ax.get_xlabel() == labels[0]
+    assert ax.get_ylabel() == labels[1]
+    for i in range(2):
+        assert ax.coords[i].get_axislabel() == labels[i]
+
+
+@pytest.mark.parametrize('atol', [0.2, 1.0e-8])
+def test_bbox_size(atol):
+    # Test for the size of a WCSAxes bbox (only have Matplotlib >= 3.0 now)
+    extents = [11.38888888888889, 3.5, 576.0, 432.0]
+
+    fig = plt.figure()
+    ax = WCSAxes(fig, [0.1, 0.1, 0.8, 0.8])
+    fig.add_axes(ax)
+    fig.canvas.draw()
+    renderer = fig.canvas.renderer
+    ax_bbox = ax.get_tightbbox(renderer)
+
+    # Enforce strict test only with reference Freetype version
+    if atol < 0.1 and not FREETYPE_261:
+        pytest.xfail("Exact BoundingBox dimensions are only ensured with FreeType 2.6.1")
+    assert np.allclose(ax_bbox.extents, extents, atol=atol)

@@ -7,9 +7,9 @@ second edition, 1998, Willmann-Bell.
 
 import numpy as np
 from numpy.polynomial.polynomial import polyval
+import erfa
 
 from astropy import units as u
-from astropy import _erfa as erfa
 from . import ICRS, SkyCoord, GeocentricTrueEcliptic
 from .builtin_frames.utils import get_jd12
 
@@ -242,4 +242,4 @@ def calc_moon(t):
     ecliptic_coo = GeocentricTrueEcliptic(lon, lat, distance=dist,
                                           obstime=t, equinox=t)
 
-    return SkyCoord(ecliptic_coo.transform_to(ICRS))
+    return SkyCoord(ecliptic_coo.transform_to(ICRS()))

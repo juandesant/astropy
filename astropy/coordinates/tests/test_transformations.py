@@ -7,13 +7,13 @@ import pytest
 
 from astropy import units as u
 from astropy.coordinates import transformations as t
-from astropy.coordinates.builtin_frames import ICRS, FK5, FK4, FK4NoETerms, Galactic, AltAz
+from astropy.coordinates.builtin_frames import ICRS, FK5, FK4, FK4NoETerms, Galactic, AltAz, HCRS
 from astropy.coordinates import representation as r
 from astropy.coordinates.baseframe import frame_transform_graph
-from astropy.tests.helper import (assert_quantity_allclose as assert_allclose,
-                             catch_warnings)
+from astropy.tests.helper import assert_quantity_allclose as assert_allclose
 from astropy.time import Time
 from astropy.units import allclose as quantity_allclose
+from astropy.utils.exceptions import AstropyWarning
 
 
 # Coordinates just for these tests.
@@ -33,13 +33,14 @@ def test_transform_classes():
     """
     Tests the class-based/OO syntax for creating transforms
     """
+    def tfun(c, f):
+        return f.__class__(ra=c.ra, dec=c.dec)
 
-    tfun = lambda c, f: f.__class__(ra=c.ra, dec=c.dec)
-    trans1 = t.FunctionTransform(tfun, TCoo1, TCoo2,
-                        register_graph=frame_transform_graph)
+    _ = t.FunctionTransform(tfun, TCoo1, TCoo2,
+                            register_graph=frame_transform_graph)
 
     c1 = TCoo1(ra=1*u.radian, dec=0.5*u.radian)
-    c2 = c1.transform_to(TCoo2)
+    c2 = c1.transform_to(TCoo2())
     assert_allclose(c2.ra.radian, 1)
     assert_allclose(c2.dec.radian, 0.5)
 
@@ -51,7 +52,7 @@ def test_transform_classes():
     trans2.register(frame_transform_graph)
 
     c3 = TCoo1(ra=1*u.deg, dec=2*u.deg)
-    c4 = c3.transform_to(TCoo2)
+    c4 = c3.transform_to(TCoo2())
 
     assert_allclose(c4.ra.degree, 1)
     assert_allclose(c4.ra.degree, 1)
@@ -71,7 +72,7 @@ def test_transform_decos():
     def trans(coo1, f):
         return TCoo2(ra=coo1.ra, dec=coo1.dec * 2)
 
-    c2 = c1.transform_to(TCoo2)
+    c2 = c1.transform_to(TCoo2())
     assert_allclose(c2.ra.degree, 1)
     assert_allclose(c2.dec.degree, 4)
 
@@ -83,7 +84,7 @@ def test_transform_decos():
                 [0, 1, 0],
                 [0, 0, 1]]
 
-    c4 = c3.transform_to(TCoo2)
+    c4 = c3.transform_to(TCoo2())
 
     assert_allclose(c4.cartesian.x, 2*u.pc)
     assert_allclose(c4.cartesian.y, 1*u.pc)
@@ -201,8 +202,8 @@ def test_obstime():
     fk4_50 = FK4(ra=1*u.deg, dec=2*u.deg, obstime=b1950)
     fk4_75 = FK4(ra=1*u.deg, dec=2*u.deg, obstime=j1975)
 
-    icrs_50 = fk4_50.transform_to(ICRS)
-    icrs_75 = fk4_75.transform_to(ICRS)
+    icrs_50 = fk4_50.transform_to(ICRS())
+    icrs_75 = fk4_75.transform_to(ICRS())
 
     # now check that the resulting coordinates are *different* - they should be,
     # because the obstime is different
@@ -291,7 +292,7 @@ def test_affine_transform_succeed(transfunc, rep):
     trans = t.AffineTransform(transfunc, TCoo1, TCoo2)
     trans.register(frame_transform_graph)
 
-    c2 = c.transform_to(TCoo2)
+    c2 = c.transform_to(TCoo2())
 
     assert quantity_allclose(c2.data.to_cartesian().xyz,
                              expected_pos.to_cartesian().xyz)
@@ -321,7 +322,7 @@ def test_affine_transform_fail(transfunc):
     trans.register(frame_transform_graph)
 
     with pytest.raises(ValueError):
-        c2 = c.transform_to(TCoo2)
+        c.transform_to(TCoo2())
 
     trans.unregister(frame_transform_graph)
 
@@ -344,7 +345,7 @@ def test_too_many_differentials():
     c = TCoo1(rep.without_differentials())
     c._data = c._data.with_differentials({'s': dif1, 's2': dif2})
     with pytest.raises(ValueError):
-        c2 = c.transform_to(TCoo2)
+        c.transform_to(TCoo2())
 
     trans.unregister(frame_transform_graph)
 
@@ -369,7 +370,7 @@ def test_unit_spherical_with_differentials(rep):
     # register and do the transformation and check against expected
     trans = t.AffineTransform(transfunc.just_matrix, TCoo1, TCoo2)
     trans.register(frame_transform_graph)
-    c2 = c.transform_to(TCoo2)
+    c2 = c.transform_to(TCoo2())
 
     assert 's' in rep.differentials
     assert isinstance(c2.data.differentials['s'],
@@ -385,12 +386,11 @@ def test_unit_spherical_with_differentials(rep):
     trans.register(frame_transform_graph)
 
     with pytest.raises(TypeError):
-        c.transform_to(TCoo2)
+        c.transform_to(TCoo2())
 
     trans.unregister(frame_transform_graph)
 
 
-@pytest.mark.remote_data
 def test_vel_transformation_obstime_err():
     # TODO: replace after a final decision on PR #6280
     from astropy.coordinates.sites import get_builtin_sites
@@ -421,17 +421,18 @@ def test_vel_transformation_obstime_err():
 
 
 def test_function_transform_with_differentials():
-    tfun = lambda c, f: f.__class__(ra=c.ra, dec=c.dec)
-    ftrans = t.FunctionTransform(tfun, TCoo3, TCoo2,
-                                 register_graph=frame_transform_graph)
+    def tfun(c, f):
+        return f.__class__(ra=c.ra, dec=c.dec)
+
+    _ = t.FunctionTransform(tfun, TCoo3, TCoo2,
+                            register_graph=frame_transform_graph)
 
     t3 = TCoo3(ra=1*u.deg, dec=2*u.deg, pm_ra_cosdec=1*u.marcsec/u.yr,
                pm_dec=1*u.marcsec/u.yr,)
 
-    with catch_warnings() as w:
-        t2 = t3.transform_to(TCoo2)
-        assert len(w) == 1
-        assert 'they have been dropped' in str(w[0].message)
+    with pytest.warns(AstropyWarning, match=r'.*they have been dropped.*') as w:
+        t3.transform_to(TCoo2())
+    assert len(w) == 1
 
 
 def test_frame_override_component_with_attribute():
@@ -491,9 +492,9 @@ def test_static_matrix_combine_paths():
     t4.register(frame_transform_graph)
 
     c = Galactic(123*u.deg, 45*u.deg)
-    c1 = c.transform_to(BFrame) # direct
-    c2 = c.transform_to(AFrame).transform_to(BFrame) # thru A
-    c3 = c.transform_to(ICRS).transform_to(BFrame) # thru ICRS
+    c1 = c.transform_to(BFrame())  # direct
+    c2 = c.transform_to(AFrame()).transform_to(BFrame())  # thru A
+    c3 = c.transform_to(ICRS()).transform_to(BFrame())  # thru ICRS
 
     assert quantity_allclose(c1.lon, c2.lon)
     assert quantity_allclose(c1.lat, c2.lat)
@@ -513,11 +514,13 @@ def test_multiple_aliases():
         name = ['alias_1', 'alias_2']
         default_representation = r.SphericalRepresentation
 
+    def tfun(c, f):
+        return f.__class__(lon=c.lon, lat=c.lat)
+
     # Register a transform
     graph = t.TransformGraph()
-    tfun = lambda c, f: f.__class__(lon=c.lon, lat=c.lat)
-    ftrans = t.FunctionTransform(tfun, MultipleAliasesFrame, MultipleAliasesFrame,
-                                 register_graph=graph)
+    _ = t.FunctionTransform(tfun, MultipleAliasesFrame, MultipleAliasesFrame,
+                            register_graph=graph)
 
     # Test that both aliases have been added to the transform graph
     assert graph.lookup_name('alias_1') == MultipleAliasesFrame
@@ -529,9 +532,11 @@ def test_multiple_aliases():
 
 
 def test_remove_transform_and_unregister():
+    def tfun(c, f):
+        f.__class__(ra=c.ra, dec=c.dec)
+
     # Register transforms
     graph = t.TransformGraph()
-    tfun = lambda c, f: f.__class__(ra=c.ra, dec=c.dec)
     ftrans1 = t.FunctionTransform(tfun, TCoo1, TCoo1, register_graph=graph)
     ftrans2 = t.FunctionTransform(tfun, TCoo2, TCoo2, register_graph=graph)
     _ = t.FunctionTransform(tfun, TCoo1, TCoo2, register_graph=graph)
@@ -559,8 +564,10 @@ def test_remove_transform_and_unregister():
 
 
 def test_remove_transform_errors():
+    def tfun(c, f):
+        return f.__class__(ra=c.ra, dec=c.dec)
+
     graph = t.TransformGraph()
-    tfun = lambda c, f: f.__class__(ra=c.ra, dec=c.dec)
     _ = t.FunctionTransform(tfun, TCoo1, TCoo1, register_graph=graph)
 
     # Test bad calls to remove_transform
@@ -579,3 +586,38 @@ def test_remove_transform_errors():
 
     with pytest.raises(ValueError):
         graph.remove_transform(TCoo1, TCoo1, 1)
+
+
+def test_impose_finite_difference_dt():
+    class H1(HCRS):
+        pass
+
+    class H2(HCRS):
+        pass
+
+    class H3(HCRS):
+        pass
+
+    graph = t.TransformGraph()
+    tfun = lambda c, f: f.__class__(ra=c.ra, dec=c.dec)
+
+    # Set up a number of transforms with different time steps
+    old_dt = 1*u.min
+    transform1 = t.FunctionTransformWithFiniteDifference(tfun, H1, H1, register_graph=graph,
+                                                         finite_difference_dt=old_dt)
+    transform2 = t.FunctionTransformWithFiniteDifference(tfun, H2, H2, register_graph=graph,
+                                                         finite_difference_dt=old_dt * 2)
+    transform3 = t.FunctionTransformWithFiniteDifference(tfun, H2, H3, register_graph=graph,
+                                                         finite_difference_dt=old_dt * 3)
+
+    # Check that all of the transforms have the same new time step
+    new_dt = 1*u.yr
+    with graph.impose_finite_difference_dt(new_dt):
+        assert transform1.finite_difference_dt == new_dt
+        assert transform2.finite_difference_dt == new_dt
+        assert transform3.finite_difference_dt == new_dt
+
+    # Check that all of the original time steps have been restored
+    assert transform1.finite_difference_dt == old_dt
+    assert transform2.finite_difference_dt == old_dt * 2
+    assert transform3.finite_difference_dt == old_dt * 3

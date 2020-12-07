@@ -13,7 +13,7 @@ The `~astropy.coordinates.Galactocentric` frame
 class is meant to be flexible enough to support all common definitions of such a
 transformation, but with reasonable default parameter values, such as the solar
 velocity relative to the Galactic center, the solar height above the Galactic
-midplane, etc. Below, `we decribe our generalized definition of the
+midplane, etc. Below, `we describe our generalized definition of the
 transformation <astropy-coordinates-galactocentric-transformation>`_ from the
 ICRS to/from Galactocentric coordinates, and `describe how to customize the
 default Galactocentric parameters
@@ -77,7 +77,7 @@ vector pointing from the Sun to the GC, but the :math:`y'` and
 :math:`z'` axes point in arbitrary directions. We adopt the
 orientation of the Galactic plane as the normal to the north pole of
 Galactic coordinates defined by the IAU
-(`Blaauw et. al. 1960 <http://adsabs.harvard.edu/abs/1960MNRAS.121..164B>`_).
+(`Blaauw et. al. 1960 <https://ui.adsabs.harvard.edu/abs/1960MNRAS.121..164B>`_).
 This extra “roll” angle, :math:`\eta`, was measured by transforming a grid
 of points along :math:`l=0` to this interim frame and minimizing the square
 of their :math:`y'` positions. We find:
@@ -171,35 +171,44 @@ up-to-date list of valid names, see the docstring of
 like ``'pre-v4.0'``, which sets the default parameter values to their original
 definition (i.e. pre-astropy-v4.0) values, and ``'v4.0'``, which sets the
 default parameter values to a more modern set of measurements as updated in
-Astropy version 4.0.
+Astropy version 4.0. Also, custom sets of measurements can be registered to
+`~astropy.coordinates.galactocentric_frame_defaults` and used like the
+built-in options.
+
+`~astropy.coordinates.galactocentric_frame_defaults` also tracks the
+references (i.e. scientific papers that define the parameter values) for all
+parameter values, as well as any further specified metadata information.
 
 As with other `~astropy.utils.state.ScienceState` subclasses, the
 `~astropy.coordinates.galactocentric_frame_defaults` class can be used to
-globally set the frame defaults at runtime. For example, the default parameter
-values can be seen by initializing the `~astropy.coordinates.Galactocentric`
-frame with no arguments:
+globally set the frame defaults at runtime.
 
-.. testsetup::
+Examples
+--------
 
-    >>> from astropy.coordinates import galactocentric_frame_defaults
-    >>> _ = galactocentric_frame_defaults.set('pre-v4.0')
+..
+  EXAMPLE START
+  Setting Galactocentric Coordinate Frame Defaults at Runtime
+
+The default parameter values can be seen by initializing the
+`~astropy.coordinates.Galactocentric` frame with no arguments:
 
 ::
 
     >>> from astropy.coordinates import Galactocentric
     >>> Galactocentric()
     <Galactocentric Frame (galcen_coord=<ICRS Coordinate: (ra, dec) in deg
-        (266.4051, -28.936175)>, galcen_distance=8.3 kpc, galcen_v_sun=(11.1, 232.24, 7.25) km / s, z_sun=27.0 pc, roll=0.0 deg)>
+        (266.4051, -28.936175)>, galcen_distance=8.122 kpc, galcen_v_sun=(12.9, 245.6, 7.78) km / s, z_sun=20.8 pc, roll=0.0 deg)>
 
 These default values can be modified using this class::
 
     >>> from astropy.coordinates import galactocentric_frame_defaults
-    >>> _ = galactocentric_frame_defaults.set('v4.0')
-    >>> Galactocentric() # doctest: +FLOAT_CMP
+    >>> _ = galactocentric_frame_defaults.set('v4.0') # doctest: +SKIP
+    >>> Galactocentric() # doctest: +SKIP
     <Galactocentric Frame (galcen_coord=<ICRS Coordinate: (ra, dec) in deg
         (266.4051, -28.936175)>, galcen_distance=8.122 kpc, galcen_v_sun=(12.9, 245.6, 7.78) km / s, z_sun=20.8 pc, roll=0.0 deg)>
-    >>> _ = galactocentric_frame_defaults.set('pre-v4.0')
-    >>> Galactocentric() # doctest: +FLOAT_CMP
+    >>> _ = galactocentric_frame_defaults.set('pre-v4.0') # doctest: +SKIP
+    >>> Galactocentric() # doctest: +SKIP
     <Galactocentric Frame (galcen_coord=<ICRS Coordinate: (ra, dec) in deg
         (266.4051, -28.936175)>, galcen_distance=8.3 kpc, galcen_v_sun=(11.1, 232.24, 7.25) km / s, z_sun=27.0 pc, roll=0.0 deg)>
 
@@ -220,9 +229,27 @@ attributes that are explicitly specified::
     <Galactocentric Frame (galcen_coord=<ICRS Coordinate: (ra, dec) in deg
         (266.4051, -28.936175)>, galcen_distance=8.0 kpc, galcen_v_sun=(11.1, 232.24, 7.25) km / s, z_sun=27.0 pc, roll=0.0 deg)>
 
+
+Additional parameter sets may be registered, for instance to use the Dehnen & Binney (1998) measurements of the solar motion. We can also add metadata, such as the 1-sigma errors::
+
+    >>> state = galactocentric_frame_defaults.get_from_registry("v4.0")
+    >>> state["parameters"]["galcen_v_sun"] = (10.00, 225.25, 7.17) * (u.km / u.s)
+    >>> state["references"]["galcen_v_sun"] = "http://www.adsabs.harvard.edu/full/1998MNRAS.298..387D"
+    >>> state["error"] = {"galcen_v_sun": (0.36, 0.62, 0.38) * (u.km / u.s)}
+    >>> galactocentric_frame_defaults.register(name="DB1998", **state)
+
+Just as in the previous examples, the new parameter set can be get / set::
+
+    >>> state = galactocentric_frame_defaults.get_from_registry("DB1998")
+    >>> print(state["error"]["galcen_v_sun"])  # doctest: +FLOAT_CMP
+    [0.36 0.62 0.38] km / s
+
+..
+  EXAMPLE END
+
 Starting with Astropy v4.1, unless set with the
 `~astropy.coordinates.galactocentric_frame_defaults` class, the default
-parameter values for the `~astropy.coordinates.Galactocentric` frame will be set
+parameter values for the `~astropy.coordinates.Galactocentric` frame are now set
 to ``'latest'``, meaning that the default parameter values may change if you
 update Astropy. If you use the `~astropy.coordinates.Galactocentric` frame
 without specifying all parameter values explicitly, we therefore suggest

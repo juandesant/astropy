@@ -18,13 +18,12 @@ from astropy.coordinates import EarthLocation
 from astropy.coordinates import Angle, SkyCoord
 
 
-@pytest.mark.remote_data
 def test_against_hor2eq():
     """Check that Astropy gives consistent results with an IDL hor2eq example.
 
     See : http://idlastro.gsfc.nasa.gov/ftp/pro/astro/hor2eq.pro
 
-    Test is against these run outputs, run at 2000-01-01T12:00:00:
+    Test is against these run outputs, run at 2000-01-01T12:00:00::
 
       # NORMAL ATMOSPHERE CASE
       IDL> hor2eq, ten(37,54,41), ten(264,55,06), 2451545.0d, ra, dec, /verb, obs='kpno', pres=781.0, temp=273.0
@@ -92,11 +91,10 @@ def test_against_hor2eq():
     assert distance_noatm < 0.4 * u.arcsec
 
 
-@pytest.mark.remote_data
 def test_against_pyephem():
     """Check that Astropy gives consistent results with one PyEphem example.
 
-    PyEphem: http://rhodesmill.org/pyephem/
+    PyEphem: https://rhodesmill.org/pyephem/
 
     See example input and output here:
     https://gist.github.com/zonca/1672906
@@ -129,7 +127,6 @@ def test_against_pyephem():
     assert distance < 1 * u.arcsec
 
 
-@pytest.mark.remote_data
 def test_against_jpl_horizons():
     """Check that Astropy gives consistent results with the JPL Horizons example.
 
@@ -152,7 +149,6 @@ def test_against_jpl_horizons():
     assert distance < 1 * u.arcsec
 
 
-@pytest.mark.remote_data
 @pytest.mark.xfail(reason="Current output is completely incorrect")
 def test_fk5_equinox_and_epoch_j2000_0_to_topocentric_observed():
     """

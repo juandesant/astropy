@@ -1,32 +1,29 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 # -*- coding: utf-8 -*-
 
-from asdf import tagged, yamlutil
+from asdf.versioning import AsdfVersion
 
 from astropy.modeling import mappings
-from astropy.utils import minversion
 from astropy.modeling import functional_models
-from astropy.io.misc.asdf.types import AstropyAsdfType
+from astropy.modeling.core import CompoundModel
+from astropy.io.misc.asdf.types import AstropyAsdfType, AstropyType
+from . import _parameter_to_value
 
 
 __all__ = ['TransformType', 'IdentityType', 'ConstantType']
 
 
 class TransformType(AstropyAsdfType):
-    version = '1.1.0'
+    version = '1.2.0'
     requires = ['astropy']
 
     @classmethod
     def _from_tree_base_transform_members(cls, model, node, ctx):
-        if 'inverse' in node:
-            model.inverse = yamlutil.tagged_tree_to_custom_tree(
-                node['inverse'], ctx)
-
         if 'name' in node:
-            model = model.rename(node['name'])
+            model.name = node['name']
 
         if 'bounding_box' in node:
-            model.bounding_box = yamlutil.tagged_tree_to_custom_tree(node['bounding_box'], ctx)
+            model.bounding_box = node['bounding_box']
 
         if "inputs" in node:
             if model.n_inputs == 1:
@@ -40,7 +37,16 @@ class TransformType(AstropyAsdfType):
             else:
                 model.outputs = tuple(node["outputs"])
 
-        return model
+        param_and_model_constraints = {}
+        for constraint in ['fixed', 'bounds']:
+            if constraint in node:
+                param_and_model_constraints[constraint] = node[constraint]
+        model._initialize_constraints(param_and_model_constraints)
+
+        yield model
+
+        if 'inverse' in node:
+            model.inverse = node['inverse']
 
     @classmethod
     def from_tree_transform(cls, node, ctx):
@@ -50,14 +56,12 @@ class TransformType(AstropyAsdfType):
     @classmethod
     def from_tree(cls, node, ctx):
         model = cls.from_tree_transform(node, ctx)
-        model = cls._from_tree_base_transform_members(model, node, ctx)
-        return model
+        return cls._from_tree_base_transform_members(model, node, ctx)
 
     @classmethod
     def _to_tree_base_transform_members(cls, model, node, ctx):
         if getattr(model, '_user_inverse', None) is not None:
-            node['inverse'] = yamlutil.custom_tree_to_tagged_tree(
-            model._user_inverse, ctx)
+            node['inverse'] = model._user_inverse
 
         if model.name is not None:
             node['name'] = model.name
@@ -72,10 +76,21 @@ class TransformType(AstropyAsdfType):
                 bb = list(bb)
             else:
                 bb = [list(item) for item in model.bounding_box]
-            node['bounding_box'] = yamlutil.custom_tree_to_tagged_tree(bb, ctx)
+            node['bounding_box'] = bb
         if type(model.__class__.inputs) != property:
             node['inputs'] = model.inputs
             node['outputs'] = model.outputs
+
+        # model / parameter constraints
+        if not isinstance(model, CompoundModel):
+            fixed_nondefaults = {k: f for k, f in model.fixed.items() if f}
+            if fixed_nondefaults:
+                node['fixed'] = fixed_nondefaults
+            bounds_nondefaults = {k: b for k, b in model.bounds.items() if any(b)}
+            if bounds_nondefaults:
+                node['bounds'] = bounds_nondefaults
+
+        return node
 
     @classmethod
     def to_tree_transform(cls, model, ctx):
@@ -84,8 +99,7 @@ class TransformType(AstropyAsdfType):
     @classmethod
     def to_tree(cls, model, ctx):
         node = cls.to_tree_transform(model, ctx)
-        cls._to_tree_base_transform_members(model, node, ctx)
-        return node
+        return cls._to_tree_base_transform_members(model, node, ctx)
 
     @classmethod
     def assert_equal(cls, a, b):
@@ -120,17 +134,40 @@ class IdentityType(TransformType):
 
 class ConstantType(TransformType):
     name = "transform/constant"
-    types = ['astropy.modeling.functional_models.Const1D']
+    version = '1.4.0'
+    supported_versions = ['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0']
+    types = ['astropy.modeling.functional_models.Const1D',
+             'astropy.modeling.functional_models.Const2D']
 
     @classmethod
     def from_tree_transform(cls, node, ctx):
-        return functional_models.Const1D(node['value'])
+        if cls.version < AsdfVersion('1.4.0'):
+            # The 'dimensions' property was added in 1.4.0,
+            # previously all values were 1D.
+            return functional_models.Const1D(node['value'])
+        elif node['dimensions'] == 1:
+            return functional_models.Const1D(node['value'])
+        elif node['dimensions'] == 2:
+            return functional_models.Const2D(node['value'])
 
     @classmethod
     def to_tree_transform(cls, data, ctx):
-        return {
-            'value': data.amplitude.value
-        }
+        if cls.version < AsdfVersion('1.4.0'):
+            if not isinstance(data, functional_models.Const1D):
+                raise ValueError(
+                    f'constant-{cls.version} does not support models with > 1 dimension')
+            return {
+                'value': _parameter_to_value(data.amplitude)
+            }
+        else:
+            if isinstance(data, functional_models.Const1D):
+                dimension = 1
+            elif isinstance(data, functional_models.Const2D):
+                dimension = 2
+            return {
+                'value': _parameter_to_value(data.amplitude),
+                'dimensions': dimension
+            }
 
 
 class GenericModel(mappings.Mapping):
@@ -161,3 +198,64 @@ class GenericType(TransformType):
             'n_inputs': data.n_inputs,
             'n_outputs': data.n_outputs
         }
+
+
+class UnitsMappingType(AstropyType):
+    name = "transform/units_mapping"
+    version = "1.0.0"
+    types = [mappings.UnitsMapping]
+
+    @classmethod
+    def to_tree(cls, node, ctx):
+        tree = {}
+
+        if node.name is not None:
+            tree["name"] = node.name
+
+        inputs = []
+        outputs = []
+        for i, o, m in zip(node.inputs, node.outputs, node.mapping):
+            input = {
+                "name": i,
+                "allow_dimensionless": node.input_units_allow_dimensionless[i],
+            }
+            if m[0] is not None:
+                input["unit"] = m[0]
+            if node.input_units_equivalencies is not None and i in node.input_units_equivalencies:
+                input["equivalencies"] = node.input_units_equivalencies[i]
+            inputs.append(input)
+
+            output = {
+                "name": o,
+            }
+            if m[-1] is not None:
+                output["unit"] = m[-1]
+            outputs.append(output)
+
+        tree["inputs"] = inputs
+        tree["outputs"] = outputs
+
+        return tree
+
+    @classmethod
+    def from_tree(cls, tree, ctx):
+        mapping = tuple((i.get("unit"), o.get("unit"))
+                        for i, o in zip(tree["inputs"], tree["outputs"]))
+
+        equivalencies = None
+        for i in tree["inputs"]:
+            if "equivalencies" in i:
+                if equivalencies is None:
+                    equivalencies = {}
+                equivalencies[i["name"]] = i["equivalencies"]
+
+        kwargs = {
+            "input_units_equivalencies": equivalencies,
+            "input_units_allow_dimensionless": {
+                i["name"]: i.get("allow_dimensionless", False) for i in tree["inputs"]},
+        }
+
+        if "name" in tree:
+            kwargs["name"] = tree["name"]
+
+        return mappings.UnitsMapping(mapping, **kwargs)

@@ -31,7 +31,7 @@ class TestRow():
 
     @property
     def t(self):
-        # py.test wants to run this method once before table_types is run
+        # pytest wants to run this method once before table_types is run
         # to set Table and Column.  In this case just return None, which would
         # cause any downstream test to fail if this happened in any other context.
         if self._column_type is None:
@@ -146,15 +146,16 @@ class TestRow():
                                          '--- ---',
                                          '  1   4']
 
-        assert row._repr_html_().splitlines() == ['<i>{} {}{}</i>'
-                                                  .format(row.__class__.__name__,
-                                                          'index=0',
-                                                          ' masked=True' if table.masked else ''),
-                                                  '<table id="table{}">'.format(id(table)),
-                                                  '<thead><tr><th>a</th><th>b</th></tr></thead>',
-                                                  '<thead><tr><th>int64</th><th>int64</th></tr></thead>',
-                                                  '<tr><td>1</td><td>4</td></tr>',
-                                                  '</table>']
+        assert row._repr_html_().splitlines() == [
+            '<i>{} {}{}</i>'
+            .format(row.__class__.__name__,
+                    'index=0',
+                    ' masked=True' if table.masked else ''),
+            f'<table id="table{id(table)}">',
+            '<thead><tr><th>a</th><th>b</th></tr></thead>',
+            '<thead><tr><th>int64</th><th>int64</th></tr></thead>',
+            '<tr><td>1</td><td>4</td></tr>',
+            '</table>']
 
     def test_as_void(self, table_types):
         """Test the as_void() method"""
@@ -339,7 +340,7 @@ def test_uint_indexing():
     """
     t = table.Table([[1., 2., 3.]], names='a')
     assert t['a'][1] == 2.
-    assert t['a'][np.int(1)] == 2.
+    assert t['a'][np.int_(1)] == 2.
     assert t['a'][np.uint(1)] == 2.
     assert t[np.uint(1)]['a'] == 2.
 
@@ -350,5 +351,5 @@ def test_uint_indexing():
              '    2.0']
 
     assert repr(t[1]).splitlines() == trepr
-    assert repr(t[np.int(1)]).splitlines() == trepr
+    assert repr(t[np.int_(1)]).splitlines() == trepr
     assert repr(t[np.uint(1)]).splitlines() == trepr

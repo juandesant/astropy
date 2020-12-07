@@ -171,8 +171,8 @@ inverse::
       File "<stdin>", line 1, in <module>
       File "astropy\modeling\core.py", line 796, in inverse
         raise NotImplementedError("An analytical inverse transform has not "
-    NotImplementedError: An analytical inverse transform has not been
-    implemented for this model.
+    NotImplementedError: No analytical or user-supplied inverse transform
+    has been implemented for this model.
 
 One may certainly compute an inverse and assign it to a polynomial model
 though.
@@ -327,7 +327,7 @@ a factor of 10 with negligible loss of information.
     # Full model image
     plt.subplot(121)
     plt.imshow(full_image, origin='lower')
-    plt.title('Full Models\nTiming: {:.2f} seconds'.format(t_full), fontsize=16)
+    plt.title(f'Full Models\nTiming: {t_full:.2f} seconds', fontsize=16)
     plt.xlabel('x')
     plt.ylabel('y')
 
@@ -340,7 +340,7 @@ a factor of 10 with negligible loss of information.
         pos = (model.x_mean.value - dx / 2, model.y_mean.value - dy / 2)
         r = Rectangle(pos, dx, dy, edgecolor='w', facecolor='none', alpha=.25)
         ax.add_patch(r)
-    plt.title('Bounded Models\nTiming: {:.2f} seconds'.format(t_bb), fontsize=16)
+    plt.title(f'Bounded Models\nTiming: {t_bb:.2f} seconds', fontsize=16)
     plt.xlabel('x')
     plt.ylabel('y')
 
@@ -349,8 +349,7 @@ a factor of 10 with negligible loss of information.
     plt.subplot(111)
     plt.imshow(diff, vmin=-max_err, vmax=max_err)
     plt.colorbar(format='%.1e')
-    plt.title('Difference Image\nTotal Flux Err = {:.0e}'.format(
-        ((flux - np.sum(bb_image)) / flux)))
+    plt.title(f'Difference Image\nTotal Flux Err = {((flux - np.sum(bb_image)) / flux):.0e}')
     plt.xlabel('x')
     plt.ylabel('y')
     plt.show()
@@ -445,7 +444,7 @@ by an attribute - ``model_set_axis``. In the above case ``model_set_axis=0``::
     >>> g.model_set_axis
     0
 
-This indicates that elements along the 0-th axis will be passed as inputs to inidvidual models.
+This indicates that elements along the 0-th axis will be passed as inputs to individual models.
 Sometimes it may be useful to pass inputs along a different axis, for example the 1st axis::
 
     >>> x = np.array([[0, 0, 0], [0.1, 0.1, 0.1]]).T
@@ -521,15 +520,51 @@ the set of equations to find the exact solution. Nonlinear models, which require
 an iterative algorithm, cannot be currently fit using model sets. Model sets of nonlinear
 models can only be evaluated.
 
+When fitting model sets it is important that data arrays are passed to the fitter
+in the correct shape. The shape depends on the ``model_set_axis`` attribute of the
+model to be fit. The rule is that the index of the dependent variable that corresponds
+to a model set should be along the ``model_set_axis`` dimension. For example, for a
+1D model set with 3 models with ``model_set_axis == 1`` the shape of ``y`` should be (x, 3)::
+
+    >>> import numpy as np
+    >>> from astropy.modeling.models import Polynomial1D
+    >>> from astropy.modeling.fitting import LinearLSQFitter
+    >>> fitter = LinearLSQFitter()
+    >>> x = np.arange(4)
+    >>> y = np.array([2*x+1, x+4, x]).T
+    >>> print(y)
+    [[1 4 0]
+     [3 5 1]
+     [5 6 2]
+     [7 7 3]]
+    >>> print(y.shape)
+    (4, 3)
+    >>> m = Polynomial1D(1, n_models=3, model_set_axis=1)
+    >>> mfit = fitter(m, x, y)
+
+For 2D models with 3 models and ``model_set_axis = 0`` the shape of ``z`` should be (3, x, y)::
+
+    >>> import numpy as np
+    >>> from astropy.modeling.models import Polynomial2D
+    >>> from astropy.modeling.fitting import LinearLSQFitter
+    >>> fitter = LinearLSQFitter()
+    >>> x = np.arange(8).reshape(2, 4)
+    >>> y = x
+    >>> z = np.asarray([2 * x + 1, x + 4, x + 3])
+    >>> print(z.shape)
+    (3, 2, 4)
+    >>> m = Polynomial2D(1, n_models=3, model_set_axis=0)
+    >>> mfit = fitter(m, x, y, z)
 
 .. _modeling-asdf:
 
 Model Serialization (Writing a Model to a File)
 ===============================================
 
-Many models are serializable using the `ASDF`_
+Models are serializable using the `ASDF`_
 format. This can be useful in many contexts, one of which is the implementation of a
 `Generalized World Coordinate System (GWCS)`_.
+
 Serializing a model to disk is possible by assigning the object to ``AsdfFile.tree``:
 
 .. doctest-requires:: asdf
@@ -557,3 +592,7 @@ To read the file and create the model:
         angle
         -----
          23.7
+
+Compound models can also be serialized. Please note that some model attributes (e.g ``meta``,
+``tied`` parameter constraints used in fitting), as well as model sets are not yet serializable.
+For more information on serialization of models, see :ref:`asdf_dev`.

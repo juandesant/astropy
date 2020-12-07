@@ -100,9 +100,9 @@ class HTMLInputter(core.BaseInputter):
                 break
         else:
             if isinstance(self.html['table_id'], int):
-                err_descr = 'number {}'.format(self.html['table_id'])
+                err_descr = f"number {self.html['table_id']}"
             else:
-                err_descr = "id '{}'".format(self.html['table_id'])
+                err_descr = f"id '{self.html['table_id']}'"
             raise core.InconsistentTableError(
                 f'ERROR: HTML table {err_descr} not found')
 
@@ -147,10 +147,9 @@ class HTMLOutputter(core.TableOutputter):
     of <th>).
     """
 
-    default_converters = [core.convert_numpy(numpy.int),
-                          core.convert_numpy(numpy.float),
-                          core.convert_numpy(numpy.str),
-                          core.convert_numpy(numpy.unicode)]
+    default_converters = [core.convert_numpy(int),
+                          core.convert_numpy(float),
+                          core.convert_numpy(str)]
 
     def __call__(self, cols, meta):
         """

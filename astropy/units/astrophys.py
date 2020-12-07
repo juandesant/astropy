@@ -59,6 +59,10 @@ def_unit(['cycle', 'cy'], 2.0 * _numpy.pi * si.rad,
          namespace=_ns, prefixes=False,
          doc="cycle: angular measurement, a full turn or rotation")
 
+def_unit(['spat', 'sp'], 4.0 * _numpy.pi * si.sr,
+         namespace=_ns, prefixes=False,
+         doc="spat: the solid angle of the sphere, 4pi sr")
+
 ###########################################################################
 # MASS
 
@@ -96,6 +100,12 @@ def_unit(['Ry', 'rydberg'],
          "constant",
          format={'latex': r'R_{\infty}', 'unicode': 'R∞'})
 
+##########################################################################
+# PRESSURE
+
+def_unit(['bar'], 1e5 * si.Pa, namespace=_ns,
+         prefixes=[(['m'], ['milli'], 1.e-3)],
+         doc="bar: pressure")
 
 ###########################################################################
 # ILLUMINATION

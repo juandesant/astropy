@@ -66,7 +66,7 @@ if COMPRESSION_SUPPORTED:
         if compression.CFITSIO_VERSION >= 3.35:
             CMTYPE_ALIASES['RICE_ONE'] = 'RICE_1'
     except AttributeError:
-        # This generally shouldn't happen unless running setup.py in an
+        # This generally shouldn't happen unless running pip in an
         # environment where an old build of pyfits exists
         CFITSIO_SUPPORTS_GZIPDATA = True
         CFITSIO_SUPPORTS_Q_FORMAT = True
@@ -1654,6 +1654,10 @@ class CompImageHDU(BinTableHDU):
             # First delete the original compressed data, if it exists
             del self.compressed_data
 
+            # Make sure that the data is contiguous otherwise CFITSIO
+            # will not write the expected data
+            self.data = np.ascontiguousarray(self.data)
+
             # Compress the data.
             # The current implementation of compress_hdu assumes the empty
             # compressed data table has already been initialized in
@@ -1914,7 +1918,7 @@ class CompImageHDU(BinTableHDU):
         if seed == DITHER_SEED_CHECKSUM:
             # Determine the tile dimensions from the ZTILEn keywords
             naxis = self._header['ZNAXIS']
-            tile_dims = [self._header['ZTILE{}'.format(idx + 1)]
+            tile_dims = [self._header[f'ZTILE{idx + 1}']
                          for idx in range(naxis)]
             tile_dims.reverse()
 

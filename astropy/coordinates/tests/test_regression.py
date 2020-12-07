@@ -6,33 +6,33 @@ Regression tests for coordinates-related bugs that don't have an obvious other
 place to live
 """
 
-
 import io
 import copy
 import pytest
 import numpy as np
-
+from erfa import ErfaWarning
 
 from astropy import units as u
-from astropy.coordinates import (AltAz, EarthLocation, SkyCoord, get_sun, ICRS,
-                GeocentricMeanEcliptic, Longitude, Latitude, GCRS, HCRS, CIRS,
-                get_moon, FK4, FK4NoETerms, BaseCoordinateFrame, ITRS,
-                QuantityAttribute, UnitSphericalRepresentation,
-                SphericalRepresentation, CartesianRepresentation,
-                FunctionTransform,
-                CylindricalRepresentation, CylindricalDifferential,
-                CartesianDifferential)
+from astropy.coordinates import (
+    AltAz, EarthLocation, SkyCoord, get_sun, ICRS,
+    GeocentricMeanEcliptic, Longitude, Latitude, GCRS, HCRS, CIRS,
+    get_moon, FK4, FK4NoETerms, BaseCoordinateFrame, ITRS,
+    QuantityAttribute, UnitSphericalRepresentation,
+    SphericalRepresentation, CartesianRepresentation,
+    FunctionTransform, get_body,
+    CylindricalRepresentation, CylindricalDifferential,
+    CartesianDifferential)
 from astropy.coordinates.sites import get_builtin_sites
 from astropy.time import Time
 from astropy.utils import iers
 from astropy.table import Table
 
-from astropy.tests.helper import assert_quantity_allclose, catch_warnings
-from .test_matching import HAS_SCIPY, OLDER_SCIPY
+from astropy.tests.helper import assert_quantity_allclose
+from .test_matching import HAS_SCIPY
 from astropy.units import allclose as quantity_allclose
 
 try:
-    import yaml  # pylint: disable=W0611
+    import yaml  # pylint: disable=W0611  # noqa
     HAS_YAML = True
 except ImportError:
     HAS_YAML = False
@@ -67,7 +67,6 @@ def test_regression_5085():
     assert_quantity_allclose(expected_result, actual_result)
 
 
-@pytest.mark.remote_data
 def test_regression_3920():
     """
     Issue: https://github.com/astropy/astropy/issues/3920
@@ -91,7 +90,6 @@ def test_regression_3920():
     assert icoo2.transform_to(aa).shape == tuple()
 
 
-@pytest.mark.remote_data
 def test_regression_3938():
     """
     Issue: https://github.com/astropy/astropy/issues/3938
@@ -132,7 +130,6 @@ def test_regression_3998():
     assert sun.obstime is time
 
 
-@pytest.mark.remote_data
 def test_regression_4033():
     """
     Issue: https://github.com/astropy/astropy/issues/4033
@@ -165,7 +162,6 @@ def test_regression_4033():
 
 
 @pytest.mark.skipif(not HAS_SCIPY, reason='No Scipy')
-@pytest.mark.skipif(OLDER_SCIPY, reason='Scipy too old')
 def test_regression_4082():
     """
     Issue: https://github.com/astropy/astropy/issues/4082
@@ -212,6 +208,7 @@ def test_regression_futuretimes_4302():
 
     Relevant comment: https://github.com/astropy/astropy/pull/4302#discussion_r44836531
     """
+    from astropy.utils.compat.context import nullcontext
     from astropy.utils.exceptions import AstropyWarning
 
     # this is an ugly hack to get the warning to show up even if it has already
@@ -220,11 +217,6 @@ def test_regression_futuretimes_4302():
     if hasattr(utils, '__warningregistry__'):
         utils.__warningregistry__.clear()
 
-    with catch_warnings() as found_warnings:
-        future_time = Time('2511-5-1')
-        c = CIRS(1*u.deg, 2*u.deg, obstime=future_time)
-        c.transform_to(ITRS(obstime=future_time))
-
     # check that out-of-range warning appears among any other warnings.  If
     # tests are run with --remote-data then the IERS table will be an instance
     # of IERS_Auto which is assured of being "fresh".  In this case getting
@@ -232,13 +224,15 @@ def test_regression_futuretimes_4302():
     # if using IERS_B (which happens without --remote-data, i.e. for all CI
     # testing) do we expect another warning.
     if isinstance(iers.earth_orientation_table.get(), iers.IERS_B):
-        saw_iers_warnings = False
-        for w in found_warnings:
-            if issubclass(w.category, AstropyWarning):
-                if '(some) times are outside of range covered by IERS table' in str(w.message):
-                    saw_iers_warnings = True
-                    break
-        assert saw_iers_warnings, 'Never saw IERS warning'
+        ctx = pytest.warns(
+            AstropyWarning,
+            match=r'\(some\) times are outside of range covered by IERS table.*')
+    else:
+        ctx = nullcontext()
+    with ctx:
+        future_time = Time('2511-5-1')
+        c = CIRS(1*u.deg, 2*u.deg, obstime=future_time)
+        c.transform_to(ITRS(obstime=future_time))
 
 
 def test_regression_4996():
@@ -281,7 +275,7 @@ def test_regression_4293():
     fk4noe_ra = fk4.ra - (Dc*np.cos(fk4.ra) +
                           Dd*np.sin(fk4.ra)) / np.cos(fk4.dec)
 
-    fk4noe = fk4.transform_to(FK4NoETerms)
+    fk4noe = fk4.transform_to(FK4NoETerms())
     # Tolerance here just set to how well the coordinates match, which is much
     # better than the claimed accuracy of <1 mas for this first-order in
     # v_earth/c approximation.
@@ -291,7 +285,6 @@ def test_regression_4293():
     assert_quantity_allclose(fk4noe.dec, fk4noe_dec, atol=3.*u.uas, rtol=0)
 
 
-@pytest.mark.remote_data
 def test_regression_4926():
     times = Time('2010-01-1') + np.arange(20)*u.day
     green = get_builtin_sites()['greenwich']
@@ -314,7 +307,6 @@ def test_regression_5209():
     assert_quantity_allclose(new_coord[0].distance, moon.distance)
 
 
-@pytest.mark.remote_data
 def test_regression_5133():
     N = 1000
     np.random.seed(12345)
@@ -339,14 +331,26 @@ def test_regression_5133():
         assert not quantity_allclose(coo.alt, coo.alt[0])
 
 
-@pytest.mark.remote_data
 def test_itrs_vals_5133():
+    """
+    Test to check if alt-az calculations respect height of observer
+
+    Because ITRS is geocentric and includes aberration, an object that
+    appears 'straight up' to a geocentric observer (ITRS) won't be
+    straight up to a topocentric observer - see
+
+    https://github.com/astropy/astropy/issues/10983
+
+    This is worse for small height above the Earth, which is why this test
+    uses large distances.
+    """
     time = Time('2010-1-1')
-    el = EarthLocation.from_geodetic(lon=20*u.deg, lat=45*u.deg, height=0*u.km)
+    height = 500000. * u.km
+    el = EarthLocation.from_geodetic(lon=20*u.deg, lat=45*u.deg, height=height)
 
     lons = [20, 30, 20]*u.deg
     lats = [44, 45, 45]*u.deg
-    alts = [0, 0, 10]*u.km
+    alts = u.Quantity([height, height, 10*height])
     coos = [EarthLocation.from_geodetic(lon, lat, height=alt).get_itrs(time)
             for lon, lat, alt in zip(lons, lats, alts)]
 
@@ -355,31 +359,48 @@ def test_itrs_vals_5133():
 
     assert all([coo.isscalar for coo in aacs])
 
-    # the ~1 arcsec tolerance is b/c aberration makes it not exact
-    assert_quantity_allclose(aacs[0].az, 180*u.deg, atol=1*u.arcsec)
+    # the ~1 degree tolerance is b/c aberration makes it not exact
+    assert_quantity_allclose(aacs[0].az, 180*u.deg, atol=1*u.deg)
     assert aacs[0].alt < 0*u.deg
-    assert aacs[0].distance > 50*u.km
+    assert aacs[0].distance > 5000*u.km
 
     # it should *not* actually be 90 degrees, b/c constant latitude is not
     # straight east anywhere except the equator... but should be close-ish
     assert_quantity_allclose(aacs[1].az, 90*u.deg, atol=5*u.deg)
     assert aacs[1].alt < 0*u.deg
-    assert aacs[1].distance > 50*u.km
+    assert aacs[1].distance > 5000*u.km
 
-    assert_quantity_allclose(aacs[2].alt, 90*u.deg, atol=1*u.arcsec)
-    assert_quantity_allclose(aacs[2].distance, 10*u.km)
+    assert_quantity_allclose(aacs[2].alt, 90*u.deg, atol=1*u.arcminute)
+    assert_quantity_allclose(aacs[2].distance, 9*height)
 
 
-@pytest.mark.remote_data
 def test_regression_simple_5133():
+    """
+    Simple test to check if alt-az calculations respect height of observer
+
+    Because ITRS is geocentric and includes aberration, an object that
+    appears 'straight up' to a geocentric observer (ITRS) won't be
+    straight up to a topocentric observer - see
+
+    https://github.com/astropy/astropy/issues/10983
+
+    This is why we construct a topocentric GCRS SkyCoord before calculating AltAz
+    """
     t = Time('J2010')
-    obj = EarthLocation(-1*u.deg, 52*u.deg, height=[100., 0.]*u.km)
-    home = EarthLocation(-1*u.deg, 52*u.deg, height=10.*u.km)
-    aa = obj.get_itrs(t).transform_to(AltAz(obstime=t, location=home))
+    obj = EarthLocation(-1*u.deg, 52*u.deg, height=[10., 0.]*u.km)
+    home = EarthLocation(-1*u.deg, 52*u.deg, height=5.*u.km)
+
+    obsloc_gcrs, obsvel_gcrs = home.get_gcrs_posvel(t)
+    gcrs_geo = obj.get_itrs(t).transform_to(GCRS(obstime=t))
+    obsrepr = home.get_itrs(t).transform_to(GCRS(obstime=t)).cartesian
+    topo_gcrs_repr = gcrs_geo.cartesian - obsrepr
+    topocentric_gcrs_frame = GCRS(obstime=t, obsgeoloc=obsloc_gcrs, obsgeovel=obsvel_gcrs)
+    gcrs_topo = topocentric_gcrs_frame.realize_frame(topo_gcrs_repr)
+    aa = gcrs_topo.transform_to(AltAz(obstime=t, location=home))
 
     # az is more-or-less undefined for straight up or down
-    assert_quantity_allclose(aa.alt, [90, -90]*u.deg, rtol=1e-5)
-    assert_quantity_allclose(aa.distance, [90, 10]*u.km)
+    assert_quantity_allclose(aa.alt, [90, -90]*u.deg, rtol=1e-7)
+    assert_quantity_allclose(aa.distance, 5*u.km)
 
 
 def test_regression_5743():
@@ -388,12 +409,11 @@ def test_regression_5743():
     assert sc[0].obstime.shape == tuple()
 
 
-@pytest.mark.remote_data
 def test_regression_5889_5890():
     # ensure we can represent all Representations and transform to ND frames
     greenwich = EarthLocation(
         *u.Quantity([3980608.90246817, -102.47522911, 4966861.27310067],
-        unit=u.m))
+                    unit=u.m))
     times = Time("2017-03-20T12:00:00") + np.linspace(-2, 2, 3)*u.hour
     moon = get_moon(times, location=greenwich)
     targets = SkyCoord([350.7*u.deg, 260.7*u.deg], [18.4*u.deg, 22.4*u.deg])
@@ -460,7 +480,6 @@ def test_regression_6236():
 
 
 @pytest.mark.skipif(not HAS_SCIPY, reason='No Scipy')
-@pytest.mark.skipif(OLDER_SCIPY, reason='Scipy too old')
 def test_regression_6347():
     sc1 = SkyCoord([1, 2]*u.deg, [3, 4]*u.deg)
     sc2 = SkyCoord([1.1, 2.1]*u.deg, [3.1, 4.1]*u.deg)
@@ -480,7 +499,6 @@ def test_regression_6347():
 
 
 @pytest.mark.skipif(not HAS_SCIPY, reason='No Scipy')
-@pytest.mark.skipif(OLDER_SCIPY, reason='Scipy too old')
 def test_regression_6347_3d():
     sc1 = SkyCoord([1, 2]*u.deg, [3, 4]*u.deg, [5, 6]*u.kpc)
     sc2 = SkyCoord([1, 2]*u.deg, [3, 4]*u.deg, [5.1, 6.1]*u.kpc)
@@ -499,13 +517,12 @@ def test_regression_6347_3d():
     assert type(d2d_1) is type(d2d_10)
 
 
-@pytest.mark.remote_data
 def test_gcrs_itrs_cartesian_repr():
     # issue 6436: transformation failed if coordinate representation was
     # Cartesian
     gcrs = GCRS(CartesianRepresentation((859.07256, -4137.20368,  5295.56871),
                                         unit='km'), representation_type='cartesian')
-    gcrs.transform_to(ITRS)
+    gcrs.transform_to(ITRS())
 
 
 @pytest.mark.skipif('not HAS_YAML')
@@ -566,7 +583,6 @@ def test_regression_6597_2():
     assert sc1.frame.name == frame.name
 
 
-@pytest.mark.remote_data
 def test_regression_6697():
     """
     Test for regression of a bug in get_gcrs_posvel that introduced errors at the 1m/s level.
@@ -613,9 +629,9 @@ def test_regression_8276():
 
 
 def test_regression_8615():
-    # note this is a "higher-level" symptom of the problem
-    # _erfa/tests/test_erfa:test_float32_input is testing for, but is kept here
-    # due to being a more practical version of the issue.
+    # note this is a "higher-level" symptom of the problem that a test now moved
+    # to pyerfa (erfa/tests/test_erfa:test_float32_input) is testing for, but we keep
+    # it here as well due to being a more practical version of the issue.
 
     crf = CartesianRepresentation(np.array([3, 0, 4], dtype=float) * u.pc)
     srf = SphericalRepresentation.from_cartesian(crf)  # does not error in 8615
@@ -640,3 +656,51 @@ def test_regression_8924():
     with pytest.raises(ValueError):
         rep._re_represent_differentials(CylindricalRepresentation,
                                         {'s2': CylindricalDifferential})
+
+
+def test_regression_10092():
+    """
+    Check that we still get a proper motion even for SkyCoords without distance
+    """
+    c = SkyCoord(l=10*u.degree, b=45*u.degree,
+                 pm_l_cosb=34*u.mas/u.yr, pm_b=-117*u.mas/u.yr,
+                 frame='galactic',
+                 obstime=Time('1988-12-18 05:11:23.5'))
+
+    with pytest.warns(ErfaWarning, match='ERFA function "pmsafe" yielded .*'):
+        # expect ErfaWarning here
+        newc = c.apply_space_motion(dt=10*u.year)
+    assert_quantity_allclose(newc.pm_l_cosb, 33.99980714*u.mas/u.yr,
+                             atol=1.0e-5*u.mas/u.yr)
+
+
+@pytest.mark.parametrize('mjd', (
+    52000, [52000], [[52000]], [52001, 52002], [[52001], [52002]]))
+def test_regression_10422(mjd):
+    """
+    Check that we can get a GCRS for a scalar EarthLocation and a
+    size=1 non-scalar Time.
+    """
+    # Avoid trying to download new IERS data.
+    with iers.earth_orientation_table.set(iers.IERS_B.open(iers.IERS_B_FILE)):
+        t = Time(mjd, format="mjd", scale="tai")
+        loc = EarthLocation(88258.0 * u.m, -4924882.2 * u.m, 3943729.0 * u.m)
+        p, v = loc.get_gcrs_posvel(obstime=t)
+        assert p.shape == v.shape == t.shape
+
+
+@pytest.mark.remote_data
+def test_regression_10291():
+    """
+    According to https://eclipse.gsfc.nasa.gov/OH/transit12.html,
+    the minimum separation between Venus and the Sun during the 2012
+    transit is 554 arcseconds for an observer at the Geocenter.
+
+    If light deflection from the Sun is incorrectly applied, this increases
+    to 557 arcseconds.
+    """
+    t = Time('2012-06-06 01:29:36')
+    sun = get_body('sun', t)
+    venus = get_body('venus', t)
+    assert_quantity_allclose(venus.separation(sun),
+                             554.427*u.arcsecond, atol=0.001*u.arcsecond)

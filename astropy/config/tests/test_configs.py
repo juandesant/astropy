@@ -1,19 +1,29 @@
 # -*- coding: utf-8 -*-
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-
+import io
 import os
 import sys
 import subprocess
 
 import pytest
 
-from astropy.tests.helper import catch_warnings
-
+from astropy.config import configuration, set_temp_config, paths
 from astropy.utils.data import get_pkg_data_filename
-from astropy.config import configuration
-from astropy.config import paths
 from astropy.utils.exceptions import AstropyDeprecationWarning
+
+
+OLD_CONFIG = {}
+
+
+def setup_module():
+    OLD_CONFIG.clear()
+    OLD_CONFIG.update(configuration._cfgobjs)
+
+
+def teardown_module():
+    configuration._cfgobjs.clear()
+    configuration._cfgobjs.update(OLD_CONFIG)
 
 
 def test_paths():
@@ -25,6 +35,9 @@ def test_paths():
 
 
 def test_set_temp_config(tmpdir, monkeypatch):
+    # Check that we start in an understood state.
+    assert configuration._cfgobjs == OLD_CONFIG
+    # Temporarily remove any temporary overrides of the configuration dir.
     monkeypatch.setattr(paths.set_temp_config, '_temp_path', None)
 
     orig_config_dir = paths.get_config_dir(rootname='astropy')
@@ -47,6 +60,8 @@ def test_set_temp_config(tmpdir, monkeypatch):
         assert paths.get_config_dir(rootname='astropy') == temp_astropy_config
 
     assert not os.path.exists(temp_config_dir)
+    # Check that we have returned to our old configuration.
+    assert configuration._cfgobjs == OLD_CONFIG
 
 
 def test_set_temp_cache(tmpdir, monkeypatch):
@@ -102,7 +117,7 @@ def test_config_file():
     parts = os.path.normpath(testcfg.filename).split(os.sep)
     assert '.astropy' in parts or 'astropy' in parts
     assert parts[-1] == 'testpkg.cfg'
-    configuration._cfgobjs['testpkg'] = None # HACK
+    configuration._cfgobjs['testpkg'] = None  # HACK
 
     # try with a different package name, no specified root name (should
     #   default to astropy):
@@ -110,23 +125,63 @@ def test_config_file():
     parts = os.path.normpath(testcfg.filename).split(os.sep)
     assert '.astropy' in parts or 'astropy' in parts
     assert parts[-1] == 'testpkg.cfg'
-    configuration._cfgobjs['testpkg'] = None # HACK
+    configuration._cfgobjs['testpkg'] = None  # HACK
 
     # try with a different package name, specified root name:
     testcfg = get_config('testpkg', rootname='testpkg')
     parts = os.path.normpath(testcfg.filename).split(os.sep)
-    assert '.testpkg' in parts or 'testpkg' in  parts
+    assert '.testpkg' in parts or 'testpkg' in parts
     assert parts[-1] == 'testpkg.cfg'
-    configuration._cfgobjs['testpkg'] = None # HACK
+    configuration._cfgobjs['testpkg'] = None  # HACK
 
     # try with a subpackage with specified root name:
     testcfg_sec = get_config('testpkg.somemodule', rootname='testpkg')
     parts = os.path.normpath(testcfg_sec.parent.filename).split(os.sep)
-    assert '.testpkg' in parts or 'testpkg' in  parts
+    assert '.testpkg' in parts or 'testpkg' in parts
     assert parts[-1] == 'testpkg.cfg'
-    configuration._cfgobjs['testpkg'] = None # HACK
+    configuration._cfgobjs['testpkg'] = None  # HACK
 
     reload_config('astropy')
+
+
+def test_generate_config(tmp_path):
+    from astropy.config.configuration import generate_config
+    out = io.StringIO()
+    generate_config('astropy', out)
+    conf = out.getvalue()
+
+    outfile = tmp_path / 'astropy.cfg'
+    generate_config('astropy', outfile)
+    with open(outfile) as fp:
+        conf2 = fp.read()
+
+    for c in (conf, conf2):
+        # test that the output contains some lines that we expect
+        assert '# unicode_output = False' in c
+        assert '[io.fits]' in c
+        assert '[visualization.wcsaxes]' in c
+        assert '## Whether to log exceptions before raising them.' in c
+        assert '# log_exceptions = False' in c
+
+
+def test_generate_config2(tmp_path):
+    """Test that generate_config works with the default filename."""
+
+    with set_temp_config(tmp_path):
+        from astropy.config.configuration import generate_config
+        generate_config('astropy')
+
+    assert os.path.exists(tmp_path / 'astropy' / 'astropy.cfg')
+
+    with open(tmp_path / 'astropy' / 'astropy.cfg') as fp:
+        conf = fp.read()
+
+    # test that the output contains some lines that we expect
+    assert '# unicode_output = False' in conf
+    assert '[io.fits]' in conf
+    assert '[visualization.wcsaxes]' in conf
+    assert '## Whether to log exceptions before raising them.' in conf
+    assert '# log_exceptions = False' in conf
 
 
 def test_configitem():
@@ -159,18 +214,31 @@ def test_configitem():
     ci.set(34)
     assert ci() == 34
 
+    # Test iterator for one-item namespace
+    result = [x for x in conf]
+    assert result == ['tstnm']
+    result = [x for x in conf.keys()]
+    assert result == ['tstnm']
+    result = [x for x in conf.values()]
+    assert result == [ci]
+    result = [x for x in conf.items()]
+    assert result == [('tstnm', ci)]
+
 
 def test_configitem_types():
 
     from astropy.config.configuration import ConfigNamespace, ConfigItem
 
-    cio = ConfigItem(['op1', 'op2', 'op3'])
+    ci1 = ConfigItem(34)
+    ci2 = ConfigItem(34.3)
+    ci3 = ConfigItem(True)
+    ci4 = ConfigItem('astring')
 
     class Conf(ConfigNamespace):
-        tstnm1 = ConfigItem(34)
-        tstnm2 = ConfigItem(34.3)
-        tstnm3 = ConfigItem(True)
-        tstnm4 = ConfigItem('astring')
+        tstnm1 = ci1
+        tstnm2 = ci2
+        tstnm3 = ci3
+        tstnm4 = ci4
 
     conf = Conf()
 
@@ -187,6 +255,16 @@ def test_configitem_types():
     with pytest.raises(TypeError):
         conf.tstnm4 = 546.245
 
+    # Test iterator for multi-item namespace. Assume ordered by insertion order.
+    item_names = [x for x in conf]
+    assert item_names == ['tstnm1', 'tstnm2', 'tstnm3', 'tstnm4']
+    result = [x for x in conf.keys()]
+    assert result == item_names
+    result = [x for x in conf.values()]
+    assert result == [ci1, ci2, ci3, ci4]
+    result = [x for x in conf.items()]
+    assert result == [('tstnm1', ci1), ('tstnm2', ci2), ('tstnm3', ci3), ('tstnm4', ci4)]
+
 
 def test_configitem_options(tmpdir):
 
@@ -197,7 +275,7 @@ def test_configitem_options(tmpdir):
     class Conf(ConfigNamespace):
         tstnmo = cio
 
-    conf = Conf()
+    conf = Conf()  # noqa
 
     sec = get_config(cio.module)
 
@@ -249,11 +327,10 @@ def test_config_noastropy_fallback(monkeypatch):
 
     # now run the basic tests, and make sure the warning about no astropy
     # is present
-    with catch_warnings(configuration.ConfigurationMissingWarning) as w:
+    with pytest.warns(configuration.ConfigurationMissingWarning,
+                      match='Configuration defaults will be used') as w:
         test_configitem()
     assert len(w) == 1
-    w = w[0]
-    assert 'Configuration defaults will be used' in str(w.message)
 
 
 def test_configitem_setters():
@@ -314,14 +391,14 @@ class TestAliasRead:
     def test_alias_read(self):
         from astropy.utils.data import conf
 
-        with catch_warnings() as w:
+        with pytest.warns(
+                AstropyDeprecationWarning,
+                match=r"Config parameter 'name_resolve_timeout' in section "
+                      r"\[coordinates.name_resolve\].*") as w:
             conf.reload()
             assert conf.remote_timeout == 42
 
         assert len(w) == 1
-        assert str(w[0].message).startswith(
-            "Config parameter 'name_resolve_timeout' in section "
-            "[coordinates.name_resolve]")
 
     def teardown_class(self):
         from astropy.utils.data import conf
@@ -339,7 +416,7 @@ def test_configitem_unicode(tmpdir):
     class Conf(ConfigNamespace):
         tstunicode = cio
 
-    conf = Conf()
+    conf = Conf()  # noqa
 
     sec = get_config(cio.module)
 
@@ -356,7 +433,7 @@ def test_warning_move_to_top_level():
     configuration._override_config_file = get_pkg_data_filename('data/deprecated.cfg')
 
     try:
-        with catch_warnings(AstropyDeprecationWarning) as w:
+        with pytest.warns(AstropyDeprecationWarning) as w:
             conf.reload()
             conf.max_lines
         assert len(w) == 1

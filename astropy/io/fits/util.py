@@ -6,6 +6,7 @@ import io
 import mmap
 import operator
 import os
+import pathlib
 import platform
 import signal
 import sys
@@ -25,13 +26,8 @@ import numpy as np
 
 from astropy.utils.exceptions import AstropyUserWarning
 
-try:
-    # Support the Python 3.6 PathLike ABC where possible
-    from os import PathLike
-    path_like = (str, PathLike)
-except ImportError:
-    path_like = (str,)
-
+from os import PathLike
+path_like = (str, PathLike)
 
 cmp = lambda a, b: (a > b) - (a < b)
 
@@ -403,7 +399,7 @@ def fileobj_name(f):
     string f itself is returned.
     """
 
-    if isinstance(f, str):
+    if isinstance(f, (str, bytes)):
         return f
     elif isinstance(f, gzip.GzipFile):
         # The .name attribute on GzipFiles does not always represent the name
@@ -433,7 +429,7 @@ def fileobj_closed(f):
     they are file-like objects with no sense of a 'closed' state.
     """
 
-    if isinstance(f, str):
+    if isinstance(f, (str, pathlib.Path)):
         return True
 
     if hasattr(f, 'closed'):
@@ -680,7 +676,7 @@ def _array_to_file_like(arr, fileobj):
     if hasattr(np, 'nditer'):
         # nditer version for non-contiguous arrays
         for item in np.nditer(arr, order='C'):
-            fileobj.write(item.tostring())
+            fileobj.write(item.tobytes())
     else:
         # Slower version for Numpy versions without nditer;
         # The problem with flatiter is it doesn't preserve the original
@@ -689,10 +685,10 @@ def _array_to_file_like(arr, fileobj):
         if ((sys.byteorder == 'little' and byteorder == '>')
                 or (sys.byteorder == 'big' and byteorder == '<')):
             for item in arr.flat:
-                fileobj.write(item.byteswap().tostring())
+                fileobj.write(item.byteswap().tobytes())
         else:
             for item in arr.flat:
-                fileobj.write(item.tostring())
+                fileobj.write(item.tobytes())
 
 
 def _write_string(f, s):
@@ -909,7 +905,7 @@ def _rstrip_inplace(array):
     # View the array as appropriate integers. The last dimension will
     # equal the number of characters in each string.
     bpc = 1 if dt.kind == 'S' else 4
-    dt_int = "({},){}u{}".format(dt.itemsize // bpc, dt.byteorder, bpc)
+    dt_int = f"({dt.itemsize // bpc},){dt.byteorder}u{bpc}"
     b = array.view(dt_int, np.ndarray)
     # For optimal speed, work in chunks of the internal ufunc buffer size.
     bufsize = np.getbufsize()

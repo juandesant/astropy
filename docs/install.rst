@@ -13,9 +13,12 @@ Requirements
 
 - `Numpy`_ |minimum_numpy_version| or later
 
+- `PyERFA`_ |minimum_erfa_version| or later
+
 ``astropy`` also depends on other packages for optional features:
 
-- `scipy`_: To power a variety of features in several modules.
+- `scipy`_ |minimum_scipy_version| or later: To power a variety of features
+  in several modules.
 
 - `h5py <http://www.h5py.org/>`_: To read/write
   :class:`~astropy.table.Table` objects from/to HDF5 files.
@@ -30,7 +33,7 @@ Requirements
 - `bleach <https://bleach.readthedocs.io/>`_: Used to sanitize text when
   disabling HTML escaping in the :class:`~astropy.table.Table` HTML writer.
 
-- `PyYAML <https://pyyaml.org>`_: To read/write
+- `PyYAML <https://pyyaml.org>`_ |minimum_yaml_version| or later: To read/write
   :class:`~astropy.table.Table` objects from/to the Enhanced CSV ASCII table
   format and to serialize mixins for various formats.
 
@@ -42,10 +45,6 @@ Requirements
   Version 0.14 or higher is required to use the :ref:`table_io_pandas`
   I/O functions to read/write :class:`~astropy.table.Table` objects.
 
-- `bintrees <https://pypi.org/project/bintrees>`_ for faster ``FastRBT`` and
-  ``FastBST`` indexing engines with ``Table``, although these will still be
-  slower in most cases than the default indexing engine.
-
 - `sortedcontainers <https://pypi.org/project/sortedcontainers/>`_ for faster
   ``SCEngine`` indexing engine with ``Table``, although this may still be
   slower in some cases than the default indexing engine.
@@ -56,11 +55,8 @@ Requirements
 - `jplephem <https://pypi.org/project/jplephem/>`_: To retrieve JPL
   ephemeris of Solar System objects.
 
-- `matplotlib <https://matplotlib.org/>`_ 2.0 or later: To provide plotting
+- `matplotlib <https://matplotlib.org/>`_ |minimum_matplotlib_version| or later: To provide plotting
   functionality that `astropy.visualization` enhances.
-
-- `scikit-image <https://scikit-image.org/>`_: To downsample a data array in
-  `astropy.nddata.utils`.
 
 - `setuptools <https://setuptools.readthedocs.io>`_: Used for discovery of
   entry points which are used to insert fitters into `astropy.modeling.fitting`.
@@ -68,7 +64,7 @@ Requirements
 - `mpmath <http://mpmath.org/>`_: Used for the 'kraft-burrows-nousek'
   interval in `~astropy.stats.poisson_conf_interval`.
 
-- `asdf <https://github.com/spacetelescope/asdf>`_ 2.3 or later: Enables the
+- `asdf <https://github.com/spacetelescope/asdf>`_ |minimum_asdf_version| or later: Enables the
   serialization of various Astropy classes into a portable, hierarchical,
   human-readable representation.
 
@@ -93,8 +89,8 @@ The following packages can optionally be used when testing:
 
 - `objgraph <https://mg.pov.lt/objgraph/>`_: Used only in tests to test for reference leaks.
 
-- `IPython <https://ipython.org/>`__: Used for testing the notebook interface of
-  `~astropy.table.Table`.
+- `IPython <https://ipython.org/>`__ |minimum_ipython_version| or later:
+  Used for testing the notebook interface of `~astropy.table.Table`.
 
 - `coverage <https://coverage.readthedocs.io/>`_: Used for code coverage
   measurements.
@@ -102,11 +98,20 @@ The following packages can optionally be used when testing:
 - `skyfield <https://rhodesmill.org/skyfield/>`_: Used for testing Solar System
   coordinates.
 
+- `spgp4 <https://pypi.org/project/sgp4/>`_: Used for testing satellite positions.
+
 - `tox <https://tox.readthedocs.io/en/latest/>`_: Used to automate testing
   and documentation builds.
 
 Installing ``astropy``
 ======================
+
+If you are new to Python and/or do not have familiarity with `Python virtual
+environments <https://docs.python.org/3/tutorial/venv.html>`_, then we recommend
+starting by installing the `Anaconda Distribution
+<https://www.anaconda.com/distribution/>`_. This works on all platforms (linux,
+Mac, Windows) and installs a full-featured scientific Python in a user directory
+without requiring root permissions.
 
 Using pip
 ---------
@@ -155,19 +160,35 @@ unless you are fully aware of the risks.
 Using Conda
 -----------
 
+To install ``astropy`` using conda run::
+
+    conda install astropy
+
 ``astropy`` is installed by default with the `Anaconda Distribution
 <https://www.anaconda.com/distribution/>`_. To update to the latest version run::
 
     conda update astropy
 
 There may be a delay of a day or two between when a new version of ``astropy``
-is released and when a package is available for Anaconda. You can check
+is released and when a package is available for conda. You can check
 for the list of available versions with ``conda search astropy``.
+
+It is highly recommended that you install all of the optional dependencies with::
+
+    conda install -c astropy -c defaults \
+      scipy h5py beautifulsoup4 html5lib bleach pyyaml pandas sortedcontainers \
+      pytz matplotlib setuptools mpmath bottleneck jplephem asdf
+
+To also be able to run tests (see below) and support :ref:`builddocs` use the
+following. We use ``pip`` for these packages to ensure getting the latest
+releases which are compatible with the latest ``pytest`` and ``sphinx`` releases::
+
+    pip install pytest-astropy sphinx-astropy
 
 .. warning::
 
     Attempting to use `pip <https://pip.pypa.io>`__ to upgrade your installation
-    of ``astropy`` may result in a corrupted installation.
+    of ``astropy`` itself may result in a corrupted installation.
 
 .. _testing_installed_astropy:
 
@@ -219,9 +240,9 @@ For Fedora/RHEL::
 .. note:: Building the developer version of ``astropy`` may require
           newer versions of the above packages than are available in
           your distribution's repository.  If so, you could either try
-          a more up to date version (such as Debian ``testing``), or
-          install more up-to-date versions using ``pip`` or ``conda``
-          in a virtual environment.
+          a more up-to-date distribution (such as Debian ``testing``),
+          or install more up-to-date versions of the packages using
+          ``pip`` or ``conda`` in a virtual environment.
 
 Prerequisites for Mac OS X
 --------------------------
@@ -236,7 +257,7 @@ Note that you do **not** need to install the full XCode distribution (assuming
 you are using MacOS X 10.9 or later).
 
 The `instructions for building NumPy from source
-<https://docs.scipy.org/doc/numpy/user/building.html>`_ are a good
+<https://numpy.org/doc/stable/user/building.html>`_ are a good
 resource for setting up your environment to build Python packages.
 
 Obtaining the Source Packages
@@ -299,7 +320,8 @@ one of those libraries, you can set environment variables with the
 pattern ``ASTROPY_USE_SYSTEM_???`` to ``1`` when building/installing
 the package.
 
-For example, to build ``astropy`` using the system expat, use::
+For example, to build ``astropy`` using the system's expat parser
+library, use::
 
     ASTROPY_USE_SYSTEM_EXPAT=1 pip install -e .
 
@@ -317,10 +339,7 @@ The C libraries currently bundled with ``astropy`` include:
   ``cextern/cfitsio/changes.txt`` for the bundled version. To use the
   system version, set ``ASTROPY_USE_SYSTEM_CFITSIO=1``.
 
-- `erfa <https://github.com/liberfa>`_ see ``cextern/erfa/README.rst`` for the
-  bundled version. To use the system version, set ``ASTROPY_USE_SYSTEM_ERFA=1``.
-
-- `expat <http://expat.sourceforge.net/>`_ see ``cextern/expat/README`` for the
+- `expat <https://libexpat.github.io/>`_ see ``cextern/expat/README`` for the
   bundled version. To use the system version, set ``ASTROPY_USE_SYSTEM_EXPAT=1``.
 
 
@@ -368,7 +387,7 @@ Building Documentation
     Building the documentation is in general not necessary unless you are
     writing new documentation or do not have internet access, because
     the latest (and archive) versions of Astropy's documentation should
-    be available at `docs.astropy.org <http://docs.astropy.org>`_ .
+    be available at `docs.astropy.org <https://docs.astropy.org>`_ .
 
 Dependencies
 ^^^^^^^^^^^^
@@ -381,19 +400,20 @@ of this section.
 
 On the other hand, if you wish to call Sphinx manually to build the
 documentation, you will need to make sure that a number of dependencies are
-installed. The easiest way to install these is to specify ``[docs]`` when
-installing ``astropy`` with pip::
-
-    pip install -e .[docs]
-
-You can alternatively install the `sphinx-astropy
-<https://github.com/astropy/sphinx-astropy>`_ package, either with pip::
-
-    pip install sphinx-astropy
-
-or with Conda::
+installed. If you use conda, the easiest way to install the dependencies is
+with::
 
     conda install -c astropy sphinx-astropy
+
+Without conda, you install the dependencies by specifying ``[docs]`` when
+installing ``astropy`` with pip::
+
+    pip install -e '.[docs]'
+
+You can alternatively install the `sphinx-astropy
+<https://github.com/astropy/sphinx-astropy>`_ package with pip::
+
+    pip install sphinx-astropy
 
 In addition to providing configuration common to packages in the Astropy
 ecosystem, this package also serves as a way to automatically get the main
@@ -411,12 +431,15 @@ dependencies, including:
 * `numpydoc <https://numpydoc.readthedocs.io>`_ - an extension to parse
   docstrings in NumPyDoc format
 * `pillow <https://pillow.readthedocs.io>`_ - used in one of the examples
+* `Graphviz <http://www.graphviz.org>`_ - generate inheritance graphs (available
+  as a conda package or a system install but not in pip)
 
-In addition, if you want inheritance graphs to be generated, you will need to
-make sure that `Graphviz <http://www.graphviz.org>`_ is installed. If you
-install sphinx-astropy with Conda, Graphviz will automatically get installed,
-but if you use pip, you will need to install Graphviz separately as it is not
-a Python package.
+.. Note::
+    Both of the ``pip`` install methods above do not include `Graphviz
+    <http://www.graphviz.org>`_.  If you do not install this package separately
+    then the documentation build process will produce a very large number of
+    lengthy warnings (which can obscure bona fide warnings) and also not
+    generate inheritance graphs.
 
 .. _astropy-doc-building:
 
@@ -426,7 +449,7 @@ Building
 There are two ways to build the Astropy documentation. The easiest way is to
 execute the following tox command (from the ``astropy`` source directory)::
 
-    tox -e docs
+    tox -e build_docs
 
 If you do this, you do not need to install any of the documentation dependencies
 as this will be done automatically. The documentation will be built in the

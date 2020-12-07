@@ -18,6 +18,7 @@ of data to another.
 """
 
 import os
+import threading
 from warnings import warn
 
 import numpy as np
@@ -56,6 +57,10 @@ class _AngleParser:
     This class should not be used directly.  Use `parse_angle`
     instead.
     """
+    # For safe multi-threaded operation all class (but not instance)
+    # members that carry state should be thread-local. They are stored
+    # in the following class member
+    _thread_local = threading.local()
 
     def __init__(self):
         # TODO: in principle, the parser should be invalidated if we change unit
@@ -65,8 +70,9 @@ class _AngleParser:
         # generate the parser for each release (as done for unit formats).
         # For some discussion of this problem, see
         # https://github.com/astropy/astropy/issues/5350#issuecomment-248770151
-        if '_parser' not in _AngleParser.__dict__:
-            _AngleParser._parser, _AngleParser._lexer = self._make_parser()
+        if '_parser' not in _AngleParser._thread_local.__dict__:
+            (_AngleParser._thread_local._parser,
+             _AngleParser._thread_local._lexer) = self._make_parser()
 
     @classmethod
     def _get_simple_unit_names(cls):
@@ -313,7 +319,7 @@ class _AngleParser:
 
         parser = yacc.yacc(debug=False, tabmodule='angle_parsetab',
                            outputdir=os.path.dirname(__file__),
-                           write_tables=True)
+                           optimize=True, write_tables=True)
 
         if not parser_exists:
             cls._add_tab_header('angle_parsetab')
@@ -334,12 +340,11 @@ class _AngleParser:
 
     def parse(self, angle, unit, debug=False):
         try:
-            found_angle, found_unit = self._parser.parse(
-                angle, lexer=self._lexer, debug=debug)
+            found_angle, found_unit = self._thread_local._parser.parse(
+                angle, lexer=self._thread_local._lexer, debug=debug)
         except ValueError as e:
             if str(e):
-                raise ValueError("{} in angle {!r}".format(
-                    str(e), angle))
+                raise ValueError(f"{str(e)} in angle {angle!r}")
             else:
                 raise ValueError(
                     f"Syntax error parsing angle {angle!r}")
@@ -662,7 +667,7 @@ def sexagesimal_to_string(values, precision=None, pad=False, sep=(':',),
         literal.append('{1:02d}{sep[1]}')
     if fields == 3:
         if precision is None:
-            last_value = '{:.4f}'.format(abs(values[2]))
+            last_value = f'{abs(values[2]):.4f}'
             last_value = last_value.rstrip('0').rstrip('.')
         else:
             last_value = '{0:.{precision}f}'.format(

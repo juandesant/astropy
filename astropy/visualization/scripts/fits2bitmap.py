@@ -1,7 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
 import os
-from distutils.version import LooseVersion
 
 from astropy.visualization.mpl_normalize import simple_norm
 from astropy import log
@@ -84,8 +83,7 @@ def fits2bitmap(filename, ext=0, out_fn=None, stretch='linear',
         return 1
 
     if image.ndim != 2:
-        log.critical('data in FITS extension {} is not a 2D array'
-                     .format(ext))
+        log.critical(f'data in FITS extension {ext} is not a 2D array')
 
     if out_fn is None:
         out_fn = os.path.splitext(filename)[0]
@@ -93,21 +91,13 @@ def fits2bitmap(filename, ext=0, out_fn=None, stretch='linear',
             out_fn = os.path.splitext(out_fn)[0]
         out_fn += '.png'
 
-    # need to explicitly define the output format due to a bug in
-    # matplotlib (<= 2.1), otherwise the format will always be PNG
+    # explicitly define the output format
     out_format = os.path.splitext(out_fn)[1][1:]
-
-    # workaround for matplotlib 2.0.0 bug where png images are inverted
-    # (mpl-#7656)
-    if (out_format.lower() == 'png' and
-            LooseVersion(matplotlib.__version__) == LooseVersion('2.0.0')):
-        image = image[::-1]
 
     try:
         cm.get_cmap(cmap)
     except ValueError:
-        log.critical('{} is not a valid matplotlib colormap name.'
-                     .format(cmap))
+        log.critical(f'{cmap} is not a valid matplotlib colormap name.')
         return 1
 
     norm = simple_norm(image, stretch=stretch, power=power, asinh_a=asinh_a,

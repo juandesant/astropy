@@ -56,6 +56,85 @@ STATISTICS = [leastsquare]
 # Optimizers implemented in `astropy.modeling.optimizers.py
 OPTIMIZERS = [Simplex, SLSQP]
 
+
+class Covariance():
+    """Class for covariance matrix calculated by fitter. """
+
+    def __init__(self, cov_matrix, param_names):
+        self.cov_matrix = cov_matrix
+        self.param_names = param_names
+
+    def pprint(self, max_lines, round_val):
+        # Print and label lower triangle of covariance matrix
+        # Print rows for params up to `max_lines`, round floats to 'round_val'
+        longest_name = max([len(x) for x in self.param_names])
+        ret_str = 'parameter variances / covariances \n'
+        fstring = f'{"": <{longest_name}}| {{0}}\n'
+        for i, row in enumerate(self.cov_matrix):
+            if i <= max_lines-1:
+                param = self.param_names[i]
+                ret_str += fstring.replace(' '*len(param), param, 1).\
+                           format(repr(np.round(row[:i+1], round_val))[7:-2])
+            else:
+                ret_str += '...'
+        return(ret_str.rstrip())
+
+    def __repr__(self):
+        return(self.pprint(max_lines=10, round_val=3))
+
+    def __getitem__(self, params):
+        # index covariance matrix by parameter names or indices
+        if len(params) != 2:
+            raise ValueError('Covariance must be indexed by two values.')
+        if all(isinstance(item, str) for item in params):
+            i1, i2 = self.param_names.index(params[0]), self.param_names.index(params[1])
+        elif all(isinstance(item, int) for item in params):
+            i1, i2 = params
+        else:
+            raise TypeError('Covariance can be indexed by two parameter names or integer indices.')
+        return(self.cov_matrix[i1][i2])
+
+
+class StandardDeviations():
+    """ Class for fitting uncertainties."""
+
+    def __init__(self, cov_matrix, param_names):
+        self.param_names = param_names
+        self.stds = self._calc_stds(cov_matrix)
+
+    def _calc_stds(self, cov_matrix):
+        # sometimes scipy lstsq returns a non-sensical negative vals in the
+        # diagonals of the cov_x it computes.
+        stds = [np.sqrt(x) if x > 0 else None for x in np.diag(cov_matrix)]
+        return stds
+
+    def pprint(self, max_lines, round_val):
+        longest_name = max([len(x) for x in self.param_names])
+        ret_str = 'standard deviations\n'
+        fstring = '{0}{1}| {2}\n'
+        for i, std in enumerate(self.stds):
+            if i <= max_lines-1:
+                param = self.param_names[i]
+                ret_str += fstring.format(param,
+                                          ' ' * (longest_name - len(param)),
+                                          str(np.round(std, round_val)))
+            else:
+                ret_str += '...'
+        return(ret_str.rstrip())
+
+    def __repr__(self):
+        return(self.pprint(max_lines=10, round_val=3))
+
+    def __getitem__(self, param):
+        if isinstance(param, str):
+            i = self.param_names.index(param)
+        elif isinstance(param, int):
+            i = param
+        else:
+            raise TypeError('Standard deviation can be indexed by parameter name or integer.')
+        return(self.stds[i])
+
+
 class ModelsError(Exception):
     """Base class for model exceptions"""
 
@@ -120,18 +199,28 @@ def fitter_unit_support(func):
 
                 if model.input_units is not None:
                     if isinstance(x, Quantity):
-                        x = x.to(model.input_units['x'],
-                                 equivalencies=input_units_equivalencies['x'])
+                        x = x.to(model.input_units[model.inputs[0]],
+                                 equivalencies=input_units_equivalencies[model.inputs[0]])
                     if isinstance(y, Quantity) and z is not None:
-                        y = y.to(model.input_units['y'],
-                                 equivalencies=input_units_equivalencies['y'])
+                        y = y.to(model.input_units[model.inputs[1]],
+                                 equivalencies=input_units_equivalencies[model.inputs[1]])
+
+                # Create a dictionary mapping the real model inputs and outputs
+                # names to the data. This remapping of names must be done here, after
+                # the input data is converted to the correct units.
+                rename_data = {model.inputs[0]: x}
+                if z is not None:
+                    rename_data[model.outputs[0]] = z
+                    rename_data[model.inputs[1]] = y
+                else:
+                    rename_data[model.outputs[0]] = y
+                    rename_data['z'] = None
 
                 # We now strip away the units from the parameters, taking care to
                 # first convert any parameters to the units that correspond to the
                 # input units (to make sure that initial guesses on the parameters)
                 # are in the right unit system
-                model = model.without_units_for_data(x=x, y=y, z=z)
-
+                model = model.without_units_for_data(**rename_data)
                 # We strip away the units from the input itself
                 add_back_units = False
 
@@ -161,8 +250,7 @@ def fitter_unit_support(func):
 
                 # And finally we add back units to the parameters
                 if add_back_units:
-                    model_new = model_new.with_units_from_data(x=x, y=y, z=z)
-
+                    model_new = model_new.with_units_from_data(**rename_data)
                 return model_new
 
             else:
@@ -187,6 +275,7 @@ class Fitter(metaclass=_FitterMeta):
         A callable implementing an optimization algorithm
     statistic : callable
         Statistic function
+
     """
 
     supported_constraints = []
@@ -234,12 +323,19 @@ class Fitter(metaclass=_FitterMeta):
         res = self._stat_method(meas, model, *args[1:-1])
         return res
 
+    @staticmethod
+    def _add_fitting_uncertainties(*args):
+        """
+        When available, calculate and sets the parameter covariance matrix
+        (model.cov_matrix) and standard deviations (model.stds).
+        """
+        return None
+
     @abc.abstractmethod
     def __call__(self):
         """
         This method performs the actual fitting and modifies the parameter list
         of a model.
-
         Fitter subclasses should implement this method.
         """
 
@@ -252,11 +348,9 @@ class Fitter(metaclass=_FitterMeta):
 class LinearLSQFitter(metaclass=_FitterMeta):
     """
     A class performing a linear least square fitting.
-
     Uses `numpy.linalg.lstsq` to do the fitting.
     Given a model and data, fits the model to the data and changes the
     model's parameters. Keeps a dictionary of auxiliary fitting information.
-
     Notes
     -----
     Note that currently LinearLSQFitter does not support compound models.
@@ -265,12 +359,90 @@ class LinearLSQFitter(metaclass=_FitterMeta):
     supported_constraints = ['fixed']
     supports_masked_input = True
 
-    def __init__(self):
+    def __init__(self, calc_uncertainties=False):
         self.fit_info = {'residuals': None,
                          'rank': None,
                          'singular_values': None,
                          'params': None
                          }
+        self._calc_uncertainties=calc_uncertainties
+
+    @staticmethod
+    def _is_invertible(m):
+        """Check if inverse of matrix can be obtained."""
+        if m.shape[0] != m.shape[1]:
+            return False
+        if np.linalg.matrix_rank(m) < m.shape[0]:
+            return False
+        return True
+
+    def _add_fitting_uncertainties(self, model, a, n_coeff, x, y, z=None,
+                                   resids=None):
+        """
+        Calculate and parameter covariance matrix and standard deviations
+        and set `cov_matrix` and `stds` attributes.
+        """
+        x_dot_x_prime = np.dot(a.T, a)
+        masked = False or hasattr(y, 'mask')
+
+        # check if invertible. if not, can't calc covariance.
+        if not self._is_invertible(x_dot_x_prime):
+            return(model)
+        inv_x_dot_x_prime = np.linalg.inv(x_dot_x_prime)
+
+        if z is None:  # 1D models
+            if len(model) == 1:  # single model
+                mask = None
+                if masked:
+                    mask = y.mask
+                xx = np.ma.array(x, mask=mask)
+                RSS = [(1/(xx.count()-n_coeff)) * resids]
+
+            if len(model) > 1:  # model sets
+                RSS = []   # collect sum residuals squared for each model in set
+                for j in range(len(model)):
+                    mask = None
+                    if masked:
+                        mask = y.mask[..., j].flatten()
+                    xx = np.ma.array(x, mask=mask)
+                    eval_y = model(xx, model_set_axis=False)
+                    eval_y = np.rollaxis(eval_y, model.model_set_axis)[j]
+                    RSS.append((1/(xx.count()-n_coeff)) * np.sum((y[..., j] - eval_y)**2))
+
+        else:  # 2D model
+            if len(model) == 1:
+                mask = None
+                if masked:
+                    warnings.warn('Calculation of fitting uncertainties '
+                                  'for 2D models with masked values not '
+                                  'currently supported.\n',
+                                  AstropyUserWarning)
+                    return
+                xx, yy = np.ma.array(x, mask=mask), np.ma.array(y, mask=mask)
+                # len(xx) instead of xx.count. this will break if values are masked?
+                RSS = [(1/(len(xx)-n_coeff)) * resids]
+            else:
+                RSS = []
+                for j in range(len(model)):
+                    eval_z = model(x, y, model_set_axis=False)
+                    mask = None  # need to figure out how to deal w/ masking here.
+                    if model.model_set_axis == 1:
+                        # model_set_axis passed when evaluating only refers to input shapes
+                        # so output must be reshaped for model_set_axis=1.
+                        eval_z = np.rollaxis(eval_z, 1)
+                    eval_z = eval_z[j]
+                    RSS.append([(1/(len(x)-n_coeff)) * np.sum((z[j] - eval_z)**2)])
+
+        covs = [inv_x_dot_x_prime * r for r in RSS]
+        free_param_names = [x for x in model.fixed if (model.fixed[x] is False)
+                            and (model.tied[x] is False)]
+
+        if len(covs) == 1:
+            model.cov_matrix = Covariance(covs[0], model.param_names)
+            model.stds = StandardDeviations(covs[0], free_param_names)
+        else:
+            model.cov_matrix = [Covariance(cov, model.param_names) for cov in covs]
+            model.stds = [StandardDeviations(cov, free_param_names) for cov in covs]
 
     @staticmethod
     def _deriv_with_constraints(model, param_indices, x=None, y=None):
@@ -347,6 +519,7 @@ class LinearLSQFitter(metaclass=_FitterMeta):
         -------
         model_copy : `~astropy.modeling.FittableModel`
             a copy of the input model with parameters set by the fitter
+
         """
 
         if not model.fittable:
@@ -372,6 +545,11 @@ class LinearLSQFitter(metaclass=_FitterMeta):
 
         has_fixed = any(model_copy.fixed.values())
 
+        # This is also done by _convert_inputs, but we need it here to allow
+        # checking the array dimensionality before that gets called:
+        if weights is not None:
+            weights = np.asarray(weights, dtype=float)
+
         if has_fixed:
 
             # The list of fixed params is the complement of those being fitted:
@@ -389,34 +567,53 @@ class LinearLSQFitter(metaclass=_FitterMeta):
         if len(farg) == 2:
             x, y = farg
 
+            if weights is not None:
+                # If we have separate weights for each model, apply the same
+                # conversion as for the data, otherwise check common weights
+                # as if for a single model:
+                _, weights = _convert_input(
+                    x, weights,
+                    n_models=len(model_copy) if weights.ndim == y.ndim else 1,
+                    model_set_axis=model_copy.model_set_axis
+                )
+
             # map domain into window
             if hasattr(model_copy, 'domain'):
                 x = self._map_domain_window(model_copy, x)
             if has_fixed:
-                lhs = self._deriv_with_constraints(model_copy,
-                                                   fitparam_indices,
-                                                   x=x)
-                fixderivs = self._deriv_with_constraints(model_copy,
-                                                         fixparam_indices,
-                                                         x=x)
+                lhs = np.asarray(self._deriv_with_constraints(model_copy,
+                                                              fitparam_indices,
+                                                              x=x))
+                fixderivs = self._deriv_with_constraints(model_copy, fixparam_indices, x=x)
             else:
-                lhs = model_copy.fit_deriv(x, *model_copy.parameters)
+                lhs = np.asarray(model_copy.fit_deriv(x, *model_copy.parameters))
             sum_of_implicit_terms = model_copy.sum_of_implicit_terms(x)
             rhs = y
         else:
             x, y, z = farg
+
+            if weights is not None:
+                # If we have separate weights for each model, apply the same
+                # conversion as for the data, otherwise check common weights
+                # as if for a single model:
+                _, _, weights = _convert_input(
+                    x, y, weights,
+                    n_models=len(model_copy) if weights.ndim == z.ndim else 1,
+                    model_set_axis=model_copy.model_set_axis
+                )
 
             # map domain into window
             if hasattr(model_copy, 'x_domain'):
                 x, y = self._map_domain_window(model_copy, x, y)
 
             if has_fixed:
-                lhs = self._deriv_with_constraints(model_copy,
-                                                   fitparam_indices, x=x, y=y)
+                lhs = np.asarray(self._deriv_with_constraints(model_copy,
+                                                              fitparam_indices, x=x, y=y))
                 fixderivs = self._deriv_with_constraints(model_copy,
-                                                         fixparam_indices, x=x, y=y)
+                                                         fixparam_indices,
+                                                         x=x, y=y)
             else:
-                lhs = model_copy.fit_deriv(x, y, *model_copy.parameters)
+                lhs = np.asanyarray(model_copy.fit_deriv(x, y, *model_copy.parameters))
             sum_of_implicit_terms = model_copy.sum_of_implicit_terms(x, y)
 
             if len(model_copy) > 1:
@@ -437,8 +634,23 @@ class LinearLSQFitter(metaclass=_FitterMeta):
                     # but z has a second axis for the model set. NB. This is
                     # ~5-10x faster than using rollaxis.
                     rhs = z.T if model_axis == 0 else z
+
+                if weights is not None:
+                    # Same for weights
+                    if weights.ndim > 2:
+                        # Separate 2D weights for each model:
+                        weights = np.rollaxis(weights, model_axis, weights.ndim)
+                        weights = weights.reshape(-1, weights.shape[-1])
+                    elif weights.ndim == z.ndim:
+                        # Separate, flattened weights for each model:
+                        weights = weights.T if model_axis == 0 else weights
+                    else:
+                        # Common weights for all the models:
+                        weights = weights.flatten()
             else:
                 rhs = z.flatten()
+                if weights is not None:
+                    weights = weights.flatten()
 
         # If the derivative is defined along rows (as with non-linear models)
         if model_copy.col_fit_deriv:
@@ -448,7 +660,7 @@ class LinearLSQFitter(metaclass=_FitterMeta):
         # when constructing their Vandermonde matrix, which can lead to obscure
         # failures below. Ultimately, np.linalg.lstsq can't handle >2D matrices,
         # so just raise a slightly more informative error when this happens:
-        if lhs.ndim > 2:
+        if np.asanyarray(lhs).ndim > 2:
             raise ValueError('{} gives unsupported >2D derivative matrix for '
                              'this x/y'.format(type(model_copy).__name__))
 
@@ -473,45 +685,52 @@ class LinearLSQFitter(metaclass=_FitterMeta):
             rhs = rhs - sum_of_implicit_terms
 
         if weights is not None:
-            weights = np.asarray(weights, dtype=float)
-            if len(x) != len(weights):
-                raise ValueError("x and weights should have the same length")
+
             if rhs.ndim == 2:
-                lhs *= weights[:, np.newaxis]
-                # Don't modify in-place in case rhs was the original dependent
-                # variable array
-                rhs = rhs * weights[:, np.newaxis]
+                if weights.shape == rhs.shape:
+                    # separate weights for multiple models case: broadcast
+                    # lhs to have more dimension (for each model)
+                    lhs = lhs[..., np.newaxis] * weights[:, np.newaxis]
+                    rhs = rhs * weights
+                else:
+                    lhs *= weights[:, np.newaxis]
+                    # Don't modify in-place in case rhs was the original
+                    # dependent variable array
+                    rhs = rhs * weights[:, np.newaxis]
             else:
                 lhs *= weights[:, np.newaxis]
                 rhs = rhs * weights
-
-        if rcond is None:
-            rcond = len(x) * np.finfo(x.dtype).eps
 
         scl = (lhs * lhs).sum(0)
         lhs /= scl
 
         masked = np.any(np.ma.getmask(rhs))
+        if weights is not None and not masked and np.any(np.isnan(lhs)):
+            raise ValueError('Found NaNs in the coefficient matrix, which '
+                             'should not happen and would crash the lapack '
+                             'routine. Maybe check that weights are not null.')
 
-        if len(model_copy) == 1 or not masked:
+        a = None  # need for calculating covarience
 
-            # If we're fitting one or more models over a common set of points,
-            # we only have to solve a single matrix equation, which is an order
-            # of magnitude faster than calling lstsq() once per model below:
+        if ((masked and len(model_copy) > 1) or
+                (weights is not None and weights.ndim > 1)):
 
-            good = ~rhs.mask if masked else slice(None)  # latter is a no-op
+            # Separate masks or weights for multiple models case: Numpy's
+            # lstsq supports multiple dimensions only for rhs, so we need to
+            # loop manually on the models. This may be fixed in the future
+            # with https://github.com/numpy/numpy/pull/15777.
 
-            # Solve for one or more models:
-            lacoef, resids, rank, sval = np.linalg.lstsq(lhs[good],
-                                                         rhs[good], rcond)
+            # Initialize empty array of coefficients and populate it one model
+            # at a time. The shape matches the number of coefficients from the
+            # Vandermonde matrix and the number of models from the RHS:
+            lacoef = np.zeros(lhs.shape[1:2] + rhs.shape[-1:], dtype=rhs.dtype)
 
-        else:
-
-            # Where fitting multiple models with masked pixels, initialize an
-            # empty array of coefficients and populate it one model at a time.
-            # The shape matches the number of coefficients from the Vandermonde
-            # matrix and the number of models from the RHS:
-            lacoef = np.zeros(lhs.shape[-1:] + rhs.shape[-1:], dtype=rhs.dtype)
+            # Arrange the lhs as a stack of 2D matrices that we can iterate
+            # over to get the correctly-orientated lhs for each model:
+            if lhs.ndim > 2:
+                lhs_stack = np.rollaxis(lhs, -1, 0)
+            else:
+                lhs_stack = np.broadcast_to(lhs, rhs.shape[-1:] + lhs.shape)
 
             # Loop over the models and solve for each one. By this point, the
             # model set axis is the second of two. Transpose rather than using,
@@ -520,40 +739,62 @@ class LinearLSQFitter(metaclass=_FitterMeta):
             # optimized by collecting together models with identical masks
             # (eg. those with no rejected points) into one operation, though it
             # will still be relatively slow when calling lstsq repeatedly.
-            for model_rhs, model_lacoef in zip(rhs.T, lacoef.T):
+            for model_lhs, model_rhs, model_lacoef in zip(lhs_stack, rhs.T, lacoef.T):
 
                 # Cull masked points on both sides of the matrix equation:
-                good = ~model_rhs.mask
-                model_lhs = lhs[good]
+                good = ~model_rhs.mask if masked else slice(None)
+                model_lhs = model_lhs[good]
                 model_rhs = model_rhs[good][..., np.newaxis]
+                a = model_lhs
 
                 # Solve for this model:
                 t_coef, resids, rank, sval = np.linalg.lstsq(model_lhs,
                                                              model_rhs, rcond)
                 model_lacoef[:] = t_coef.T
 
+        else:
+
+            # If we're fitting one or more models over a common set of points,
+            # we only have to solve a single matrix equation, which is an order
+            # of magnitude faster than calling lstsq() once per model below:
+
+            good = ~rhs.mask if masked else slice(None)  # latter is a no-op
+            a = lhs[good]
+            # Solve for one or more models:
+            lacoef, resids, rank, sval = np.linalg.lstsq(lhs[good],
+                                                         rhs[good], rcond)
+
         self.fit_info['residuals'] = resids
         self.fit_info['rank'] = rank
         self.fit_info['singular_values'] = sval
 
-        lacoef = (lacoef.T / scl).T
+        lacoef /= scl[:, np.newaxis] if scl.ndim < rhs.ndim else scl
         self.fit_info['params'] = lacoef
+
+        _fitter_to_model_params(model_copy, lacoef.flatten())
 
         # TODO: Only Polynomial models currently have an _order attribute;
         # maybe change this to read isinstance(model, PolynomialBase)
-        if hasattr(model_copy, '_order') and rank != model_copy._order:
+        if hasattr(model_copy, '_order') and len(model_copy) == 1 \
+                and not has_fixed and rank != model_copy._order:
             warnings.warn("The fit may be poorly conditioned\n",
                           AstropyUserWarning)
 
-        _fitter_to_model_params(model_copy, lacoef.flatten())
+        # calculate and set covariance matrix and standard devs. on model
+        if self._calc_uncertainties:
+            if len(y) > len(lacoef):
+                self._add_fitting_uncertainties(model_copy, a*scl,
+                                               len(lacoef), x, y, z, resids)
+
         return model_copy
 
 
 class FittingWithOutlierRemoval:
     """
     This class combines an outlier removal technique with a fitting procedure.
-    Basically, given a number of iterations ``niter``, outliers are removed
-    and fitting is performed for each iteration.
+    Basically, given a maximum number of iterations ``niter``, outliers are
+    removed and fitting is performed for each iteration, until no new outliers
+    are found or ``niter`` is reached.
 
     Parameters
     ----------
@@ -570,9 +811,17 @@ class FittingWithOutlierRemoval:
         each model separately; otherwise, the same filtering must be performed
         in a loop over models, which is almost an order of magnitude slower.
     niter : int, optional
-        Number of iterations.
+        Maximum number of iterations.
     outlier_kwargs : dict, optional
         Keyword arguments for outlier_func.
+
+    Attributes
+    ----------
+    fit_info : dict
+        The ``fit_info`` (if any) from the last iteration of the wrapped
+        ``fitter`` during the most recent fit. An entry is also added with the
+        keyword ``niter`` that records the actual number of fitting iterations
+        performed (as opposed to the user-specified maximum).
     """
 
     def __init__(self, fitter, outlier_func, niter=3, **outlier_kwargs):
@@ -580,6 +829,7 @@ class FittingWithOutlierRemoval:
         self.outlier_func = outlier_func
         self.niter = niter
         self.outlier_kwargs = outlier_kwargs
+        self.fit_info = {'niter': None}
 
     def __str__(self):
         return ("Fitter: {0}\nOutlier function: {1}\nNum. of iterations: {2}" +
@@ -614,7 +864,6 @@ class FittingWithOutlierRemoval:
             Weights to be passed to the fitter.
         kwargs : dict, optional
             Keyword arguments to be passed to the fitter.
-
         Returns
         -------
         fitted_model : `~astropy.modeling.FittableModel`
@@ -676,10 +925,11 @@ class FittingWithOutlierRemoval:
         if filtered_data.mask is np.ma.nomask:
             filtered_data.mask = False
         filtered_weights = weights
+        last_n_masked = filtered_data.mask.sum()
+        n = 0  # (allow recording no. of iterations when 0)
 
         # Perform the iterative fitting:
-        # TO DO: add a stopping criterion when results aren't changing?
-        for n in range(self.niter):
+        for n in range(1, self.niter + 1):
 
             # (Re-)evaluate the last model:
             model_vals = fitted_model(*coords, model_set_axis=False)
@@ -756,6 +1006,16 @@ class FittingWithOutlierRemoval:
                                            filtered_data,
                                            weights=filtered_weights, **kwargs)
 
+            # Stop iteration if the masked points are no longer changing (with
+            # cumulative rejection we only need to compare how many there are):
+            this_n_masked = filtered_data.mask.sum()  # (minimal overhead)
+            if this_n_masked == last_n_masked:
+                break
+            last_n_masked = this_n_masked
+
+        self.fit_info = {'niter': n}
+        self.fit_info.update(getattr(self.fitter, 'fit_info', {}))
+
         return fitted_model, filtered_data.mask
 
 
@@ -777,12 +1037,12 @@ class LevMarLSQFitter(metaclass=_FitterMeta):
     documentation for details on the meaning of these values. Note that the
     ``x`` return value is *not* included (as it is instead the parameter values
     of the returned model).
-
     Additionally, one additional element of ``fit_info`` is computed whenever a
     model is fit, with the key 'param_cov'. The corresponding value is the
     covariance matrix of the parameters as a 2D numpy array.  The order of the
     matrix elements matches the order of the parameters in the fitted model
     (i.e., the same order as ``model.param_names``).
+
     """
 
     supported_constraints = ['fixed', 'tied', 'bounds']
@@ -790,7 +1050,7 @@ class LevMarLSQFitter(metaclass=_FitterMeta):
     The constraint types supported by this fitter type.
     """
 
-    def __init__(self):
+    def __init__(self, calc_uncertainties=False):
         self.fit_info = {'nfev': None,
                          'fvec': None,
                          'fjac': None,
@@ -800,7 +1060,7 @@ class LevMarLSQFitter(metaclass=_FitterMeta):
                          'ierr': None,
                          'param_jac': None,
                          'param_cov': None}
-
+        self._calc_uncertainties=calc_uncertainties
         super().__init__()
 
     def objective_function(self, fps, *args):
@@ -813,6 +1073,7 @@ class LevMarLSQFitter(metaclass=_FitterMeta):
             parameters returned by the fitter
         args : list
             [model, [weights], [input coordinates]]
+
         """
 
         model = args[0]
@@ -823,6 +1084,19 @@ class LevMarLSQFitter(metaclass=_FitterMeta):
             return np.ravel(model(*args[2: -1]) - meas)
         else:
             return np.ravel(weights * (model(*args[2: -1]) - meas))
+
+    @staticmethod
+    def _add_fitting_uncertainties(model, cov_matrix):
+        """
+        Set ``cov_matrix`` and ``stds`` attributes on model with parameter
+        covariance matrix returned by ``optimize.leastsq``.
+        """
+
+        free_param_names = [x for x in model.fixed if (model.fixed[x] is False)
+                            and (model.tied[x] is False)]
+
+        model.cov_matrix = Covariance(cov_matrix, free_param_names)
+        model.stds = StandardDeviations(cov_matrix, free_param_names)
 
     @fitter_unit_support
     def __call__(self, model, x, y, z=None, weights=None,
@@ -867,6 +1141,7 @@ class LevMarLSQFitter(metaclass=_FitterMeta):
         -------
         model_copy : `~astropy.modeling.FittableModel`
             a copy of the input model with parameters set by the fitter
+
         """
 
         from scipy import optimize
@@ -900,6 +1175,11 @@ class LevMarLSQFitter(metaclass=_FitterMeta):
         else:
             self.fit_info['param_cov'] = None
 
+        if self._calc_uncertainties is True:
+            if self.fit_info['param_cov'] is not None:
+                self._add_fitting_uncertainties(model_copy,
+                                               self.fit_info['param_cov'])
+
         return model_copy
 
     @staticmethod
@@ -907,7 +1187,6 @@ class LevMarLSQFitter(metaclass=_FitterMeta):
         """
         Wraps the method calculating the Jacobian of the function to account
         for model constraints.
-
         `scipy.optimize.leastsq` expects the function derivative to have the
         above signature (parlist, (argtuple)). In order to accommodate model
         constraints, instead of using p directly, we set the parameter list in
@@ -960,13 +1239,17 @@ class LevMarLSQFitter(metaclass=_FitterMeta):
 
 class SLSQPLSQFitter(Fitter):
     """
-    SLSQP optimization algorithm and least squares statistic.
-
+    Sequential Least Squares Programming (SLSQP) optimization algorithm and
+    least squares statistic.
 
     Raises
     ------
     ModelLinearityError
         A linear model is passed to a nonlinear fitter
+
+    Notes
+    ------
+    See also the `~astropy.modeling.optimizers.SLSQP` optimizer.
 
     """
 
@@ -997,7 +1280,6 @@ class SLSQPLSQFitter(Fitter):
             1/sigma.
         kwargs : dict
             optional keyword arguments to be passed to the optimizer or the statistic
-
         verblevel : int
             0-silent
             1-print summary upon completion,
@@ -1016,6 +1298,7 @@ class SLSQPLSQFitter(Fitter):
         -------
         model_copy : `~astropy.modeling.FittableModel`
             a copy of the input model with parameters set by the fitter
+
         """
 
         model_copy = _validate_model(model, self._opt_method.supported_constraints)
@@ -1031,7 +1314,6 @@ class SLSQPLSQFitter(Fitter):
 
 class SimplexLSQFitter(Fitter):
     """
-
     Simplex algorithm and least squares statistic.
 
     Raises
@@ -1068,7 +1350,6 @@ class SimplexLSQFitter(Fitter):
             1/sigma.
         kwargs : dict
             optional keyword arguments to be passed to the optimizer or the statistic
-
         maxiter : int
             maximum number of iterations
         acc : float
@@ -1081,6 +1362,7 @@ class SimplexLSQFitter(Fitter):
         -------
         model_copy : `~astropy.modeling.FittableModel`
             a copy of the input model with parameters set by the fitter
+
         """
 
         model_copy = _validate_model(model,
@@ -1099,7 +1381,6 @@ class SimplexLSQFitter(Fitter):
 class JointFitter(metaclass=_FitterMeta):
     """
     Fit models which share a parameter.
-
     For example, fit two gaussians to two data sets but keep
     the FWHM the same.
 
@@ -1111,6 +1392,7 @@ class JointFitter(metaclass=_FitterMeta):
         a list of joint parameters
     initvals : list
         a list of initial values
+
     """
 
     def __init__(self, models, jointparameters, initvals):
@@ -1150,6 +1432,7 @@ class JointFitter(metaclass=_FitterMeta):
         args : dict
             tuple of measured and input coordinates
             args is always passed as a tuple from optimize.leastsq
+
         """
 
         lstsqargs = list(args)
@@ -1189,8 +1472,7 @@ class JointFitter(metaclass=_FitterMeta):
 
     def _verify_input(self):
         if len(self.models) <= 1:
-            raise TypeError("Expected >1 models, {} is given".format(
-                len(self.models)))
+            raise TypeError(f"Expected >1 models, {len(self.models)} is given")
         if len(self.jointparams.keys()) < 2:
             raise TypeError("At least two parameters are expected, "
                             "{} is given".format(len(self.jointparams.keys())))
@@ -1253,34 +1535,43 @@ def _convert_input(x, y, z=None, n_models=1, model_set_axis=0):
 
     if z is not None:
         z = np.asanyarray(z, dtype=float)
+        data_ndim, data_shape = z.ndim, z.shape
+    else:
+        data_ndim, data_shape = y.ndim, y.shape
 
     # For compatibility with how the linear fitter code currently expects to
     # work, shift the dependent variable's axes to the expected locations
-    if n_models > 1:
+    if n_models > 1 or data_ndim > x.ndim:
+        if (model_set_axis or 0) >= data_ndim:
+            raise ValueError("model_set_axis out of range")
+        if data_shape[model_set_axis] != n_models:
+            raise ValueError(
+                "Number of data sets (y or z array) is expected to equal "
+                "the number of parameter sets"
+            )
         if z is None:
-            if y.shape[model_set_axis] != n_models:
-                raise ValueError(
-                    "Number of data sets (y array is expected to equal "
-                    "the number of parameter sets)")
             # For a 1-D model the y coordinate's model-set-axis is expected to
             # be last, so that its first dimension is the same length as the x
             # coordinates.  This is in line with the expectations of
             # numpy.linalg.lstsq:
-            # http://docs.scipy.org/doc/numpy/reference/generated/numpy.linalg.lstsq.html
+            # https://numpy.org/doc/stable/reference/generated/numpy.linalg.lstsq.html
             # That is, each model should be represented by a column.  TODO:
             # Obviously this is a detail of np.linalg.lstsq and should be
             # handled specifically by any fitters that use it...
             y = np.rollaxis(y, model_set_axis, y.ndim)
+            data_shape = y.shape[:-1]
         else:
             # Shape of z excluding model_set_axis
-            z_shape = z.shape[:model_set_axis] + z.shape[model_set_axis + 1:]
-
-            if not (x.shape == y.shape == z_shape):
-                raise ValueError("x, y and z should have the same shape")
+            data_shape = (z.shape[:model_set_axis] +
+                          z.shape[model_set_axis + 1:])
 
     if z is None:
+        if data_shape != x.shape:
+            raise ValueError("x and y should have the same shape")
         farg = (x, y)
     else:
+        if not (x.shape == y.shape == data_shape):
+            raise ValueError("x, y and z should have the same shape")
         farg = (x, y, z)
     return farg
 
@@ -1351,7 +1642,7 @@ def _fitter_to_model_params(model, fps):
                 slice_ = param_metrics[name]['slice']
 
                 # To handle multiple tied constraints, model parameters
-                # need to be updated after each iterration.
+                # need to be updated after each iteration.
                 parameters[slice_] = value
                 model._array_to_parameters()
 
@@ -1362,7 +1653,6 @@ def _model_to_fit_params(model):
     with a fitter that doesn't natively support fixed or tied parameters.
     In particular, it removes fixed/tied parameters from the parameter
     array.
-
     These may be a subset of the model parameters, if some of them are held
     constant or tied.
     """
@@ -1432,19 +1722,15 @@ def populate_entry_points(entry_points):
     This injects entry points into the `astropy.modeling.fitting` namespace.
     This provides a means of inserting a fitting routine without requirement
     of it being merged into astropy's core.
-
     Parameters
     ----------
-
     entry_points : a list of `~pkg_resources.EntryPoint`
                   entry_points are objects which encapsulate
                   importable objects and are defined on the
                   installation of a package.
-
     Notes
     -----
     An explanation of entry points can be found `here <http://setuptools.readthedocs.io/en/latest/setuptools.html#dynamic-discovery-of-services-and-plugins>`
-
     """
 
     for entry_point in entry_points:

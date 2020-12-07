@@ -7,16 +7,11 @@ party JavaScript libraries used for browser-based features.
 
 In particular, this currently includes for Python:
 
-- ConfigObj_ (Python 2 and 3 versions): This provides the core config file
-  handling for Astropy's configuration system.
+- ConfigObj_: This provides the core config file handling for Astropy's
+  configuration system.
 
 - PLY_: This is a parser generator providing lex/yacc-like tools in Python.
   It is used for Astropy's unit parsing and angle/coordinate string parsing.
-
-- pytest_: This is the test framework used to collect and run Astropy's tests.
-  It is a fairly large package, so it is bundled as a compressed base64 string
-  that is unpacked and loaded as a Python module.  This packed bundled version
-  is officially provided by the pytest project.
 
 And for JavaScript:
 
@@ -30,7 +25,8 @@ Notes for developers
 
 jQuery/DataTables
 ^^^^^^^^^^^^^^^^^
-the minified files are the ones that are used in the table viewer feature, but
+
+The minified files are the ones that are used in the table viewer feature, but
 the non-minified versions are also present in the ``js/`` sub-directory for
 packaging reasons. These files must also be distributed, to provide the source
 files from which the minified ones can be compiled. This is a requirement for
@@ -53,7 +49,7 @@ modules).
 
 It is possible to change the default urls for the remote versions of these
 files by using the Astropy
-`Configuration system <http://docs.astropy.org/en/stable/config/>`_. The default
+`Configuration system <https://docs.astropy.org/en/stable/config/>`_. The default
 configuration file (``$HOME/.astropy/config``) contains a commented section
 ``[table.jsviewer]`` with two items for jQuery and DataTables. It is also
 possible to display the default value and modify it by importing the
@@ -83,6 +79,5 @@ rather than the bundled copies.
 
 .. _ConfigObj: https://github.com/DiffSK/configobj
 .. _PLY: http://www.dabeaz.com/ply/
-.. _pytest: https://pytest.org/en/latest/
 .. _jQuery: http://jquery.com/
 .. _DataTables: http://www.datatables.net/

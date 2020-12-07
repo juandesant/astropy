@@ -1,17 +1,17 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 # -*- coding: utf-8 -*-
 
+import pytest
+
+asdf = pytest.importorskip('asdf')
+
 import datetime
 from collections import OrderedDict
-
-import pytest
 
 import numpy as np
 
 from astropy import time
-from astropy import __minimum_asdf_version__
 
-asdf = pytest.importorskip('asdf', minversion=__minimum_asdf_version__)
 from asdf import AsdfFile, yamlutil, tagged
 from asdf.tests import helpers
 import asdf.schema as asdf_schema
@@ -65,6 +65,20 @@ def test_time_with_location(tmpdir):
     tree = {'time': t}
 
     helpers.assert_roundtrip_tree(tree, tmpdir)
+
+
+def test_time_with_location_1_0_0(tmpdir):
+    from astropy import units as u
+    from astropy.coordinates.earth import EarthLocation
+
+    location = EarthLocation(x=6378100*u.m, y=0*u.m, z=0*u.m)
+
+    t = time.Time('J2000.000', location=location, format='jyear_str')
+
+    tree = {'time': t}
+
+    # The version refers to ASDF Standard 1.0.0, which includes time-1.0.0
+    helpers.assert_roundtrip_tree(tree, tmpdir, init_options={"version": "1.0.0"})
 
 
 def test_isot(tmpdir):

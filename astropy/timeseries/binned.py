@@ -29,7 +29,7 @@ class BinnedTimeSeries(BaseTimeSeries):
     series, such as a flexible initializer for setting up the times, and
     attributes to access the start/center/end time of bins.
 
-    See also: http://docs.astropy.org/en/stable/timeseries/
+    See also: https://docs.astropy.org/en/stable/timeseries/
 
     Parameters
     ----------
@@ -107,10 +107,10 @@ class BinnedTimeSeries(BaseTimeSeries):
         if time_bin_end is None and time_bin_size is None:
             raise TypeError("Either 'time_bin_size' or 'time_bin_end' should be specified")
 
-        if not isinstance(time_bin_start, Time):
+        if not isinstance(time_bin_start, (Time, TimeDelta)):
             time_bin_start = Time(time_bin_start)
 
-        if time_bin_end is not None and not isinstance(time_bin_end, Time):
+        if time_bin_end is not None and not isinstance(time_bin_end, (Time, TimeDelta)):
             time_bin_end = Time(time_bin_end)
 
         if time_bin_size is not None and not isinstance(time_bin_size, (Quantity, TimeDelta)):
@@ -226,7 +226,7 @@ class BinnedTimeSeries(BaseTimeSeries):
 
         This method uses the unified I/O infrastructure in Astropy which makes
         it easy to define readers/writers for various classes
-        (http://docs.astropy.org/en/stable/io/unified.html). By default, this
+        (https://docs.astropy.org/en/stable/io/unified.html). By default, this
         method will try and use readers defined specifically for the
         `astropy.timeseries.BinnedTimeSeries` class - however, it is also
         possible to use the ``format`` keyword to specify formats defined for

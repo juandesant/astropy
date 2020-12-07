@@ -4,15 +4,15 @@ import math
 import os
 import re
 import time
-import warnings
 
 import pytest
 import numpy as np
 from numpy.testing import assert_equal
 
 from astropy.io import fits
-from astropy.tests.helper import catch_warnings, ignore_warnings
 from astropy.io.fits.hdu.compressed import SUBTRACTIVE_DITHER_1, DITHER_SEED_CHECKSUM
+from astropy.utils.exceptions import AstropyUserWarning
+from astropy.utils.data import get_pkg_data_filename
 from .test_table import comparerecords
 
 from . import FitsTestCase
@@ -167,7 +167,7 @@ class TestImageFunctions(FitsTestCase):
 
     def test_fortran_array(self):
         # Test that files are being correctly written+read for "C" and "F" order arrays
-        a = np.arange(21).reshape(3,7)
+        a = np.arange(21).reshape(3, 7)
         b = np.asfortranarray(a)
 
         afits = self.temp('a_str.fits')
@@ -190,7 +190,7 @@ class TestImageFunctions(FitsTestCase):
 
     def test_fortran_array_non_contiguous(self):
         # Test that files are being correctly written+read for 'C' and 'F' order arrays
-        a = np.arange(105).reshape(3,5,7)
+        a = np.arange(105).reshape(3, 5, 7)
         b = np.asfortranarray(a)
 
         # writting to str specified files
@@ -239,11 +239,6 @@ class TestImageFunctions(FitsTestCase):
         with fits.open(self.temp('test.fits')) as hdul:
             assert hdul[0].name == 'XPRIMARY2'
 
-    # This test used to fail on Windows - if it fails again in future, see
-    # https://github.com/astropy/astropy/issues/5797
-    # The warning appears on Windows but cannot be explicitly caught.
-    @pytest.mark.filterwarnings("ignore:Assigning the 'data' attribute is an "
-                                "inherently unsafe operation")
     def test_io_manipulation(self):
         # Get a keyword value.  An extension can be referred by name or by
         # number.  Both extension and keyword names are case insensitive.
@@ -391,18 +386,14 @@ class TestImageFunctions(FitsTestCase):
         # make a defect HDUList first
         x = fits.ImageHDU()
         hdu = fits.HDUList(x)  # HDUList can take a list or one single HDU
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning, match=r"HDUList's 0th element is not a primary HDU\.") as w:
             hdu.verify()
-        text = "HDUList's 0th element is not a primary HDU."
         assert len(w) == 3
-        assert text in str(w[1].message)
 
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning, match=r"HDUList's 0th element is not a primary HDU\.  "
+                          r"Fixed by inserting one as 0th HDU\.") as w:
             hdu.writeto(self.temp('test_new2.fits'), 'fix')
-        text = ("HDUList's 0th element is not a primary HDU.  "
-                "Fixed by inserting one as 0th HDU.")
         assert len(w) == 3
-        assert text in str(w[1].message)
 
     def test_section(self):
         # section testing
@@ -762,22 +753,21 @@ class TestImageFunctions(FitsTestCase):
         hdu = fits.PrimaryHDU(data=arr)
         hdu.header['BLANK'] = 2
 
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning, match="Invalid 'BLANK' keyword in header") as w:
             hdu.writeto(self.temp('test_new.fits'))
-            # Allow the HDU to be written, but there should be a warning
-            # when writing a header with BLANK when then data is not
-            # int
-            assert len(w) == 1
-            assert "Invalid 'BLANK' keyword in header" in str(w[0].message)
+        # Allow the HDU to be written, but there should be a warning
+        # when writing a header with BLANK when then data is not
+        # int
+        assert len(w) == 1
 
         # Should also get a warning when opening the file, and the BLANK
         # value should not be applied
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning, match="Invalid 'BLANK' keyword in header") as w:
             with fits.open(self.temp('test_new.fits')) as h:
-                assert len(w) == 1
-                assert "Invalid 'BLANK' keyword in header" in str(w[0].message)
                 assert np.all(arr == h[0].data)
+        assert len(w) == 1
 
+    @pytest.mark.filterwarnings("ignore:Invalid 'BLANK' keyword in header")
     def test_scale_back_with_blanks(self):
         """
         Test that when auto-rescaling integer data with "blank" values (where
@@ -815,17 +805,17 @@ class TestImageFunctions(FitsTestCase):
 
         # Now reopen the newly written file.  It should not have a 'BLANK'
         # keyword
-        with catch_warnings() as w:
-            with fits.open(self.temp('test2.fits')) as hdul2:
-                assert len(w) == 0
-                assert 'BLANK' not in hdul2[0].header
-                data = hdul2[0].data
-                assert np.isnan(data[0])
+        with fits.open(self.temp('test2.fits')) as hdul2:
+            assert 'BLANK' not in hdul2[0].header
+            data = hdul2[0].data
+            assert np.isnan(data[0])
 
         # Finally, test that scale_back keeps the BLANKs correctly
         with fits.open(filename, scale_back=True,
                        mode='update') as hdul3:
             data = hdul3[0].data
+            # This emits warning that pytest cannot catch properly, so we
+            # catch it with pytest.mark.filterwarnings above.
             assert np.isnan(data[0])
 
         with fits.open(filename,
@@ -855,8 +845,7 @@ class TestImageFunctions(FitsTestCase):
 
         hdul = fits.open(self.data('fixed-1890.fits'))
         orig_data = hdul[0].data
-        with ignore_warnings():
-            hdul.writeto(self.temp('test_new.fits'), overwrite=True)
+        hdul.writeto(self.temp('test_new.fits'), overwrite=True)
         hdul.close()
         hdul = fits.open(self.temp('test_new.fits'))
         assert (hdul[0].data == orig_data).all()
@@ -866,8 +855,7 @@ class TestImageFunctions(FitsTestCase):
         # back out--this is the case that failed in
         # https://aeon.stsci.edu/ssb/trac/pyfits/ticket/84
         hdul = fits.open(self.data('fixed-1890.fits'))
-        with ignore_warnings():
-            hdul.writeto(self.temp('test_new.fits'), overwrite=True)
+        hdul.writeto(self.temp('test_new.fits'), overwrite=True)
         hdul.close()
         hdul = fits.open(self.temp('test_new.fits'))
         assert (hdul[0].data == orig_data).all()
@@ -1018,7 +1006,7 @@ class TestImageFunctions(FitsTestCase):
                           r"'BLANK' keyword in header: 'nan'"):
             hdu.writeto(self.temp('test.fits'))
 
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning) as w:
             with fits.open(self.temp('test.fits')) as hdul:
                 assert np.all(hdul[0].data == data)
 
@@ -1084,6 +1072,13 @@ class TestImageFunctions(FitsTestCase):
                        scale_back=True) as (hdu,):
             hdu.data[:] = 0
             assert np.allclose(hdu.data, 0)
+
+    def test_hdu_creation_with_scalar(self):
+        msg = r'data object array\(1\) should have at least one dimension'
+        with pytest.raises(TypeError, match=msg):
+            fits.ImageHDU(data=1)
+        with pytest.raises(TypeError, match=msg):
+            fits.PrimaryHDU(data=1)
 
 
 class TestCompressedImage(FitsTestCase):
@@ -1223,15 +1218,12 @@ class TestCompressedImage(FitsTestCase):
             assert np.all(hdul[1].data == array)
 
     def test_disable_image_compression(self):
-        with catch_warnings():
-            # No warnings should be displayed in this case
-            warnings.simplefilter('error')
-            with fits.open(self.data('comp.fits'),
-                           disable_image_compression=True) as hdul:
-                # The compressed image HDU should show up as a BinTableHDU, but
-                # *not* a CompImageHDU
-                assert isinstance(hdul[1], fits.BinTableHDU)
-                assert not isinstance(hdul[1], fits.CompImageHDU)
+        with fits.open(self.data('comp.fits'),
+                       disable_image_compression=True) as hdul:
+            # The compressed image HDU should show up as a BinTableHDU, but
+            # *not* a CompImageHDU
+            assert isinstance(hdul[1], fits.BinTableHDU)
+            assert not isinstance(hdul[1], fits.CompImageHDU)
 
         with fits.open(self.data('comp.fits')) as hdul:
             assert isinstance(hdul[1], fits.CompImageHDU)
@@ -1336,8 +1328,7 @@ class TestCompressedImage(FitsTestCase):
 
         hdul = fits.open(self.temp('fixed-1890-z.fits'))
         orig_data = hdul[1].data
-        with ignore_warnings():
-            hdul.writeto(self.temp('test_new.fits'), overwrite=True)
+        hdul.writeto(self.temp('test_new.fits'), overwrite=True)
         hdul.close()
         hdul = fits.open(self.temp('test_new.fits'))
         assert (hdul[1].data == orig_data).all()
@@ -1347,8 +1338,7 @@ class TestCompressedImage(FitsTestCase):
         # back out--this is the case that failed in
         # https://aeon.stsci.edu/ssb/trac/pyfits/ticket/84
         hdul = fits.open(self.temp('fixed-1890-z.fits'))
-        with ignore_warnings():
-            hdul.writeto(self.temp('test_new.fits'), overwrite=True)
+        hdul.writeto(self.temp('test_new.fits'), overwrite=True)
         hdul.close()
         hdul = fits.open(self.temp('test_new.fits'))
         assert (hdul[1].data == orig_data).all()
@@ -1430,8 +1420,7 @@ class TestCompressedImage(FitsTestCase):
 
         chdu2 = fits.CompImageHDU(data=noise, compression_type='GZIP_1',
                                   quantize_level=0.0)  # No quantization
-        with ignore_warnings():
-            chdu2.writeto(self.temp('test.fits'), overwrite=True)
+        chdu2.writeto(self.temp('test.fits'), overwrite=True)
 
         with fits.open(self.temp('test.fits')) as h:
             assert (noise == h[1].data).all()
@@ -1525,12 +1514,12 @@ class TestCompressedImage(FitsTestCase):
         """
 
         def test_set_keyword(hdr, keyword, value):
-            with catch_warnings() as w:
+            with pytest.warns(UserWarning) as w:
                 hdr[keyword] = value
-                assert len(w) == 1
-                assert str(w[0].message).startswith(
-                        f"Keyword {keyword!r} is reserved")
-                assert keyword not in hdr
+            assert len(w) == 1
+            assert str(w[0].message).startswith(
+                f"Keyword {keyword!r} is reserved")
+            assert keyword not in hdr
 
         with fits.open(self.data('comp.fits')) as hdul:
             hdr = hdul[1].header
@@ -1543,10 +1532,10 @@ class TestCompressedImage(FitsTestCase):
         with fits.open(self.data('comp.fits')) as hdul:
             imghdr = hdul[1].header
             tblhdr = hdul[1]._header
-            with catch_warnings() as w:
+            with pytest.warns(UserWarning, match="Keyword 'TFIELDS' is reserved") as w:
                 imghdr.append('TFIELDS')
-                assert len(w) == 1
-                assert 'TFIELDS' not in imghdr
+            assert len(w) == 1
+            assert 'TFIELDS' not in imghdr
 
             imghdr.append(('FOO', 'bar', 'qux'), end=True)
             assert 'FOO' in imghdr
@@ -1580,11 +1569,11 @@ class TestCompressedImage(FitsTestCase):
             imghdr = hdul[1].header
             tblhdr = hdul[1]._header
             # First try inserting a restricted keyword
-            with catch_warnings() as w:
+            with pytest.warns(UserWarning, match="Keyword 'TFIELDS' is reserved") as w:
                 imghdr.insert(1000, 'TFIELDS')
-                assert len(w) == 1
-                assert 'TFIELDS' not in imghdr
-                assert tblhdr.count('TFIELDS') == 1
+            assert len(w) == 1
+            assert 'TFIELDS' not in imghdr
+            assert tblhdr.count('TFIELDS') == 1
 
             # First try keyword-relative insert
             imghdr.insert('TELESCOP', ('OBSERVER', 'Phil Plait'))
@@ -1607,12 +1596,12 @@ class TestCompressedImage(FitsTestCase):
             imghdr = hdul[1].header
             tblhdr = hdul[1]._header
 
-            with catch_warnings() as w:
+            with pytest.warns(UserWarning, match="Keyword 'ZBITPIX' is reserved ") as w:
                 imghdr.set('ZBITPIX', 77, 'asdf', after='XTENSION')
-                assert len(w) == 1
-                assert 'ZBITPIX' not in imghdr
-                assert tblhdr.count('ZBITPIX') == 1
-                assert tblhdr['ZBITPIX'] != 77
+            assert len(w) == 1
+            assert 'ZBITPIX' not in imghdr
+            assert tblhdr.count('ZBITPIX') == 1
+            assert tblhdr['ZBITPIX'] != 77
 
             # Move GCOUNT before PCOUNT (not that there's any reason you'd
             # *want* to do that, but it's just a test...)
@@ -1790,6 +1779,33 @@ class TestCompressedImage(FitsTestCase):
         new = fits.getdata(testfile)
         np.testing.assert_array_equal(data, new)
 
+    def test_write_non_contiguous_data(self):
+        """
+        Regression test for https://github.com/astropy/astropy/issues/2150
+        """
+        orig = np.arange(100, dtype=float).reshape((10, 10), order='f')
+        assert not orig.flags.contiguous
+        primary = fits.PrimaryHDU()
+        hdu = fits.CompImageHDU(orig)
+        hdulist = fits.HDUList([primary, hdu])
+        hdulist.writeto(self.temp('test.fits'))
+
+        actual = fits.getdata(self.temp('test.fits'))
+        assert_equal(orig, actual)
+
+    def test_slice_and_write_comp_hdu(self):
+        """
+        Regression test for https://github.com/astropy/astropy/issues/9955
+        """
+        with fits.open(self.data('comp.fits')) as hdul:
+            hdul[1].data = hdul[1].data[:200, :100]
+            assert not hdul[1].data.flags.contiguous
+            hdul[1].writeto(self.temp('test.fits'))
+
+        with fits.open(self.data('comp.fits')) as hdul1:
+            with fits.open(self.temp('test.fits')) as hdul2:
+                assert_equal(hdul1[1].data[:200, :100], hdul2[1].data)
+
 
 def test_comphdu_bscale(tmpdir):
     """
@@ -1840,8 +1856,7 @@ def test_bzero_implicit_casting_compressed():
     # case BZERO should be 32768. But if the keyword is stored as 32768.0, then
     # it was possible to trigger the implicit casting error.
 
-    filename = os.path.join(os.path.dirname(__file__),
-                            'data', 'compressed_float_bzero.fits')
+    filename = get_pkg_data_filename('data/compressed_float_bzero.fits')
 
     with fits.open(filename) as hdul:
         hdu = hdul[1]

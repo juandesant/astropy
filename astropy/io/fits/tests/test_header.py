@@ -2,7 +2,6 @@
 # Licensed under a 3-clause BSD style license - see PYFITS.rst
 
 import copy
-import warnings
 import collections
 
 from io import StringIO, BytesIO
@@ -12,7 +11,6 @@ import numpy as np
 
 from astropy.io import fits
 from astropy.io.fits.verify import VerifyWarning
-from astropy.tests.helper import catch_warnings, ignore_warnings
 from astropy.utils.exceptions import AstropyUserWarning
 
 from . import FitsTestCase
@@ -79,6 +77,18 @@ class TestHeaderFunctions(FitsTestCase):
         assert header['B'] == 'B'
         assert header.comments['B'] == 'C'
 
+    @pytest.mark.parametrize('key', ['A', 'a'])
+    def test_indexing_case(self, key):
+        """Check that indexing is case insensitive"""
+        header = fits.Header([('A', 'B', 'C'), ('D', 'E', 'F')])
+        assert key in header
+        assert header[key] == 'B'
+        assert header.get(key) == 'B'
+        assert header.index(key) == 0
+        assert header.comments[key] == 'C'
+        assert header.count(key) == 1
+        header.remove(key, ignore_missing=False)
+
     def test_card_constructor_default_args(self):
         """Test Card constructor with default argument values."""
 
@@ -142,13 +152,14 @@ class TestHeaderFunctions(FitsTestCase):
 
         # card image constructed from key/value/comment is too long
         # (non-string value)
-        with ignore_warnings():
-            c = fits.Card('abc', 9, 'abcde' * 20)
+        c = fits.Card('abc', 9, 'abcde' * 20)
+        with pytest.warns(fits.verify.VerifyWarning):
             assert (str(c) ==
                     "ABC     =                    9 "
                     "/ abcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeabcdeab")
-            c = fits.Card('abc', 'a' * 68, 'abcdefg')
-            assert str(c) == "ABC     = '{}'".format('a' * 68)
+        c = fits.Card('abc', 'a' * 68, 'abcdefg')
+        with pytest.warns(fits.verify.VerifyWarning):
+            assert str(c) == f"ABC     = '{'a' * 68}'"
 
     def test_constructor_filter_illegal_data_structures(self):
         """Test that Card constructor raises exceptions on bad arguments"""
@@ -159,9 +170,7 @@ class TestHeaderFunctions(FitsTestCase):
     def test_keyword_too_long(self):
         """Test that long Card keywords are allowed, but with a warning"""
 
-        with catch_warnings():
-            warnings.simplefilter('error')
-            pytest.raises(UserWarning, fits.Card, 'abcdefghi', 'long')
+        pytest.warns(UserWarning, fits.Card, 'abcdefghi', 'long')
 
     def test_illegal_characters_in_key(self):
         """
@@ -173,12 +182,12 @@ class TestHeaderFunctions(FitsTestCase):
         # keyword like 'abc+' was simply not allowed.  Now it should create a
         # HIERARCH card.
 
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning) as w:
             c = fits.Card('abc+', 9)
         assert len(w) == 1
         assert c.image == _pad('HIERARCH abc+ =                    9')
 
-    def test_add_commentary(self):
+    def test_add_history(self):
         header = fits.Header([('A', 'B', 'C'), ('HISTORY', 1),
                               ('HISTORY', 2), ('HISTORY', 3), ('', '', ''),
                               ('', '', '')])
@@ -187,12 +196,14 @@ class TestHeaderFunctions(FitsTestCase):
         assert len(header) == 6
         assert header.cards[4].value == 4
         assert header['HISTORY'] == [1, 2, 3, 4]
+        assert repr(header['HISTORY']) == '1\n2\n3\n4'
 
         header.add_history(0, after='A')
         assert len(header) == 6
         assert header.cards[1].value == 0
         assert header['HISTORY'] == [0, 1, 2, 3, 4]
 
+    def test_add_blank(self):
         header = fits.Header([('A', 'B', 'C'), ('', 1), ('', 2), ('', 3),
                               ('', '', ''), ('', '', '')])
         header.add_blank(4)
@@ -203,11 +214,17 @@ class TestHeaderFunctions(FitsTestCase):
         assert len(header) == 7
         assert header.cards[6].value == 4
         assert header[''] == [1, 2, 3, '', '', 4]
+        assert repr(header['']) == '1\n2\n3\n\n\n4'
 
         header.add_blank(0, after='A')
         assert len(header) == 8
         assert header.cards[1].value == 0
         assert header[''] == [0, 1, 2, 3, '', '', 4]
+
+        header[''] = 5
+        header[' '] = 6
+        assert header[''] == [0, 1, 2, 3, '', '', 4, 5, 6]
+        assert header[' '] == [0, 1, 2, 3, '', '', 4, 5, 6]
 
     def test_update(self):
         class FakeHeader(list):
@@ -360,7 +377,7 @@ class TestHeaderFunctions(FitsTestCase):
     def test_verify_invalid_equal_sign(self):
         # verification
         c = fits.Card.fromstring('ABC= a6')
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning) as w:
             c.verify()
         err_text1 = ("Card 'ABC' is not FITS standard (equal sign not at "
                      "column 8)")
@@ -371,24 +388,23 @@ class TestHeaderFunctions(FitsTestCase):
         assert err_text2 in str(w[2].message)
 
     def test_fix_invalid_equal_sign(self):
-        c = fits.Card.fromstring('ABC= a6')
-        with catch_warnings() as w:
-            c.verify('fix')
         fix_text = "Fixed 'ABC' card to meet the FITS standard."
+        c = fits.Card.fromstring('ABC= a6')
+        with pytest.warns(AstropyUserWarning, match=fix_text) as w:
+            c.verify('fix')
         assert len(w) == 4
-        assert fix_text in str(w[1].message)
         assert str(c) == _pad("ABC     = 'a6      '")
 
     def test_long_string_value(self):
         # test long string value
         c = fits.Card('abc', 'long string value ' * 10, 'long comment ' * 10)
         assert (str(c) ==
-            "ABC     = 'long string value long string value long string value long string &' "
-            "CONTINUE  'value long string value long string value long string value long &'  "
-            "CONTINUE  'string value long string value long string value &'                  "
-            "CONTINUE  '&' / long comment long comment long comment long comment long        "
-            "CONTINUE  '&' / comment long comment long comment long comment long comment     "
-            "CONTINUE  '' / long comment                                                     ")
+                "ABC     = 'long string value long string value long string value long string &' "
+                "CONTINUE  'value long string value long string value long string value long &'  "
+                "CONTINUE  'string value long string value long string value &'                  "
+                "CONTINUE  '&' / long comment long comment long comment long comment long        "
+                "CONTINUE  '&' / comment long comment long comment long comment long comment     "
+                "CONTINUE  '' / long comment                                                     ")
 
     def test_long_unicode_string(self):
         """Regression test for
@@ -402,9 +418,7 @@ class TestHeaderFunctions(FitsTestCase):
         h1['TEST'] = 'abcdefg' * 30
 
         h2 = fits.Header()
-        with catch_warnings() as w:
-            h2['TEST'] = 'abcdefg' * 30
-            assert len(w) == 0
+        h2['TEST'] = 'abcdefg' * 30
 
         assert str(h1) == str(h2)
 
@@ -534,11 +548,10 @@ class TestHeaderFunctions(FitsTestCase):
 
     def test_hierarch_card_creation(self):
         # Test automatic upgrade to hierarch card
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning, match='HIERARCH card will be created') as w:
             c = fits.Card('ESO INS SLIT2 Y1FRML',
                           'ENC=OFFSET+RESOL*acos((WID-(MAX+MIN))/(MAX-MIN)')
         assert len(w) == 1
-        assert 'HIERARCH card will be created' in str(w[0].message)
         assert (str(c) ==
                 "HIERARCH ESO INS SLIT2 Y1FRML= "
                 "'ENC=OFFSET+RESOL*acos((WID-(MAX+MIN))/(MAX-MIN)'")
@@ -547,7 +560,7 @@ class TestHeaderFunctions(FitsTestCase):
         c = fits.Card('hierarch abcdefghi', 10)
         assert str(c) == _pad("HIERARCH abcdefghi = 10")
         c = fits.Card('HIERARCH ESO INS SLIT2 Y1FRML',
-                        'ENC=OFFSET+RESOL*acos((WID-(MAX+MIN))/(MAX-MIN)')
+                      'ENC=OFFSET+RESOL*acos((WID-(MAX+MIN))/(MAX-MIN)')
         assert (str(c) ==
                 "HIERARCH ESO INS SLIT2 Y1FRML= "
                 "'ENC=OFFSET+RESOL*acos((WID-(MAX+MIN))/(MAX-MIN)'")
@@ -666,7 +679,7 @@ class TestHeaderFunctions(FitsTestCase):
         msg = 'a HIERARCH card will be created'
 
         header = fits.Header()
-        with catch_warnings(VerifyWarning) as w:
+        with pytest.warns(VerifyWarning) as w:
             header.update({'HIERARCH BLAH BLAH': 'TESTA'})
             assert len(w) == 0
             assert 'BLAH BLAH' in header
@@ -729,7 +742,7 @@ class TestHeaderFunctions(FitsTestCase):
         msg = 'a HIERARCH card will be created'
 
         header = fits.Header()
-        with catch_warnings(VerifyWarning) as w:
+        with pytest.warns(VerifyWarning) as w:
             header.update({'HIERARCH BLA BLA': 'TESTA'})
             assert len(w) == 0
             assert 'BLA BLA' in header
@@ -756,7 +769,7 @@ class TestHeaderFunctions(FitsTestCase):
             assert header['bla bla'], 'TESTE'
 
         header = fits.Header()
-        with catch_warnings(VerifyWarning) as w:
+        with pytest.warns(VerifyWarning) as w:
             # Create a HIERARCH card containing invalid characters without
             # explicitly stating 'HIERARCH'
             header.update({'BLA BLA': 'TESTA'})
@@ -1579,9 +1592,8 @@ class TestHeaderFunctions(FitsTestCase):
         assert 'EXTENSION' not in hdu.header
         assert 'SIMPLE' in hdu.header
 
-        with ignore_warnings():
-            hdu.writeto(self.temp('test.fits'), output_verify='ignore',
-                        overwrite=True)
+        hdu.writeto(self.temp('test.fits'), output_verify='ignore',
+                    overwrite=True)
 
         with fits.open(self.temp('test.fits')) as hdul2:
             assert len(hdul2) == 2
@@ -1686,45 +1698,41 @@ class TestHeaderFunctions(FitsTestCase):
         # it is given an = after it
         s = invalid_header('END =', True)
 
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning, match="Unexpected bytes trailing "
+                          "END keyword: ' ='") as w:
             h = fits.Header.fromfile(s)
             assert h == horig
-            assert len(w) == 1
-            assert str(w[0].message).startswith(
-                "Unexpected bytes trailing END keyword: ' ='")
+        assert len(w) == 1
 
         # A case similar to the last but with more spaces between END and the
         # =, as though the '= ' value indicator were placed like that of a
         # normal card
         s = invalid_header('END     = ', True)
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning, match="Unexpected bytes trailing "
+                          "END keyword: '     ='") as w:
             h = fits.Header.fromfile(s)
             assert h == horig
-            assert len(w) == 1
-            assert str(w[0].message).startswith(
-                "Unexpected bytes trailing END keyword: '     ='")
+        assert len(w) == 1
 
         # END card with trailing gibberish
         s = invalid_header('END$%&%^*%*', True)
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning, match=r"Unexpected bytes trailing "
+                          r"END keyword: '\$%&%\^\*%\*'") as w:
             h = fits.Header.fromfile(s)
             assert h == horig
-            assert len(w) == 1
-            assert str(w[0].message).startswith(
-                "Unexpected bytes trailing END keyword: '$%&%^*%*'")
+        assert len(w) == 1
 
         # 'END' at the very end of a truncated file without padding; the way
         # the block reader works currently this can only happen if the 'END'
         # is at the very end of the file.
         s = invalid_header('END', False)
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning, match="Missing padding to end of "
+                          "the FITS block") as w:
             # Don't raise an exception on missing padding, but still produce a
             # warning that the END card is incomplete
             h = fits.Header.fromfile(s, padding=False)
             assert h == horig
-            assert len(w) == 1
-            assert str(w[0].message).startswith(
-                "Missing padding to end of the FITS block")
+        assert len(w) == 1
 
     def test_invalid_characters(self):
         """
@@ -1745,13 +1753,12 @@ class TestHeaderFunctions(FitsTestCase):
         with open(self.temp('test2.fits'), 'wb') as f2:
             f2.write(out)
 
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning, match="non-ASCII characters are "
+                          "present in the FITS file") as w:
             h = fits.getheader(self.temp('test2.fits'))
             assert h['FOO'] == 'B?R'
             assert h['COMMENT'] == 'h?llo'
-            assert len(w) == 1
-            assert str(w[0].message).startswith(
-                "non-ASCII characters are present in the FITS file")
+        assert len(w) == 1
 
     def test_unnecessary_move(self):
         """
@@ -1845,7 +1852,7 @@ class TestHeaderFunctions(FitsTestCase):
         assert (str(h.cards['FOCALLEN']) ==
                 _pad("FOCALLEN= +1.550000000000E+002"))
         assert (str(h.cards['APERTURE']) ==
-                     _pad("APERTURE= +0.000000000000E+000"))
+                _pad("APERTURE= +0.000000000000E+000"))
 
     def test_invalid_float_cards2(self, capsys):
         """
@@ -1865,7 +1872,7 @@ class TestHeaderFunctions(FitsTestCase):
             f.write(encode_ascii('e'))
 
         hdul = fits.open(self.temp('test.fits'))
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning) as w:
             hdul.writeto(self.temp('temp.fits'), output_verify='warn')
         assert len(w) == 5
         # The first two warnings are just the headers to the actual warning
@@ -2014,8 +2021,7 @@ class TestHeaderFunctions(FitsTestCase):
         # Add blanks until the header is extended to two block sizes
         while len(hdu.header) < 36:
             hdu.header.append()
-        with ignore_warnings():
-            hdu.writeto(self.temp('test.fits'), overwrite=True)
+        hdu.writeto(self.temp('test.fits'), overwrite=True)
 
         with fits.open(self.temp('test.fits')) as hdul:
             assert 'TESTKW' in hdul[0].header
@@ -2076,9 +2082,8 @@ class TestHeaderFunctions(FitsTestCase):
         """
 
         h = fits.Header()
-
-        pytest.raises(ValueError, h.set, 'TEST',
-                      bytes('Hello', encoding='ascii'))
+        with pytest.raises(ValueError, match="Illegal value: b'Hello'."):
+            h.set('TEST', b'Hello')
 
     def test_header_strip_whitespace(self):
         """
@@ -2158,7 +2163,7 @@ class TestHeaderFunctions(FitsTestCase):
 
         hdu = fits.PrimaryHDU()
         # This should work with some warnings
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning) as w:
             hdu.header.append(c1)
             hdu.header.append(c2)
             hdu.header.append(c3)
@@ -2166,7 +2171,7 @@ class TestHeaderFunctions(FitsTestCase):
 
         hdu.writeto(self.temp('test.fits'))
 
-        with catch_warnings() as w:
+        with pytest.warns(AstropyUserWarning) as w:
             with fits.open(self.temp('test.fits')) as hdul:
                 # Merely opening the file should blast some warnings about the
                 # invalid keywords
@@ -2371,6 +2376,17 @@ class TestHeaderFunctions(FitsTestCase):
         assert pri_hdr == pri_hdr_from_bytes
         assert pri_hdr.tostring() == pri_hdr_from_bytes.tostring()
 
+    def test_set_keyword_with_space(self):
+        """
+        Regression test for https://github.com/astropy/astropy/issues/10479
+        """
+        hdr = fits.Header()
+        hdr['KEY2 '] = 2
+        hdr['KEY2  '] = 4
+        assert len(hdr) == 1
+        assert hdr['KEY2'] == 4
+        assert hdr['KEY2 '] == 4
+
 
 class TestRecordValuedKeywordCards(FitsTestCase):
     """
@@ -2441,7 +2457,7 @@ class TestRecordValuedKeywordCards(FitsTestCase):
         assert c.value == 2.0
         assert c.field_specifier == 'NAXIS'
 
-        with ignore_warnings():
+        with pytest.warns(fits.verify.VerifyWarning):
             c = fits.Card('DP1.NAXIS', 'a')
         assert c.keyword == 'DP1.NAXIS'
         assert c.value == 'a'

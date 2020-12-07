@@ -13,14 +13,15 @@ overview of running or writing the tests.
 =============================
 To ease development of tests that work with Astropy, the
 `astropy.tests.helper` module provides some utility functions to make
-tests that use Astropy conventions or classes easier to work with. e.g.,
+tests that use Astropy conventions or classes easier to work with, e.g.,
 functions to test for near-equality of `~astropy.units.Quantity` objects.
 
-The functionality here is not exhaustive, because much of the useful tools
-are either in the standard library, py.test, or `numpy.testing
-<https://docs.scipy.org/doc/numpy/reference/routines.testing.html>`_.  This
-module contains primarily functionality specific to the astropy core package
-or packages that follow the Astropy package template.
+The functionality here is not exhaustive, because
+much of the useful tools are either in the standard
+library, `pytest <https://docs.pytest.org>`_, or `numpy.testing
+<https://numpy.org/doc/stable/reference/routines.testing.html>`_.  This module
+contains primarily functionality specific to the astropy core package or
+packages that follow the Astropy package template.
 
 
 Reference/API
@@ -42,7 +43,7 @@ by the `astropy.tests.runner.TestRunner` class.
 The `~astropy.tests.runner.TestRunner` class is used to generate the
 `astropy.test` function, the test function generates a set of command line
 arguments to pytest. The arguments to pytest are defined in the
-`~astropy.tests.runner.TestRunner.run_tests` method, the arguments to
+``run_tests`` method, the arguments to
 ``run_tests`` and their respective logic are defined in methods of
 `~astropy.tests.runner.TestRunner` decorated with the
 `~astropy.tests.runner.keyword` decorator. For an example of this see
@@ -56,5 +57,9 @@ Reference/API
 
 .. module:: astropy.tests.runner
 
-.. automodapi:: astropy.tests.runner
-    :no-main-docstr:
+.. autoclass:: astropy.tests.runner.keyword
+    :no-undoc-members:
+
+.. autoclass:: astropy.tests.runner.TestRunnerBase
+
+.. autoclass:: astropy.tests.runner.TestRunner

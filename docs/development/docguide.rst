@@ -11,6 +11,21 @@ keep to these as closely as possible, and we encourage affiliated packages to
 also adhere to these as they encourage useful documentation, a characteristic
 often lacking in professional astronomy software.
 
+Adding a Git Commit
+===================
+
+When your changes only affect documentation (i.e., docstring or RST files)
+and do not include any code snippets that require doctest to run, you may
+add a ``[ci skip]`` in your commit message. For example::
+
+    git commit -m "Update documentation about this and that [ci skip]"
+
+When this commit is pushed out to your branch associated with a pull request,
+all CI will be skipped because it is not required. This is because the
+the documentation build resides in RTD, which currently does not respect the
+``[ci skip]`` directive.
+
+
 Building the Documentation from source
 ======================================
 
@@ -99,7 +114,7 @@ In addition, the sphinx-astropy_ includes a few small extensions:
 * ``sphinx_astropy.ext.doctest`` - an extension that makes it possible to
   add metadata about doctests inside ``.rst`` files
 
-.. _NumPy: https://www.numpy.org/
+.. _NumPy: https://numpy.org/
 .. _numpydoc: https://pypi.org/project/numpydoc/
 .. _Matplotlib: https://matplotlib.org/
 .. _SciPy: https://www.scipy.org/

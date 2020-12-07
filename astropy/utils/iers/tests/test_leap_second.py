@@ -1,19 +1,20 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 import urllib.request
 import os
+import locale
+import platform
 
 import pytest
 import numpy as np
 from numpy.testing import assert_array_equal
+import erfa
 
-from astropy import _erfa as erfa
 from astropy.time import Time, TimeDelta
 from astropy.utils.iers import iers
 from astropy.utils.data import get_pkg_data_filename
 
 
 SYSTEM_FILE = '/usr/share/zoneinfo/leap-seconds.list'
-ON_CI = 'CI' in os.environ or 'TRAVIS' in os.environ
 
 # Test leap_seconds.list in test/data.
 LEAP_SECOND_LIST = get_pkg_data_filename('data/leap-seconds.list')
@@ -49,6 +50,24 @@ class TestReading:
         assert ls['tai_utc'][-1] >= 37
         self.verify_day_month_year(ls)
 
+    def test_read_leap_second_dat_locale(self):
+        current = locale.setlocale(locale.LC_ALL)
+        try:
+            if platform.system() == 'Darwin':
+                locale.setlocale(locale.LC_ALL, 'fr_FR')
+            else:
+                locale.setlocale(locale.LC_ALL, 'fr_FR.utf8')
+
+            ls = iers.LeapSeconds.from_iers_leap_seconds(
+                iers.IERS_LEAP_SECOND_FILE)
+        except locale.Error as e:
+            pytest.skip(f'Locale error: {e}')
+        finally:
+            locale.setlocale(locale.LC_ALL, current)
+
+        # Below, >= to take into account we might ship and updated file.
+        assert ls.expires >= Time('2020-06-28', scale='tai')
+
     def test_open_leap_second_dat(self):
         ls = iers.LeapSeconds.from_iers_leap_seconds(
             iers.IERS_LEAP_SECOND_FILE)
@@ -80,8 +99,8 @@ class TestReading:
     def test_open_system_file(self):
         ls = iers.LeapSeconds.open(SYSTEM_FILE)
         expired = ls.expires < Time.now()
-        if ON_CI and expired:
-            pytest.skip("CI system leap second file is expired.")
+        if expired:
+            pytest.skip("System leap second file is expired.")
         assert not expired
 
 
@@ -145,9 +164,24 @@ class TestAutoOpenExplicitLists:
         assert ls2.meta['data_url'] == fake_file2
         assert ls2.expires == Time('2012-06-27', scale='tai')
 
+        # Use the fake files to make sure auto_max_age is safe.
+        with iers.conf.set_temp('auto_max_age', None):
+            ls3 = iers.LeapSeconds.auto_open([fake_file1,
+                                              iers.IERS_LEAP_SECOND_FILE])
+        assert ls3.meta['data_url'] == fake_file1
+
 
 @pytest.mark.remote_data
 class TestRemoteURLs:
+    def setup_class(cls):
+        # Need auto_download so that IERS_B won't be loaded and cause tests to
+        # fail.
+        iers.conf.auto_download = True
+
+    def teardown_class(cls):
+        # This setting is to be consistent with astropy/conftest.py
+        iers.conf.auto_download = False
+
     # In these tests, the results may be cached.
     # This is fine - no need to download again.
     def test_iers_url(self):
@@ -164,7 +198,7 @@ class TestDefaultAutoOpen:
     def setup(self):
         # Identical to what is used in LeapSeconds.auto_open().
         self.good_enough = (iers.LeapSeconds._today()
-                            + TimeDelta(180 - iers.conf.auto_max_age,
+                            + TimeDelta(180 - iers._none_to_float(iers.conf.auto_max_age),
                                         format='jd'))
         self._auto_open_files = iers.LeapSeconds._auto_open_files.copy()
 
@@ -195,14 +229,16 @@ class TestDefaultAutoOpen:
         assert ls.meta['data_url'] == iers.IERS_LEAP_SECOND_FILE
 
     # The test below is marked remote_data only to ensure it runs
-    # as an allowed-fail job on travis: i.e., we will notice it (eventually)
+    # as an allowed-fail job on CI: i.e., we will notice it (eventually)
     # but will not be misled in thinking that a PR is bad.
     @pytest.mark.remote_data
     def test_builtin_not_expired(self):
         # TODO: would be nice to have automatic PRs for this!
         ls = iers.LeapSeconds.open(iers.IERS_LEAP_SECOND_FILE)
-        assert ls.expires > self.good_enough, \
-            "The leap second file built in to astropy is expired. PR needed!"
+        assert ls.expires > self.good_enough, (
+            "The leap second file built in to astropy is expired. Fix with:\n"
+            "cd astropy/utils/iers/data/; . update_builtin_iers.sh\n"
+            "and commit as a PR (for details, see release procedure).")
 
     def test_fake_future_file(self, tmpdir):
         fake_file = make_fake_file('28 June 2345', tmpdir)
@@ -244,9 +280,8 @@ class TestDefaultAutoOpen:
         # We skip the test if the system file is on a CI and is expired -
         # we should not depend on CI keeping it up to date, but if it is,
         # we should check that it is used if possible.
-        if (iers.LeapSeconds.open(SYSTEM_FILE).expires <= self.good_enough
-                and ON_CI):
-            pytest.skip("CI system leap second file is expired.")
+        if (iers.LeapSeconds.open(SYSTEM_FILE).expires <= self.good_enough):
+            pytest.skip("System leap second file is expired.")
 
         self.remove_auto_open_files('erfa')
         with iers.conf.set_temp('system_leap_second_file', SYSTEM_FILE):
@@ -266,11 +301,19 @@ class TestDefaultAutoOpen:
     def test_auto_open_urls_always_good_enough(self):
         # Avoid using the erfa, built-in and system files, as they might
         # be good enough already.
-        self.remove_auto_open_files('erfa', iers.IERS_LEAP_SECOND_FILE,
-                                    'system_leap_second_file')
-        ls = iers.LeapSeconds.open()
-        assert ls.expires > self.good_enough
-        assert ls.meta['data_url'].startswith('http')
+        try:
+            # Need auto_download so that IERS_B won't be loaded and
+            # cause tests to fail.
+            iers.conf.auto_download = True
+
+            self.remove_auto_open_files('erfa', iers.IERS_LEAP_SECOND_FILE,
+                                        'system_leap_second_file')
+            ls = iers.LeapSeconds.open()
+            assert ls.expires > self.good_enough
+            assert ls.meta['data_url'].startswith('http')
+        finally:
+            # This setting is to be consistent with astropy/conftest.py
+            iers.conf.auto_download = False
 
 
 class ERFALeapSecondsSafe:

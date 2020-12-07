@@ -45,6 +45,8 @@ class CDS(Base):
         'DIVISION',
         'OPEN_PAREN',
         'CLOSE_PAREN',
+        'OPEN_BRACKET',
+        'CLOSE_BRACKET',
         'X',
         'SIGN',
         'UINT',
@@ -88,9 +90,12 @@ class CDS(Base):
         t_DIVISION = r'/'
         t_OPEN_PAREN = r'\('
         t_CLOSE_PAREN = r'\)'
+        t_OPEN_BRACKET = r'\['
+        t_CLOSE_BRACKET = r'\]'
 
         # NOTE THE ORDERING OF THESE RULES IS IMPORTANT!!
         # Regular expression rules for simple tokens
+
         def t_UFLOAT(t):
             r'((\d+\.?\d+)|(\.\d+))([eE][+-]?\d+)?'
             if not re.search(r'[eE\.]', t.value):
@@ -157,11 +162,15 @@ class CDS(Base):
             '''
             main : factor combined_units
                  | combined_units
+                 | OPEN_BRACKET combined_units CLOSE_BRACKET
                  | factor
             '''
             from astropy.units.core import Unit
+            from astropy.units import dex
             if len(p) == 3:
                 p[0] = Unit(p[1] * p[2])
+            elif len(p) == 4:
+                p[0] = dex(p[2])
             else:
                 p[0] = Unit(p[1])
 
@@ -270,7 +279,7 @@ class CDS(Base):
 
         parser = yacc.yacc(debug=False, tabmodule='cds_parsetab',
                            outputdir=os.path.dirname(__file__),
-                           write_tables=True)
+                           optimize=True, write_tables=True)
 
         if not parser_exists:
             cls._add_tab_header('cds_parsetab')
@@ -283,8 +292,7 @@ class CDS(Base):
             return cls._parse_unit(t.value)
         except ValueError as e:
             raise ValueError(
-                "At col {}, {}".format(
-                    t.lexpos, str(e)))
+                f"At col {t.lexpos}, {str(e)}")
 
     @classmethod
     def _parse_unit(cls, unit, detailed_exception=True):
@@ -332,8 +340,7 @@ class CDS(Base):
             if power == 1:
                 out.append(cls._get_unit_name(base))
             else:
-                out.append('{}{}'.format(
-                    cls._get_unit_name(base), int(power)))
+                out.append(f'{cls._get_unit_name(base)}{int(power)}')
         return '.'.join(out)
 
     @classmethod

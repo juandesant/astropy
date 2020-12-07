@@ -537,7 +537,7 @@ class _TableBaseHDU(ExtensionHDU, _TableLikeHDU):
                 self._header[0].rstrip() == self._extension):
 
             err_text = 'The XTENSION keyword must match the HDU type.'
-            fix_text = 'Converted the XTENSION keyword to {}.'.format(self._extension)
+            fix_text = f'Converted the XTENSION keyword to {self._extension}.'
 
             def fix(header=self._header):
                 header[0] = (self._extension, self._ext_comment)
@@ -949,14 +949,12 @@ class BinTableHDU(_TableBaseHDU):
                     for row in field:
                         if len(row) > 0:
                             nbytes += row.nbytes
-                            if not fileobj.simulateonly:
-                                fileobj.writearray(row)
+                            fileobj.writearray(row)
             else:
                 heap_data = data._get_heap_data()
                 if len(heap_data) > 0:
                     nbytes += len(heap_data)
-                    if not fileobj.simulateonly:
-                        fileobj.writearray(heap_data)
+                    fileobj.writearray(heap_data)
 
             data._heapsize = nbytes - data._gap
             size += nbytes
@@ -1244,7 +1242,7 @@ class BinTableHDU(_TableBaseHDU):
                     # the length of the array for this row and set the format
                     # for the VLA data
                     line.append('VLA_Length=')
-                    line.append('{:21d}'.format(len(row[column.name])))
+                    line.append(f'{len(row[column.name]):21d}')
                     _, dtype, option = _parse_tformat(column.format)
                     vla_format = FITS2NUMPY[option[0]][0]
 

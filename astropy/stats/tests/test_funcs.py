@@ -21,7 +21,6 @@ else:
 
 from astropy.stats import funcs
 from astropy import units as u
-from astropy.tests.helper import catch_warnings
 from astropy.utils.exceptions import AstropyDeprecationWarning
 from astropy.utils.misc import NumpyRNGContext
 
@@ -353,22 +352,20 @@ def test_mad_std_scalar_return():
         assert np.isscalar(rslt)
 
         data[5, 5] = np.nan
+
         rslt = funcs.mad_std(data, ignore_nan=True)
         assert np.isscalar(rslt)
-        with catch_warnings():
-            rslt = funcs.mad_std(data)
-            assert np.isscalar(rslt)
-            assert np.isnan(rslt)
+        rslt = funcs.mad_std(data)
+        assert np.isscalar(rslt)
+        assert np.isnan(rslt)
 
 
 def test_mad_std_warns():
     with NumpyRNGContext(12345):
         data = np.random.normal(5, 2, size=(10, 10))
         data[5, 5] = np.nan
-
-        with catch_warnings():
-            rslt = funcs.mad_std(data, ignore_nan=False)
-            assert np.isnan(rslt)
+        rslt = funcs.mad_std(data, ignore_nan=False)
+        assert np.isnan(rslt)
 
 
 @pytest.mark.filterwarnings('ignore:Invalid value encountered in median')
@@ -459,7 +456,7 @@ def test_poisson_conf_large(interval):
 def test_poisson_conf_array_rootn0_zero():
     n = np.zeros((3, 4, 5))
     assert_allclose(funcs.poisson_conf_interval(n, interval='root-n-0'),
-                    funcs.poisson_conf_interval(n[0, 0, 0], interval='root-n-0')[:, None, None, None] * np.ones_like(n))
+                    funcs.poisson_conf_interval(n[0, 0, 0], interval='root-n-0')[:, None, None, None] * np.ones_like(n))  # noqa: E501
 
     assert not np.any(np.isnan(
         funcs.poisson_conf_interval(n, interval='root-n-0')))
@@ -470,7 +467,7 @@ def test_poisson_conf_array_frequentist_confidence_zero():
     n = np.zeros((3, 4, 5))
     assert_allclose(
         funcs.poisson_conf_interval(n, interval='frequentist-confidence'),
-        funcs.poisson_conf_interval(n[0, 0, 0], interval='frequentist-confidence')[:, None, None, None] * np.ones_like(n))
+        funcs.poisson_conf_interval(n[0, 0, 0], interval='frequentist-confidence')[:, None, None, None] * np.ones_like(n))  # noqa: E501
 
     assert not np.any(np.isnan(
         funcs.poisson_conf_interval(n, interval='root-n-0')))
@@ -488,7 +485,7 @@ def test_poisson_conf_list_rootn0_zero():
 def test_poisson_conf_array_rootn0():
     n = 7 * np.ones((3, 4, 5))
     assert_allclose(funcs.poisson_conf_interval(n, interval='root-n-0'),
-                    funcs.poisson_conf_interval(n[0, 0, 0], interval='root-n-0')[:, None, None, None] * np.ones_like(n))
+                    funcs.poisson_conf_interval(n[0, 0, 0], interval='root-n-0')[:, None, None, None] * np.ones_like(n))  # noqa: E501
 
     n[1, 2, 3] = 0
     assert not np.any(np.isnan(
@@ -500,7 +497,7 @@ def test_poisson_conf_array_fc():
     n = 7 * np.ones((3, 4, 5))
     assert_allclose(
         funcs.poisson_conf_interval(n, interval='frequentist-confidence'),
-        funcs.poisson_conf_interval(n[0, 0, 0], interval='frequentist-confidence')[:, None, None, None] * np.ones_like(n))
+        funcs.poisson_conf_interval(n[0, 0, 0], interval='frequentist-confidence')[:, None, None, None] * np.ones_like(n))  # noqa: E501
 
     n[1, 2, 3] = 0
     assert not np.any(np.isnan(
@@ -590,11 +587,23 @@ def test_scipy_poisson_limit():
 
     Test numbers are from table1 1, 3 in
     Kraft, Burrows and Nousek in
-    `ApJ 374, 344 (1991) <http://adsabs.harvard.edu/abs/1991ApJ...374..344K>`_
+    `ApJ 374, 344 (1991) <https://ui.adsabs.harvard.edu/abs/1991ApJ...374..344K>`_
     '''
-    assert_allclose(funcs._scipy_kraft_burrows_nousek(5., 2.5, .99),
+    assert_allclose(funcs._scipy_kraft_burrows_nousek(5, 2.5, .99),
                     (0, 10.67), rtol=1e-3)
-    conf = funcs.poisson_conf_interval([5., 6.], 'kraft-burrows-nousek',
+    assert_allclose(funcs._scipy_kraft_burrows_nousek(np.int32(5.), 2.5, .99),
+                    (0, 10.67), rtol=1e-3)
+    assert_allclose(funcs._scipy_kraft_burrows_nousek(np.int64(5.), 2.5, .99),
+                    (0, 10.67), rtol=1e-3)
+    assert_allclose(funcs._scipy_kraft_burrows_nousek(5, np.float32(2.5), .99),
+                    (0, 10.67), rtol=1e-3)
+    assert_allclose(funcs._scipy_kraft_burrows_nousek(5, np.float64(2.5), .99),
+                    (0, 10.67), rtol=1e-3)
+    assert_allclose(funcs._scipy_kraft_burrows_nousek(5, 2.5, np.float32(.99)),
+                    (0, 10.67), rtol=1e-3)
+    assert_allclose(funcs._scipy_kraft_burrows_nousek(5, 2.5, np.float64(.99)),
+                    (0, 10.67), rtol=1e-3)
+    conf = funcs.poisson_conf_interval([5, 6], 'kraft-burrows-nousek',
                                        background=[2.5, 2.],
                                        confidence_level=[.99, .9])
     assert_allclose(conf[:, 0], (0, 10.67), rtol=1e-3)
@@ -603,57 +612,85 @@ def test_scipy_poisson_limit():
 
 @pytest.mark.skipif('not HAS_MPMATH')
 def test_mpmath_poisson_limit():
-    assert_allclose(funcs._mpmath_kraft_burrows_nousek(6., 2., .9),
+    assert_allclose(funcs._mpmath_kraft_burrows_nousek(1., .1, .99),
+                    (0.00, 6.54), rtol=5e-3)
+    assert_allclose(funcs._mpmath_kraft_burrows_nousek(1., .5, .95),
+                    (0.00, 4.36), rtol=5e-3)
+    assert_allclose(funcs._mpmath_kraft_burrows_nousek(5., 0., .99),
+                    (1.17, 13.32), rtol=5e-3)
+    assert_allclose(funcs._mpmath_kraft_burrows_nousek(5., 2.5, .99),
+                    (0, 10.67), rtol=1e-3)
+    assert_allclose(funcs._mpmath_kraft_burrows_nousek(np.int32(6), 2., .9),
+                    (0.81, 8.99), rtol=5e-3)
+    assert_allclose(funcs._mpmath_kraft_burrows_nousek(np.int64(6), 2., .9),
+                    (0.81, 8.99), rtol=5e-3)
+    assert_allclose(funcs._mpmath_kraft_burrows_nousek(6., np.float32(2.), .9),
+                    (0.81, 8.99), rtol=5e-3)
+    assert_allclose(funcs._mpmath_kraft_burrows_nousek(6., np.float64(2.), .9),
+                    (0.81, 8.99), rtol=5e-3)
+    assert_allclose(funcs._mpmath_kraft_burrows_nousek(6., 2., np.float32(.9)),
+                    (0.81, 8.99), rtol=5e-3)
+    assert_allclose(funcs._mpmath_kraft_burrows_nousek(6., 2., np.float64(.9)),
                     (0.81, 8.99), rtol=5e-3)
     assert_allclose(funcs._mpmath_kraft_burrows_nousek(5., 2.5, .99),
                     (0, 10.67), rtol=1e-3)
 
+    assert_allclose(funcs.poisson_conf_interval(
+        n=160, background=154.543,
+        confidence_level=.95, interval='kraft-burrows-nousek')[:, 0], (0, 30.30454909))
+    # For this one we do not have the "true" answer from the publication,
+    # but we want to make sure that it at least runs without error
+    # see https://github.com/astropy/astropy/issues/9596
+    _ = funcs._mpmath_kraft_burrows_nousek(1000., 900., .9)
+
 
 @pytest.mark.skipif('not HAS_SCIPY')
 def test_poisson_conf_value_errors():
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='Only sigma=1 supported'):
         funcs.poisson_conf_interval([5, 6], 'root-n', sigma=2)
-    assert 'Only sigma=1 supported' in str(e.value)
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='background not supported'):
         funcs.poisson_conf_interval([5, 6], 'pearson', background=[2.5, 2.])
-    assert 'background not supported' in str(e.value)
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='confidence_level not supported'):
         funcs.poisson_conf_interval([5, 6], 'sherpagehrels',
                                     confidence_level=[2.5, 2.])
-    assert 'confidence_level not supported' in str(e.value)
 
-    with pytest.raises(ValueError) as e:
+    with pytest.raises(ValueError, match='Invalid method'):
         funcs.poisson_conf_interval(1, 'foo')
-    assert 'Invalid method' in str(e.value)
 
 
 @pytest.mark.skipif('not HAS_SCIPY')
 def test_poisson_conf_kbn_value_errors():
-    with pytest.raises(ValueError) as e:
-        funcs.poisson_conf_interval(5., 'kraft-burrows-nousek',
+    with pytest.raises(ValueError, match='number between 0 and 1'):
+        funcs.poisson_conf_interval(5, 'kraft-burrows-nousek',
                                     background=2.5,
                                     confidence_level=99)
-    assert 'number between 0 and 1' in str(e.value)
 
-    with pytest.raises(ValueError) as e:
-        funcs.poisson_conf_interval(5., 'kraft-burrows-nousek',
+    with pytest.raises(ValueError, match='Set confidence_level for method'):
+        funcs.poisson_conf_interval(5, 'kraft-burrows-nousek',
                                     background=2.5)
-    assert 'Set confidence_level for method' in str(e.value)
 
-    with pytest.raises(ValueError) as e:
-        funcs.poisson_conf_interval(5., 'kraft-burrows-nousek',
+    with pytest.raises(ValueError, match='Background must be'):
+        funcs.poisson_conf_interval(5, 'kraft-burrows-nousek',
                                     background=-2.5,
                                     confidence_level=.99)
-    assert 'Background must be' in str(e.value)
+
+    with pytest.raises(TypeError, match='Number of counts must be integer'):
+        funcs.poisson_conf_interval(5., 'kraft-burrows-nousek',
+                                    background=2.5, confidence_level=.99)
+
+    with pytest.raises(TypeError, match='Number of counts must be integer'):
+        funcs.poisson_conf_interval([5., 6.], 'kraft-burrows-nousek',
+                                    background=[2.5, 2.],
+                                    confidence_level=[.99, .9])
 
 
 @pytest.mark.skipif('HAS_SCIPY or HAS_MPMATH')
 def test_poisson_limit_nodependencies():
     with pytest.raises(ImportError):
         with pytest.warns(AstropyDeprecationWarning):
-            funcs.poisson_conf_interval(20., interval='kraft-burrows-nousek',
+            funcs.poisson_conf_interval(20, interval='kraft-burrows-nousek',
                                         background=10., conflevel=.95)
 
 

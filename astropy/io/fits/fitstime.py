@@ -19,7 +19,7 @@ from astropy.utils.exceptions import AstropyUserWarning
 
 # The following is based on the FITS WCS Paper IV, "Representations of time
 # coordinates in FITS".
-# http://adsabs.harvard.edu/abs/2015A%26A...574A..36R
+# https://ui.adsabs.harvard.edu/abs/2015A%26A...574A..36R
 
 
 # FITS WCS standard specified "4-3" form for non-linear coordinate types
@@ -45,8 +45,7 @@ COLUMN_TIME_KEYWORDS = ('TCTYP', 'TCUNI', 'TRPOS')
 
 
 # Column-specific keywords regex
-COLUMN_TIME_KEYWORD_REGEXP = '({})[0-9]+'.format(
-    '|'.join(COLUMN_TIME_KEYWORDS))
+COLUMN_TIME_KEYWORD_REGEXP = f"({'|'.join(COLUMN_TIME_KEYWORDS)})[0-9]+"
 
 
 def is_time_column_keyword(keyword):
@@ -576,9 +575,9 @@ def time_to_fits(table):
                 if location.size > 1:
                     for dim in ('x', 'y', 'z'):
                         newtable.add_column(Column(getattr(location, dim).to_value(u.m)),
-                                            name='OBSGEO-{}'.format(dim.upper()))
+                                            name=f'OBSGEO-{dim.upper()}')
                 else:
-                    hdr.extend([Card(keyword='OBSGEO-{}'.format(dim.upper()),
+                    hdr.extend([Card(keyword=f'OBSGEO-{dim.upper()}',
                                      value=getattr(location, dim).to_value(u.m))
                             for dim in ('x', 'y', 'z')])
             elif location != col.location:

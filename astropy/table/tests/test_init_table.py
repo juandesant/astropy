@@ -157,7 +157,7 @@ class TestInitFromListOfLists(BaseInitFromListLike):
     def test_partial_names_dtype(self, table_type):
         self._setup(table_type)
         t = table_type(self.data, names=['b', None, 'c'],
-                  dtype=['f4', None, 'f8'])
+                       dtype=['f4', None, 'f8'])
         assert t.colnames == ['b', 'col1', 'c']
         assert t['b'].dtype.type == np.float32
         assert t['col1'].dtype.type == np.int32
@@ -465,6 +465,18 @@ class TestInitFromRows():
         assert "Cannot supply both `data` and `rows` values" in str(err.value)
 
 
+@pytest.mark.parametrize('has_data', [True, False])
+def test_init_table_with_names_and_structured_dtype(has_data):
+    """Test fix for #10393"""
+    arr = np.ones(2, dtype=np.dtype([('a', 'i4'), ('b', 'f4')]))
+    data_args = [arr] if has_data else []
+    t = Table(*data_args, names=['x', 'y'], dtype=arr.dtype)
+    assert t.colnames == ['x', 'y']
+    assert str(t['x'].dtype) == 'int32'
+    assert str(t['y'].dtype) == 'float32'
+    assert len(t) == (2 if has_data else 0)
+
+
 @pytest.mark.usefixtures('table_type')
 def test_init_and_ref_from_multidim_ndarray(table_type):
     """
@@ -514,6 +526,16 @@ def test_init_and_ref_from_dict(table_type, copy):
         assert x2[1] == -100
 
 
+def test_add_none_object_column():
+    """Test fix for a problem introduced in #10636 (see
+    https://github.com/astropy/astropy/pull/10636#issuecomment-676847515)
+    """
+    t = Table(data={'a': [1, 2, 3]})
+    t['b'] = None
+    assert all(val is None for val in t['b'])
+    assert t['b'].dtype.kind == 'O'
+
+
 @pytest.mark.usefixtures('table_type')
 def test_init_from_row_OrderedDict(table_type):
     row1 = OrderedDict([('b', 1), ('a', 0)])
@@ -524,8 +546,10 @@ def test_init_from_row_OrderedDict(table_type):
     rows34 = [row3, row4]
     t1 = table_type(rows=rows12)
     t2 = table_type(rows=rows34)
+    t3 = t2[sorted(t2.colnames)]
     assert t1.colnames == ['b', 'a']
-    assert t2.colnames == ['a', 'b']
+    assert t2.colnames == ['b', 'a']
+    assert t3.colnames == ['a', 'b']
 
 
 def test_init_from_rows_as_generator():

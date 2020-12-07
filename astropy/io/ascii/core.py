@@ -277,7 +277,7 @@ class BaseInputter:
     encoding = None
     """Encoding used to read the file"""
 
-    def get_lines(self, table):
+    def get_lines(self, table, newline=None):
         """
         Get the lines from the ``table`` input. The input table can be one of:
 
@@ -292,6 +292,7 @@ class BaseInputter:
             Can be either a file name, string (newline separated) with all header and data
             lines (must have at least 2 lines), a file-like object with a ``read()`` method,
             or a list of strings.
+        newline: line separator, if `None` use OS default from ``splitlines()``.
 
         Returns
         -------
@@ -304,14 +305,25 @@ class BaseInputter:
                 with get_readable_fileobj(table,
                                           encoding=self.encoding) as fileobj:
                     table = fileobj.read()
-            lines = table.splitlines()
+            if newline is None:
+                lines = table.splitlines()
+            else:
+                lines = table.split(newline)
         except TypeError:
             try:
                 # See if table supports indexing, slicing, and iteration
                 table[0]
                 table[0:1]
                 iter(table)
-                lines = table
+                if len(table) > 1:
+                    lines = table
+                else:
+                    # treat single entry as if string had been passed directly
+                    if newline is None:
+                        lines = table[0].splitlines()
+                    else:
+                        lines = table[0].split(newline)
+
             except TypeError:
                 raise TypeError(
                     'Input "table" must be a string (filename or data) or an iterable')
@@ -696,8 +708,7 @@ class BaseHeader:
                 if (_is_number(name) or len(name) == 0
                         or name[0] in bads or name[-1] in bads):
                     raise InconsistentTableError(
-                        'Column name {!r} does not meet strict name requirements'
-                        .format(name))
+                        f'Column name {name!r} does not meet strict name requirements')
         # When guessing require at least two columns
         if guessing and len(self.colnames) <= 1:
             raise ValueError('Table format guessing requires at least two columns, got {}'
@@ -834,7 +845,7 @@ class BaseData:
         """Replace string values in col.str_vals and set masks"""
         if self.fill_values:
             for col in (col for col in cols if col.fill_values):
-                col.mask = numpy.zeros(len(col.str_vals), dtype=numpy.bool)
+                col.mask = numpy.zeros(len(col.str_vals), dtype=bool)
                 for i, str_val in ((i, x) for i, x in enumerate(col.str_vals)
                                    if x in col.fill_values):
                     col.str_vals[i] = col.fill_values[str_val]
@@ -890,9 +901,9 @@ def convert_numpy(numpy_type):
     ----------
     numpy_type : numpy data-type
         The numpy type required of an array returned by ``converter``. Must be a
-        valid `numpy type <https://docs.scipy.org/doc/numpy/user/basics.types.html>`_,
-        e.g. numpy.int, numpy.uint, numpy.int8, numpy.int64, numpy.float,
-        numpy.float64, numpy.str.
+        valid `numpy type <https://numpy.org/doc/stable/user/basics.types.html>`_
+        (e.g., numpy.uint, numpy.int8, numpy.int64, numpy.float64) or a python
+        type covered by a numpy type (e.g., int, float, str, bool).
 
     Returns
     -------
@@ -933,13 +944,18 @@ def convert_numpy(numpy_type):
         # Try a smaller subset first for a long array
         if len(vals) > 10000:
             svals = numpy.asarray(vals[:1000])
-            if not numpy.all((svals == 'False') | (svals == 'True')):
-                raise ValueError('bool input strings must be only False or True')
+            if not numpy.all((svals == 'False')
+                             | (svals == 'True')
+                             | (svals == '0')
+                             | (svals == '1')):
+                raise ValueError('bool input strings must be False, True, 0, 1, or ""')
         vals = numpy.asarray(vals)
-        trues = vals == 'True'
-        falses = vals == 'False'
+
+        trues = (vals == 'True') | (vals == '1')
+        falses = (vals == 'False') | (vals == '0')
         if not numpy.all(trues | falses):
-            raise ValueError('bool input strings must be only False or True')
+            raise ValueError('bool input strings must be only False, True, 0, 1, or ""')
+
         return trues
 
     def generic_converter(vals):
@@ -1017,14 +1033,36 @@ class BaseOutputter:
                     raise ValueError(f'Column {col.name} failed to convert: {last_err}')
 
 
+def _deduplicate_names(names):
+    """Ensure there are no duplicates in ``names``
+
+    This is done by iteratively adding ``_<N>`` to the name for increasing N
+    until the name is unique.
+    """
+    new_names = []
+    existing_names = set()
+
+    for name in names:
+        base_name = name + '_'
+        i = 1
+        while name in existing_names:
+            # Iterate until a unique name is found
+            name = base_name + str(i)
+            i += 1
+        new_names.append(name)
+        existing_names.add(name)
+
+    return new_names
+
+
 class TableOutputter(BaseOutputter):
     """
     Output the table as an astropy.table.Table object.
     """
 
-    default_converters = [convert_numpy(numpy.int),
-                          convert_numpy(numpy.float),
-                          convert_numpy(numpy.str)]
+    default_converters = [convert_numpy(int),
+                          convert_numpy(float),
+                          convert_numpy(str)]
 
     def __call__(self, cols, meta):
         # Sets col.data to numpy array and col.type to io.ascii Type class (e.g.
@@ -1100,7 +1138,7 @@ def _apply_include_exclude_names(table, names, include_names, exclude_names):
     Parameters
     ----------
     table : `~astropy.table.Table`, `~astropy.io.ascii.BaseHeader`
-        Input table
+        Input table or BaseHeader subclass instance
     names : list
         List of names to override those in table (set to None to use existing names)
     include_names : list
@@ -1109,8 +1147,7 @@ def _apply_include_exclude_names(table, names, include_names, exclude_names):
         List of names to exclude from output (applied after ``include_names``)
 
     """
-
-    if names is not None:
+    def rename_columns(table, names):
         # Rename table column names to those passed by user
         # Temporarily rename with names that are not in `names` or `table.colnames`.
         # This ensures that rename succeeds regardless of existing names.
@@ -1121,13 +1158,21 @@ def _apply_include_exclude_names(table, names, include_names, exclude_names):
         for ii, name in enumerate(names):
             table.rename_column(xxxs + str(ii), name)
 
-    names = set(table.colnames)
+    if names is not None:
+        rename_columns(table, names)
+    else:
+        colnames_uniq = _deduplicate_names(table.colnames)
+        if colnames_uniq != list(table.colnames):
+            rename_columns(table, colnames_uniq)
+
+    names_set = set(table.colnames)
+
     if include_names is not None:
-        names.intersection_update(include_names)
+        names_set.intersection_update(include_names)
     if exclude_names is not None:
-        names.difference_update(exclude_names)
-    if names != set(table.colnames):
-        remove_names = set(table.colnames) - set(names)
+        names_set.difference_update(exclude_names)
+    if names_set != set(table.colnames):
+        remove_names = set(table.colnames) - names_set
         table.remove_columns(remove_names)
 
 
@@ -1206,8 +1251,17 @@ class BaseReader(metaclass=MetaBaseReader):
             if os.linesep not in table + '':
                 self.data.table_name = os.path.basename(table)
 
+        # If one of the newline chars is set as field delimiter, only
+        # accept the other one as line splitter
+        if self.header.splitter.delimiter == '\n':
+            newline = '\r'
+        elif self.header.splitter.delimiter == '\r':
+            newline = '\n'
+        else:
+            newline = None
+
         # Get a list of the lines (rows) in the table
-        self.lines = self.inputter.get_lines(table)
+        self.lines = self.inputter.get_lines(table, newline=newline)
 
         # Set self.data.data_lines to a slice of lines contain the data rows
         self.data.get_data_lines(self.lines)
@@ -1468,7 +1522,12 @@ def _get_reader(Reader, Inputter=None, Outputter=None, **kwargs):
     except TypeError:  # Start line could be None or an instancemethod
         default_header_length = None
 
+    # csv.reader is hard-coded to recognise either '\r' or '\n' as end-of-line,
+    # therefore DefaultSplitter cannot handle these as delimiters.
     if 'delimiter' in kwargs:
+        if kwargs['delimiter'] in ('\n', '\r', '\r\n'):
+            reader.header.splitter = BaseSplitter()
+            reader.data.splitter = BaseSplitter()
         reader.header.splitter.delimiter = kwargs['delimiter']
         reader.data.splitter.delimiter = kwargs['delimiter']
     if 'comment' in kwargs:
@@ -1501,6 +1560,10 @@ def _get_reader(Reader, Inputter=None, Outputter=None, **kwargs):
         reader.header.splitter = kwargs['header_Splitter']()
     if 'names' in kwargs:
         reader.names = kwargs['names']
+        if None in reader.names:
+            raise TypeError('Cannot have None for column name')
+        if len(set(reader.names)) != len(reader.names):
+            raise ValueError('Duplicate column names')
     if 'include_names' in kwargs:
         reader.include_names = kwargs['include_names']
     if 'exclude_names' in kwargs:

@@ -6,11 +6,13 @@ import numpy as np
 from astropy.tests.helper import assert_quantity_allclose
 from astropy import units as u
 from astropy.time import Time
-from astropy.coordinates import EarthLocation, SkyCoord, Angle
+from astropy.coordinates import EarthLocation, SkyCoord, Angle, Distance
 from astropy.coordinates.sites import get_builtin_sites
+from astropy.utils.data import download_file
+from astropy.constants import c as speed_of_light
+from astropy.table import Table
 
 
-@pytest.mark.remote_data
 @pytest.mark.parametrize('kind', ['heliocentric', 'barycentric'])
 def test_basic(kind):
     t0 = Time('2015-1-1')
@@ -37,7 +39,6 @@ test_input_loc = EarthLocation.from_geodetic(lon=-70.403*u.deg,
                                              height=2635*u.m)
 
 
-@pytest.mark.remote_data
 def test_helio_iraf():
     """
     Compare the heliocentric correction to the IRAF rvcorrect.
@@ -199,7 +200,6 @@ def _get_test_input_radecs():
     return SkyCoord(ra=ras, dec=decs, unit=u.deg)
 
 
-@pytest.mark.remote_data
 def test_barycorr():
     # this is the result of calling _get_barycorr_bvcs
     barycorr_bvcs = u.Quantity([
@@ -264,7 +264,6 @@ def _get_barycorr_bvcs(coos, loc, injupyter=False):
     return bvcs*u.m/u.s
 
 
-@pytest.mark.remote_data
 def test_rvcorr_multiple_obstimes_onskycoord():
     loc = EarthLocation(-2309223 * u.m, -3695529 * u.m, -4641767 * u.m)
     arrtime = Time('2005-03-21 00:00:00') + np.linspace(-1, 1, 10)*u.day
@@ -280,7 +279,6 @@ def test_rvcorr_multiple_obstimes_onskycoord():
     assert len(rvcbary_sc3) == 10
 
 
-@pytest.mark.remote_data
 def test_invalid_argument_combos():
     loc = EarthLocation(-2309223 * u.m, -3695529 * u.m, -4641767 * u.m)
     time = Time('2005-03-21 00:00:00')
@@ -301,3 +299,142 @@ def test_invalid_argument_combos():
 
     with pytest.raises(ValueError):
         scwattrs.radial_velocity_correction(timel)
+
+
+def test_regression_9645():
+    sc = SkyCoord(10*u.deg, 20*u.deg, distance=5*u.pc, obstime=test_input_time,
+                  pm_ra_cosdec=0*u.mas/u.yr, pm_dec=0*u.mas/u.yr, radial_velocity=0*u.km/u.s)
+    sc_novel = SkyCoord(10*u.deg, 20*u.deg, distance=5*u.pc, obstime=test_input_time)
+    corr = sc.radial_velocity_correction(obstime=test_input_time, location=test_input_loc)
+    corr_novel = sc_novel.radial_velocity_correction(obstime=test_input_time, location=test_input_loc)
+    assert_quantity_allclose(corr, corr_novel)
+
+
+def test_barycorr_withvels():
+    # this is the result of calling _get_barycorr_bvcs_withvels
+    barycorr_bvcs = u.Quantity(
+        [-10335.94926581, -14198.49117304,  -2237.58656335,
+         -14198.49078575, -17425.47883864, -17131.72711182,
+         2424.38466675,   2130.62819093, -17425.47834604,
+         -19872.51254565, -24442.39064348, -11017.0964353,
+         6978.07515501,  11547.94831175,  -1877.34560543,
+         -19872.51188308, -21430.0931411, -27669.15919972,
+         -16917.09482078,   2729.57757823,  16476.5087925,
+         13971.97955641,  -2898.04451551, -21430.09220144,
+         -22028.52224227, -29301.93613248, -21481.14015151,
+         -3147.44852058,  14959.50849997,  22232.91906264,
+         14412.12044201,  -3921.56783473, -22028.52088749,
+         -21641.02117064, -29373.05982792, -24205.91319258,
+         -8557.34473049,  10250.50560918,  23417.23357219,
+         24781.98113432,  13706.17025059,  -4627.70468688,
+         -21641.01928189, -20284.92926795, -28193.92117514,
+         -22908.52127321,  -6901.82512637,  12336.45557256,
+         25804.5137786,  27200.49576347,  15871.20847332,
+         -2882.25080211, -20284.92696256, -18020.92824383,
+         -25752.96528309, -20585.82211189,  -4937.26088706,
+         13870.58217495,  27037.30698639,  28402.0571686,
+         17326.25314311,  -1007.62313006, -18020.92552769,
+         -14950.32653444, -22223.73793506, -14402.95155047,
+         3930.72325162,  22037.66749783,  29311.07826101,
+         21490.29193529,   3156.62360741, -14950.32373745,
+         -11210.52665171, -17449.59068509,  -6697.54579192,
+         12949.09948082,  26696.01956077,  24191.50403015,
+         7321.50684816, -11210.52389393,  -6968.87610888,
+         -11538.7547047,   1886.50525065,  19881.64366561,
+         24451.52197666,  11026.26396455,  -6968.87351156,
+         -2415.17899385,  -2121.44598968,  17434.60465075,
+         17140.87204017,  -2415.1771038,   2246.79688215,
+         14207.61339552,   2246.79790276,   6808.43888253], u.m/u.s)
+    coos = _get_test_input_radecvels()
+    bvcs_astropy = coos.radial_velocity_correction(obstime=test_input_time,
+                                                   location=test_input_loc)
+    assert_quantity_allclose(bvcs_astropy, barycorr_bvcs, atol=10*u.mm/u.s)
+    return bvcs_astropy, barycorr_bvcs  # for interactively examination
+
+
+def _get_test_input_radecvels():
+    coos = _get_test_input_radecs()
+    ras = coos.ra
+    decs = coos.dec
+    pmra = np.linspace(-1000, 1000, coos.size)*u.mas/u.yr
+    pmdec = np.linspace(0, 1000, coos.size)*u.mas/u.yr
+    rvs = np.linspace(0, 100, coos.size)*u.km/u.s
+    distance = np.linspace(10, 100, coos.size)*u.pc
+    return SkyCoord(ras, decs, pm_ra_cosdec=pmra, pm_dec=pmdec,
+                    radial_velocity=rvs, distance=distance,
+                    obstime=test_input_time)
+
+
+def _get_barycorr_bvcs_withvels(coos, loc, injupyter=False):
+    """
+    Gets the barycentric correction of the test data from the
+    http://astroutils.astronomy.ohio-state.edu/exofast/barycorr.html web site.
+    Requires the https://github.com/tronsgaard/barycorr python interface to that
+    site.
+
+    Provided to reproduce the test data above, but not required to actually run
+    the tests.
+    """
+    import barycorr
+    from astropy.utils.console import ProgressBar
+
+    bvcs = []
+    for coo in ProgressBar(coos, ipython_widget=injupyter):
+        res = barycorr.bvc(test_input_time.utc.jd,
+                           coo.ra.deg, coo.dec.deg,
+                           lat=loc.geodetic[1].deg,
+                           lon=loc.geodetic[0].deg,
+                           pmra=coo.pm_ra_cosdec.to_value(u.mas/u.yr),
+                           pmdec=coo.pm_dec.to_value(u.mas/u.yr),
+                           parallax=coo.distance.to_value(u.mas, equivalencies=u.parallax()),
+                           rv=coo.radial_velocity.to_value(u.m/u.s),
+                           epoch=test_input_time.utc.jd,
+                           elevation=loc.geodetic[2].to(u.m).value)
+        bvcs.append(res)
+    return bvcs*u.m/u.s
+
+
+def test_warning_no_obstime_on_skycoord():
+    c = SkyCoord(l=10*u.degree, b=45*u.degree,
+                 pm_l_cosb=34*u.mas/u.yr, pm_b=-117*u.mas/u.yr,
+                 distance=50*u.pc, frame='galactic')
+    with pytest.warns(Warning):
+        c.radial_velocity_correction('barycentric', test_input_time,
+                                     test_input_loc)
+
+
+@pytest.mark.remote_data
+def test_regression_10094():
+    """
+    Make sure that when we include the proper motion and radial velocity of
+    a SkyCoord, our velocity corrections remain close to TEMPO2.
+
+    We check that tau Ceti is within 5mm/s
+    """
+    # Wright & Eastman (2014) Table2
+    # Corrections for tau Ceti
+    wright_table = Table.read(
+        download_file('http://data.astropy.org/coordinates/wright_eastmann_2014_tau_ceti.fits')
+    )
+    reduced_jds = wright_table['JD-2400000']
+    tempo2 = wright_table['TEMPO2']
+    barycorr = wright_table['BARYCORR']
+
+    # tau Ceti Hipparchos data
+    tauCet = SkyCoord('01 44 05.1275 -15 56 22.4006',
+                      unit=(u.hour, u.deg),
+                      pm_ra_cosdec=-1721.05*u.mas/u.yr,
+                      pm_dec=854.16*u.mas/u.yr,
+                      distance=Distance(parallax=273.96*u.mas),
+                      radial_velocity=-16.597*u.km/u.s,
+                      obstime=Time(48348.5625, format='mjd'))
+    # CTIO location as used in Wright & Eastmann
+    xyz = u.Quantity([1814985.3, -5213916.8, -3187738.1], u.m)
+    obs = EarthLocation(*xyz)
+    times = Time(2400000, reduced_jds, format='jd')
+    tempo2 = tempo2 * speed_of_light
+    barycorr = barycorr * speed_of_light
+    astropy = tauCet.radial_velocity_correction(location=obs, obstime=times)
+
+    assert_quantity_allclose(astropy, tempo2, atol=5*u.mm/u.s)
+    assert_quantity_allclose(astropy, barycorr, atol=5*u.mm/u.s)

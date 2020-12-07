@@ -5,22 +5,21 @@ ephemerides from jplephem.
 """
 
 from urllib.parse import urlparse
-from collections import OrderedDict
+import os.path
 
 import numpy as np
-import os.path
+import erfa
 
 from .sky_coordinate import SkyCoord
 from astropy.utils.data import download_file
-from astropy.utils.decorators import classproperty
+from astropy.utils.decorators import classproperty, deprecated
 from astropy.utils.state import ScienceState
 from astropy.utils import indent
 from astropy import units as u
-from astropy import _erfa as erfa
 from astropy.constants import c as speed_of_light
-from .representation import CartesianRepresentation
+from .representation import CartesianRepresentation, CartesianDifferential
 from .orbital_elements import calc_moon
-from .builtin_frames import GCRS, ICRS
+from .builtin_frames import GCRS, ICRS, ITRS, TETE
 from .builtin_frames.utils import get_jd12
 
 __all__ = ["get_body", "get_moon", "get_body_barycentric",
@@ -30,31 +29,32 @@ __all__ = ["get_body", "get_moon", "get_body_barycentric",
 DEFAULT_JPL_EPHEMERIS = 'de430'
 
 """List of kernel pairs needed to calculate positions of a given object."""
-BODY_NAME_TO_KERNEL_SPEC = OrderedDict([
-    ('sun', [(0, 10)]),
-    ('mercury', [(0, 1), (1, 199)]),
-    ('venus', [(0, 2), (2, 299)]),
-    ('earth-moon-barycenter', [(0, 3)]),
-    ('earth', [(0, 3), (3, 399)]),
-    ('moon', [(0, 3), (3, 301)]),
-    ('mars', [(0, 4)]),
-    ('jupiter', [(0, 5)]),
-    ('saturn', [(0, 6)]),
-    ('uranus', [(0, 7)]),
-    ('neptune', [(0, 8)]),
-    ('pluto', [(0, 9)])
-])
+BODY_NAME_TO_KERNEL_SPEC = {
+    'sun': [(0, 10)],
+    'mercury': [(0, 1), (1, 199)],
+    'venus': [(0, 2), (2, 299)],
+    'earth-moon-barycenter': [(0, 3)],
+    'earth': [(0, 3), (3, 399)],
+    'moon': [(0, 3), (3, 301)],
+    'mars': [(0, 4)],
+    'jupiter': [(0, 5)],
+    'saturn': [(0, 6)],
+    'uranus': [(0, 7)],
+    'neptune': [(0, 8)],
+    'pluto': [(0, 9)],
+}
 
 """Indices to the plan94 routine for the given object."""
-PLAN94_BODY_NAME_TO_PLANET_INDEX = OrderedDict(
-    (('mercury', 1),
-     ('venus', 2),
-     ('earth-moon-barycenter', 3),
-     ('mars', 4),
-     ('jupiter', 5),
-     ('saturn', 6),
-     ('uranus', 7),
-     ('neptune', 8)))
+PLAN94_BODY_NAME_TO_PLANET_INDEX = {
+    'mercury': 1,
+    'venus': 2,
+    'earth-moon-barycenter': 3,
+    'mars': 4,
+    'jupiter': 5,
+    'saturn': 6,
+    'uranus': 7,
+    'neptune': 8,
+}
 
 _EPHEMERIS_NOTE = """
 You can either give an explicit ephemeris or use a default, which is normally
@@ -374,7 +374,7 @@ def get_body_barycentric(body, time, ephemeris=None):
 get_body_barycentric.__doc__ += indent(_EPHEMERIS_NOTE)[4:]
 
 
-def _get_apparent_body_position(body, time, ephemeris):
+def _get_apparent_body_position(body, time, ephemeris, obsgeoloc=None):
     """Calculate the apparent position of body ``body`` relative to Earth.
 
     This corrects for the light-travel time to the object.
@@ -390,7 +390,8 @@ def _get_apparent_body_position(body, time, ephemeris):
     ephemeris : str, optional
         Ephemeris to use.  By default, use the one set with
         ``~astropy.coordinates.solar_system_ephemeris.set``
-
+    obsgeoloc : `~astropy.coordinates.CartesianRepresentation`, optional
+        The GCRS position of the observer
     Returns
     -------
     cartesian_position : `~astropy.coordinates.CartesianRepresentation`
@@ -409,6 +410,8 @@ def _get_apparent_body_position(body, time, ephemeris):
     emitted_time = time
     light_travel_time = 0. * u.s
     earth_loc = get_body_barycentric('earth', time, ephemeris)
+    if obsgeoloc is not None:
+        earth_loc += obsgeoloc
     while np.any(np.fabs(delta_light_travel_time) > 1.0e-8*u.s):
         body_loc = get_body_barycentric(body, emitted_time, ephemeris)
         earth_distance = (body_loc - earth_loc).norm()
@@ -452,19 +455,24 @@ def get_body(body, time, location=None, ephemeris=None):
 
     Notes
     -----
+    The coordinate returned is the apparent position, which is the position of
+    the body at time *t* minus the light travel time from the *body* to the
+    observing *location*.
     """
     if location is None:
         location = time.location
 
-    cartrep = _get_apparent_body_position(body, time, ephemeris)
-    icrs = ICRS(cartrep)
     if location is not None:
         obsgeoloc, obsgeovel = location.get_gcrs_posvel(time)
-        gcrs = icrs.transform_to(GCRS(obstime=time,
-                                      obsgeoloc=obsgeoloc,
-                                      obsgeovel=obsgeovel))
     else:
-        gcrs = icrs.transform_to(GCRS(obstime=time))
+        obsgeoloc, obsgeovel = None, None
+
+    cartrep = _get_apparent_body_position(body, time, ephemeris, obsgeoloc)
+    icrs = ICRS(cartrep)
+    gcrs = icrs.transform_to(GCRS(obstime=time,
+                                  obsgeoloc=obsgeoloc,
+                                  obsgeovel=obsgeovel))
+
     return SkyCoord(gcrs)
 
 
@@ -504,12 +512,25 @@ def get_moon(time, location=None, ephemeris=None):
 get_moon.__doc__ += indent(_EPHEMERIS_NOTE)[4:]
 
 
+deprecation_msg = """
+The use of _apparent_position_in_true_coordinates is deprecated because
+astropy now implements a True Equator True Equinox Frame (TETE), which
+should be used instead.
+"""
+
+
+@deprecated('4.2', deprecation_msg)
 def _apparent_position_in_true_coordinates(skycoord):
     """
     Convert Skycoord in GCRS frame into one in which RA and Dec
     are defined w.r.t to the true equinox and poles of the Earth
     """
-    jd1, jd2 = get_jd12(skycoord.obstime, 'tt')
-    _, _, _, _, _, _, _, rbpn = erfa.pn00a(jd1, jd2)
-    return SkyCoord(skycoord.frame.realize_frame(
-        skycoord.cartesian.transform(rbpn)))
+    location = getattr(skycoord, 'location', None)
+    if location is None:
+        gcrs_rep = skycoord.obsgeoloc.with_differentials(
+            {'s': CartesianDifferential.from_cartesian(skycoord.obsgeovel)})
+        location = (GCRS(gcrs_rep, obstime=skycoord.obstime)
+                    .transform_to(ITRS(obstime=skycoord.obstime))
+                    .earth_location)
+    tete_frame = TETE(obstime=skycoord.obstime, location=location)
+    return skycoord.transform_to(tete_frame)

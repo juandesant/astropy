@@ -9,7 +9,6 @@ from astropy.io.fits.hdu import HDUList, PrimaryHDU, ImageHDU
 from astropy.io.fits.hdu.table import BinTableHDU
 from astropy.io.fits.header import Header
 
-from astropy.tests.helper import catch_warnings
 from astropy.utils.exceptions import AstropyDeprecationWarning
 from astropy.io import fits
 
@@ -667,7 +666,7 @@ class TestDiff(FitsTestCase):
         assert 'Headers contain differences' not in report
         assert 'Data contains differences' in report
         for y in range(10):
-            assert 'Data differs at [{}, 1]'.format(y + 1) in report
+            assert f'Data differs at [{y + 1}, 1]' in report
         assert '100 different pixels found (100.00% different).' in report
 
     def test_partially_identical_files3(self):
@@ -787,9 +786,49 @@ class TestDiff(FitsTestCase):
         hb['C'] = 4
         diffobj = HeaderDiff(ha, hb)
         diffobj.report(fileobj=outpath)
-        with catch_warnings(AstropyDeprecationWarning) as warning_lines:
+        with pytest.warns(AstropyDeprecationWarning, match=r'"clobber" was '
+                          r'deprecated in version 2\.0 and will be removed in a '
+                          r'future version\. Use argument "overwrite" instead\.'):
             diffobj.report(fileobj=outpath, clobber=True)
-            assert warning_lines[0].category == AstropyDeprecationWarning
-            assert (str(warning_lines[0].message) == '"clobber" was '
-                    'deprecated in version 2.0 and will be removed in a '
-                    'future version. Use argument "overwrite" instead.')
+
+
+def test_fitsdiff_hdu_name(tmpdir):
+    """Make sure diff report reports HDU name and ver if same in files"""
+    path1 = str(tmpdir.join("test1.fits"))
+    path2 = str(tmpdir.join("test2.fits"))
+
+    hdulist = HDUList([PrimaryHDU(), ImageHDU(data=np.zeros(5), name="SCI")])
+    hdulist.writeto(path1)
+    hdulist[1].data[0] = 1
+    hdulist.writeto(path2)
+
+    diff = FITSDiff(path1, path2)
+    assert "Extension HDU 1 (SCI, 1):" in diff.report()
+
+
+def test_fitsdiff_no_hdu_name(tmpdir):
+    """Make sure diff report doesn't report HDU name if not in files"""
+    path1 = str(tmpdir.join("test1.fits"))
+    path2 = str(tmpdir.join("test2.fits"))
+
+    hdulist = HDUList([PrimaryHDU(), ImageHDU(data=np.zeros(5))])
+    hdulist.writeto(path1)
+    hdulist[1].data[0] = 1
+    hdulist.writeto(path2)
+
+    diff = FITSDiff(path1, path2)
+    assert "Extension HDU 1:" in diff.report()
+
+
+def test_fitsdiff_with_names(tmpdir):
+    """Make sure diff report doesn't report HDU name if not same in files"""
+    path1 = str(tmpdir.join("test1.fits"))
+    path2 = str(tmpdir.join("test2.fits"))
+
+    hdulist = HDUList([PrimaryHDU(), ImageHDU(data=np.zeros(5), name="SCI", ver=1)])
+    hdulist.writeto(path1)
+    hdulist[1].name = "ERR"
+    hdulist.writeto(path2)
+
+    diff = FITSDiff(path1, path2)
+    assert "Extension HDU 1:" in diff.report()

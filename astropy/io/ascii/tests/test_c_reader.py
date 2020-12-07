@@ -15,14 +15,13 @@ from astropy.io import ascii
 from astropy.io.ascii.core import ParameterError, FastOptionsError, InconsistentTableError
 from astropy.io.ascii.fastbasic import (
     FastBasic, FastCsv, FastTab, FastCommentedHeader, FastRdb, FastNoHeader)
-from astropy.tests.helper import catch_warnings
 from astropy.utils.data import get_pkg_data_filename
 from astropy.utils.exceptions import AstropyWarning
 from .common import assert_equal, assert_almost_equal, assert_true
 
 
 StringIO = lambda x: BytesIO(x.encode('ascii'))  # noqa
-TRAVIS = os.environ.get('TRAVIS', False)
+CI = os.environ.get('CI', False)
 
 
 def assert_table_equal(t1, t2, check_meta=False, rtol=1.e-15, atol=1.e-300):
@@ -72,8 +71,8 @@ def _read(tmpdir, table, Reader=None, format=None, parallel=False, check_meta=Fa
     assert_table_equal(t4, t5, check_meta=check_meta)
 
     if parallel:
-        if TRAVIS:
-            pytest.xfail("Multiprocessing can sometimes fail on Travis CI")
+        if CI:
+            pytest.xfail("Multiprocessing can sometimes fail on CI")
         t6 = ascii.read(table, format=format, guess=False, fast_reader={
             'parallel': True}, **kwargs)
         assert_table_equal(t1, t6, check_meta=check_meta)
@@ -1072,15 +1071,18 @@ def test_data_out_of_range(parallel, fast_reader, guess):
     if parallel:
         if not fast_reader:
             pytest.skip("Multiprocessing only available in fast reader")
-        elif TRAVIS:
-            pytest.xfail("Multiprocessing can sometimes fail on Travis CI")
+        elif CI:
+            pytest.xfail("Multiprocessing can sometimes fail on CI")
+
+    test_for_warnings = fast_reader and not parallel
 
     fields = ['10.1E+199', '3.14e+313', '2048e+306', '0.6E-325', '-2.e345']
     values = np.array([1.01e200, np.inf, np.inf, 0.0, -np.inf])
-    with catch_warnings(AstropyWarning) as w:
+    # NOTE: Warning behavior varies for the parameters being passed in.
+    with pytest.warns(None) as w:
         t = ascii.read(StringIO(' '.join(fields)), format='no_header',
                        guess=guess, fast_reader=fast_reader)
-    if fast_reader and not parallel:  # Assert precision warnings for cols 2-5
+    if test_for_warnings:  # Assert precision warnings for cols 2-5
         assert len(w) == 4
         for i in range(len(w)):
             assert (f"OverflowError converting to FloatType in column col{i+2}"
@@ -1092,10 +1094,10 @@ def test_data_out_of_range(parallel, fast_reader, guess):
     fields = ['.0101E202', '0.000000314E+314', '1777E+305', '-1799E+305',
               '0.2e-323', '5200e-327', ' 0.0000000000000000000001024E+330']
     values = np.array([1.01e200, 3.14e307, 1.777e308, -np.inf, 0.0, 4.94e-324, 1.024e308])
-    with catch_warnings(AstropyWarning) as w:
+    with pytest.warns(None) as w:
         t = ascii.read(StringIO(' '.join(fields)), format='no_header',
                        guess=guess, fast_reader=fast_reader)
-    if fast_reader and not parallel:  # Assert precision warnings for cols 4-6
+    if test_for_warnings:  # Assert precision warnings for cols 4-6
         assert len(w) == 3
         for i in range(len(w)):
             assert (f"OverflowError converting to FloatType in column col{i+4}"
@@ -1111,10 +1113,10 @@ def test_data_out_of_range(parallel, fast_reader, guess):
 
     fields = ['.0101D202', '0.000000314d+314', '1777+305', '-1799E+305',
               '0.2e-323', '2500-327', ' 0.0000000000000000000001024Q+330']
-    with catch_warnings(AstropyWarning) as w:
+    with pytest.warns(None) as w:
         t = ascii.read(StringIO(' '.join(fields)), format='no_header',
                        guess=guess, fast_reader=fast_reader)
-    if fast_reader and not parallel:
+    if test_for_warnings:
         assert len(w) == 3
     read_values = np.array([col[0] for col in t.itercols()])
     assert_almost_equal(read_values, values, rtol=rtol, atol=1.e-324)
@@ -1148,8 +1150,8 @@ def test_data_at_range_limit(parallel, fast_reader, guess):
     if parallel:
         if not fast_reader:
             pytest.skip("Multiprocessing only available in fast reader")
-        elif TRAVIS:
-            pytest.xfail("Multiprocessing can sometimes fail on Travis CI")
+        elif CI:
+            pytest.xfail("Multiprocessing can sometimes fail on CI")
 
     # Test very long fixed-format strings (to strtod range limit w/o Overflow)
     for D in 99, 202, 305:
@@ -1163,22 +1165,24 @@ def test_data_at_range_limit(parallel, fast_reader, guess):
 
     # 0.0 is always exact (no Overflow warning)!
     for s in '0.0', '0.0e+0', 399 * '0' + '.' + 365 * '0':
-        with pytest.warns(None) as w:
-            t = ascii.read(StringIO(s), format='no_header',
-                           guess=guess, fast_reader=fast_reader)
+        t = ascii.read(StringIO(s), format='no_header',
+                       guess=guess, fast_reader=fast_reader)
         assert t['col1'][0] == 0.0
-        assert len(w) == 0
 
     # Test OverflowError at precision limit with laxer rtol
     if parallel:
         pytest.skip("Catching warnings broken in parallel mode")
     elif not fast_reader:
         pytest.skip("Python/numpy reader does not raise on Overflow")
-    with pytest.warns(AstropyWarning, match=r'OverflowError converting to '
-                      r'FloatType in column col1, possibly resulting in '
-                      r'degraded precision'):
+    with pytest.warns(None) as warning_lines:
         t = ascii.read(StringIO('0.' + 314 * '0' + '1'), format='no_header',
                        guess=guess, fast_reader=fast_reader)
+
+    n_warns = len(warning_lines)
+    assert n_warns in (0, 1), f'Expected 0 or 1 warning, found {n_warns}'
+    if n_warns == 1:
+        assert 'OverflowError converting to FloatType in column col1, possibly resulting in degraded precision' in str(warning_lines[0].message)  # noqa
+
     assert_almost_equal(t['col1'][0], 1.e-315, rtol=1.e-10, atol=1.e-324)
 
 
@@ -1195,7 +1199,8 @@ def test_int_out_of_range(parallel, guess):
 
     text = f'P M S\n {imax:d} {imin:d} {huge:s}'
     expected = Table([[imax], [imin], [huge]], names=('P', 'M', 'S'))
-    with catch_warnings(AstropyWarning) as w:
+    # NOTE: Warning behavior varies for the parameters being passed in.
+    with pytest.warns(None) as w:
         table = ascii.read(text, format='basic', guess=guess,
                            fast_reader={'parallel': parallel})
     if not parallel:
@@ -1207,7 +1212,7 @@ def test_int_out_of_range(parallel, guess):
     # Check with leading zeroes to make sure strtol does not read them as octal
     text = f'P M S\n000{imax:d} -0{-imin:d} 00{huge:s}'
     expected = Table([[imax], [imin], ['00' + huge]], names=('P', 'M', 'S'))
-    with catch_warnings(AstropyWarning) as w:
+    with pytest.warns(None) as w:
         table = ascii.read(text, format='basic', guess=guess,
                            fast_reader={'parallel': parallel})
     if not parallel:
@@ -1232,11 +1237,11 @@ def test_int_out_of_order(guess):
     with pytest.warns(AstropyWarning, match=r'OverflowError converting to '
                       r'IntType in column B, reverting to String'):
         table = ascii.read(text, format='basic', guess=guess, fast_reader=True)
-        assert_table_equal(table, expected)
+    assert_table_equal(table, expected)
     with pytest.warns(AstropyWarning, match=r'OverflowError converting to '
                       r'IntType in column B, reverting to String'):
         table = ascii.read(text, format='basic', guess=guess, fast_reader=False)
-        assert_table_equal(table, expected)
+    assert_table_equal(table, expected)
 
 
 @pytest.mark.parametrize("guess", [True, False])
@@ -1291,8 +1296,8 @@ def test_fortran_invalid_exp(parallel, guess):
     exponent-like patterns (no triple-digits) to make sure they are returned
     as strings instead, as with the standard C parser.
     """
-    if parallel and TRAVIS:
-        pytest.xfail("Multiprocessing can sometimes fail on Travis CI")
+    if parallel and CI:
+        pytest.xfail("Multiprocessing can sometimes fail on CI")
 
     formats = {'basic': ' ', 'tab': '\t', 'csv': ','}
     header = ['S1', 'F2', 'S2', 'F3', 'S3', 'F4', 'F5', 'S4', 'I1', 'F6', 'F7']
@@ -1481,3 +1486,65 @@ def test_conversion_fast(fast_reader):
     assert table['F'].dtype.kind in ('S', 'U')
     assert table['G'].dtype.kind in ('S', 'U')
     assert table['H'].dtype.kind in ('S', 'U')
+
+
+@pytest.mark.parametrize('delimiter', ['\n', '\r'])
+@pytest.mark.parametrize('fast_reader', [False, True, 'force'])
+def test_newline_as_delimiter(delimiter, fast_reader):
+    """
+    Check that newline characters are correctly handled as delimiters.
+    Tests the fix for #9928.
+    """
+    if delimiter == '\r':
+        eol = '\n'
+    else:
+        eol = '\r'
+
+    inp0 = ["a  | b | c ", " 1 | '2' | 3.00000 "]
+    inp1 = "a {0:s} b {0:s}c{1:s} 1 {0:s}'2'{0:s} 3.0".format(delimiter, eol)
+    inp2 = [f"a {delimiter} b{delimiter} c",
+            f"1{delimiter} '2' {delimiter} 3.0"]
+
+    t0 = ascii.read(inp0, delimiter='|', fast_reader=fast_reader)
+    t1 = ascii.read(inp1, delimiter=delimiter, fast_reader=fast_reader)
+    t2 = ascii.read(inp2, delimiter=delimiter, fast_reader=fast_reader)
+
+    assert t1.colnames == t2.colnames == ['a', 'b', 'c']
+    assert len(t1) == len(t2) == 1
+    assert t1['b'].dtype.kind in ('S', 'U')
+    assert t2['b'].dtype.kind in ('S', 'U')
+    assert_table_equal(t1, t0)
+    assert_table_equal(t2, t0)
+
+    inp0 = 'a {0:s} b {0:s} c{1:s} 1 {0:s}"2"{0:s} 3.0'.format('|', eol)
+    inp1 = 'a {0:s} b {0:s} c{1:s} 1 {0:s}"2"{0:s} 3.0'.format(delimiter, eol)
+
+    t0 = ascii.read(inp0, delimiter='|', fast_reader=fast_reader)
+    t1 = ascii.read(inp1, delimiter=delimiter, fast_reader=fast_reader)
+
+    if not fast_reader:
+        pytest.xfail("Quoted fields are not parsed correctly by BaseSplitter")
+    assert_equal(t1['b'].dtype.kind, 'i')
+
+
+@pytest.mark.parametrize('delimiter', [' ', '|', '\n', '\r'])
+@pytest.mark.parametrize('fast_reader', [False, True, 'force'])
+def test_single_line_string(delimiter, fast_reader):
+    """
+    String input without a newline character is interpreted as filename,
+    unless element of an iterable. Maybe not logical, but test that it is
+    at least treated consistently.
+    """
+    expected = Table([[1], [2], [3.00]], names=('col1', 'col2', 'col3'))
+    text = "1{0:s}2{0:s}3.0".format(delimiter)
+
+    if delimiter in ('\r', '\n'):
+        t1 = ascii.read(text, format='no_header', delimiter=delimiter, fast_reader=fast_reader)
+        assert_table_equal(t1, expected)
+    else:
+        # Windows raises OSError, but not the other OSes.
+        with pytest.raises((FileNotFoundError, OSError)):
+            t1 = ascii.read(text, format='no_header', delimiter=delimiter, fast_reader=fast_reader)
+
+    t2 = ascii.read([text], format='no_header', delimiter=delimiter, fast_reader=fast_reader)
+    assert_table_equal(t2, expected)

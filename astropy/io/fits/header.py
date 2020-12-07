@@ -73,6 +73,11 @@ class Header:
         ...
 
     See the Astropy documentation for more details on working with headers.
+
+    Notes
+    -----
+    Although FITS keywords must be exclusively upper case, retrieving an item
+    in a `Header` object is case insensitive.
     """
 
     def __init__(self, cards=[], copy=False):
@@ -136,16 +141,20 @@ class Header:
         elif self._haswildcard(key):
             return self.__class__([copy.copy(self._cards[idx])
                                    for idx in self._wildcardmatch(key)])
-        elif (isinstance(key, str) and
-              key.upper() in Card._commentary_keywords):
-            key = key.upper()
-            # Special case for commentary cards
-            return _HeaderCommentaryCards(self, key)
+        elif isinstance(key, str):
+            key = key.strip()
+            if key.upper() in Card._commentary_keywords:
+                key = key.upper()
+                # Special case for commentary cards
+                return _HeaderCommentaryCards(self, key)
+
         if isinstance(key, tuple):
             keyword = key[0]
         else:
             keyword = key
+
         card = self._cards[self._cardindex(key)]
+
         if card.field_specifier is not None and keyword == card.rawkeyword:
             # This is RVKC; if only the top-level keyword was specified return
             # the raw value, not the parsed out float value
@@ -161,7 +170,7 @@ class Header:
             return
 
         if isinstance(value, tuple):
-            if not (0 < len(value) <= 2):
+            if len(value) > 2:
                 raise ValueError(
                     'A Header item may be set with either a scalar value, '
                     'a 1-tuple containing a scalar value, or a 2-tuple '
@@ -744,10 +753,9 @@ class Header:
                         len(blocks) - actual_block_size + BLOCK_SIZE,
                         BLOCK_SIZE))
 
-            if not fileobj.simulateonly:
-                fileobj.flush()
-                fileobj.write(blocks.encode('ascii'))
-                fileobj.flush()
+            fileobj.flush()
+            fileobj.write(blocks.encode('ascii'))
+            fileobj.flush()
         finally:
             if close_file:
                 fileobj.close()
@@ -1004,8 +1012,7 @@ class Header:
         """
 
         if len(args) > 2:
-            raise TypeError('Header.pop expected at most 2 arguments, got '
-                            '{}'.format(len(args)))
+            raise TypeError(f'Header.pop expected at most 2 arguments, got {len(args)}')
 
         if len(args) == 0:
             key = -1
@@ -1401,8 +1408,7 @@ class Header:
             if self._cards[idx].keyword.upper() == norm_keyword:
                 return idx
         else:
-            raise ValueError('The keyword {!r} is not in the '
-                             ' header.'.format(keyword))
+            raise ValueError(f'The keyword {keyword!r} is not in the  header.')
 
     def insert(self, key, card, useblanks=True, after=False):
         """
@@ -1557,8 +1563,7 @@ class Header:
                 raise ValueError('Regular and commentary keys can not be '
                                  'renamed to each other.')
         elif not force and newkeyword in self:
-            raise ValueError('Intended keyword {} already exists in header.'
-                             .format(newkeyword))
+            raise ValueError(f'Intended keyword {newkeyword} already exists in header.')
 
         idx = self.index(oldkeyword)
         card = self._cards[idx]
@@ -1632,7 +1637,7 @@ class Header:
         keyword, value, comment = card
 
         # Lookups for existing/known keywords are case-insensitive
-        keyword = keyword.upper()
+        keyword = keyword.strip().upper()
         if keyword.startswith('HIERARCH '):
             keyword = keyword[9:]
 
@@ -2230,7 +2235,7 @@ class _HeaderCommentaryCards(_CardAccessor):
             yield self._header[(self._keyword, idx)]
 
     def __repr__(self):
-        return '\n'.join(self)
+        return '\n'.join(str(x) for x in self)
 
     def __getitem__(self, idx):
         if isinstance(idx, slice):
@@ -2298,5 +2303,4 @@ def _check_padding(header_str, block_size, is_eof, check_block_size=True):
         # now, but maybe it shouldn't?
         actual_len = len(header_str) - block_size + BLOCK_SIZE
         # TODO: Pass this error to validation framework
-        raise ValueError('Header size is not multiple of {}: {}'
-                         .format(BLOCK_SIZE, actual_len))
+        raise ValueError(f'Header size is not multiple of {BLOCK_SIZE}: {actual_len}')

@@ -3,24 +3,26 @@
 import fnmatch
 import time
 import re
+import sys
 import datetime
 import warnings
 from decimal import Decimal
 from collections import OrderedDict, defaultdict
+from pathlib import Path
 
 import numpy as np
+import erfa
 
-from astropy.utils.decorators import lazyproperty
+from astropy.utils.decorators import lazyproperty, classproperty
 from astropy.utils.exceptions import AstropyDeprecationWarning
 from astropy import units as u
-from astropy import _erfa as erfa
 
 from . import utils
 from .utils import day_frac, quantity_day_frac, two_sum, two_product
-
+from . import conf
 
 __all__ = ['TimeFormat', 'TimeJD', 'TimeMJD', 'TimeFromEpoch', 'TimeUnix',
-           'TimeCxcSec', 'TimeGPS', 'TimeDecimalYear',
+           'TimeUnixTai', 'TimeCxcSec', 'TimeGPS', 'TimeDecimalYear',
            'TimePlotDate', 'TimeUnique', 'TimeDatetime', 'TimeString',
            'TimeISO', 'TimeISOT', 'TimeFITS', 'TimeYearDayTime',
            'TimeEpochDate', 'TimeBesselianEpoch', 'TimeJulianEpoch',
@@ -129,6 +131,7 @@ class TimeFormat(metaclass=TimeFormatMeta):
     """
 
     _default_scale = 'utc'  # As of astropy 0.4
+    subfmts = ()
 
     def __init__(self, val1, val2, scale, precision,
                  in_subfmt, out_subfmt, from_jd=False):
@@ -145,6 +148,40 @@ class TimeFormat(metaclass=TimeFormatMeta):
         else:
             val1, val2 = self._check_val_type(val1, val2)
             self.set_jds(val1, val2)
+
+    @classmethod
+    def _get_allowed_subfmt(cls, subfmt):
+        """Get an allowed subfmt for this class, either the input ``subfmt``
+        if this is valid or '*' as a default.  This method gets used in situations
+        where the format of an existing Time object is changing and so the
+        out_ or in_subfmt may need to be coerced to the default '*' if that
+        ``subfmt`` is no longer valid.
+        """
+        try:
+            cls._select_subfmts(subfmt)
+        except ValueError:
+            subfmt = '*'
+        return subfmt
+
+    @property
+    def in_subfmt(self):
+        return self._in_subfmt
+
+    @in_subfmt.setter
+    def in_subfmt(self, subfmt):
+        # Validate subfmt value for this class, raises ValueError if not.
+        self._select_subfmts(subfmt)
+        self._in_subfmt = subfmt
+
+    @property
+    def out_subfmt(self):
+        return self._out_subfmt
+
+    @out_subfmt.setter
+    def out_subfmt(self, subfmt):
+        # Validate subfmt value for this class, raises ValueError if not.
+        self._select_subfmts(subfmt)
+        self._out_subfmt = subfmt
 
     @property
     def jd1(self):
@@ -212,8 +249,13 @@ class TimeFormat(metaclass=TimeFormatMeta):
     def _check_val_type(self, val1, val2):
         """Input value validation, typically overridden by derived classes"""
         # val1 cannot contain nan, but val2 can contain nan
+        isfinite1 = np.isfinite(val1)
+        if val1.size > 1:  # Calling .all() on a scalar is surprisingly slow
+            isfinite1 = isfinite1.all()  # Note: arr.all() about 3x faster than np.all(arr)
+        elif val1.size == 0:
+            isfinite1 = False
         ok1 = (val1.dtype.kind == 'f' and val1.dtype.itemsize >= 8
-               and np.all(np.isfinite(val1)) or val1.size == 0)
+               and isfinite1 or val1.size == 0)
         ok2 = val2 is None or (
             val2.dtype.kind == 'f' and val2.dtype.itemsize >= 8
             and not np.any(np.isinf(val2))) or val2.size == 0
@@ -251,7 +293,7 @@ class TimeFormat(metaclass=TimeFormatMeta):
             raise TypeError('Cannot mix float and Quantity inputs')
 
         if val2 is None:
-            val2 = np.zeros_like(val1)
+            val2 = np.array(0, dtype=val1.dtype)
 
         def asarray_or_scalar(val):
             """
@@ -292,30 +334,71 @@ class TimeFormat(metaclass=TimeFormatMeta):
         """
         raise NotImplementedError
 
-    def to_value(self, parent=None):
+    def to_value(self, parent=None, out_subfmt=None):
         """
-        Return time representation from internal jd1 and jd2.  This is
-        the base method that ignores ``parent`` and requires that
-        subclasses implement the ``value`` property.  Subclasses that
-        require ``parent`` or have other optional args for ``to_value``
-        should compute and return the value directly.
+        Return time representation from internal jd1 and jd2 in specified
+        ``out_subfmt``.
+
+        This is the base method that ignores ``parent`` and uses the ``value``
+        property to compute the output. This is done by temporarily setting
+        ``self.out_subfmt`` and calling ``self.value``. This is required for
+        legacy Format subclasses prior to astropy 4.0  New code should instead
+        implement the value functionality in ``to_value()`` and then make the
+        ``value`` property be a simple call to ``self.to_value()``.
+
+        Parameters
+        ----------
+        parent : obj
+            Parent `~astropy.time.Time` object associated with this
+            `~astropy.time.TimeFormat` object
+        out_subfmt : str or `None`
+            Output subformt (use existing self.out_subfmt if `None`)
+
+        Returns
+        -------
+        value : numpy.array, numpy.ma.array
+            Array or masked array of formatted time representation values
         """
-        return self.mask_if_needed(self.value)
+        # Get value via ``value`` property, overriding out_subfmt temporarily if needed.
+        if out_subfmt is not None:
+            out_subfmt_orig = self.out_subfmt
+            try:
+                self.out_subfmt = out_subfmt
+                value = self.value
+            finally:
+                self.out_subfmt = out_subfmt_orig
+        else:
+            value = self.value
+
+        return self.mask_if_needed(value)
 
     @property
     def value(self):
         raise NotImplementedError
 
-    def _select_subfmts(self, pattern):
+    @classmethod
+    def _select_subfmts(cls, pattern):
         """
         Return a list of subformats where name matches ``pattern`` using
         fnmatch.
-        """
 
-        fnmatchcase = fnmatch.fnmatchcase
-        subfmts = [x for x in self.subfmts if fnmatchcase(x[0], pattern)]
-        if len(subfmts) == 0:
-            raise ValueError(f'No subformats match {pattern}')
+        If no subformat matches pattern then a ValueError is raised.  A special
+        case is a format with no allowed subformats, i.e. subfmts=(), and
+        pattern='*'.  This is OK and happens when this method is used for
+        validation of an out_subfmt.
+        """
+        if not isinstance(pattern, str):
+            raise ValueError('subfmt attribute must be a string')
+
+        subfmts = [x for x in cls.subfmts if fnmatch.fnmatchcase(x[0], pattern)]
+        if len(subfmts) == 0 and pattern != '*':
+            if len(cls.subfmts) == 0:
+                raise ValueError(f'subformat not allowed for format {cls.name}')
+            else:
+                subfmt_names = [x[0] for x in cls.subfmts]
+                raise ValueError(f'subformat {pattern!r} must match one of '
+                                 f'{subfmt_names} for format {cls.name}')
+
         return subfmts
 
 
@@ -332,9 +415,15 @@ class TimeNumeric(TimeFormat):
 
     def _check_val_type(self, val1, val2):
         """Input value validation, typically overridden by derived classes"""
+        # Save original state of val2 because the super()._check_val_type below
+        # may change val2 from None to np.array(0). The value is saved in order
+        # to prevent a useless and slow call to np.result_type() below in the
+        # most common use-case of providing only val1.
+        orig_val2_is_none = val2 is None
+
         if val1.dtype.kind == 'f':
             val1, val2 = super()._check_val_type(val1, val2)
-        elif (val2 is not None
+        elif (not orig_val2_is_none
               or not (val1.dtype.kind in 'US'
                       or (val1.dtype.kind == 'O'
                           and all(isinstance(v, Decimal) for v in val1.flat)))):
@@ -343,9 +432,11 @@ class TimeNumeric(TimeFormat):
                 'and second values are only allowed for doubles.'
                 .format(self.name))
 
+        val_dtype = (val1.dtype if orig_val2_is_none else
+                     np.result_type(val1.dtype, val2.dtype))
         subfmts = self._select_subfmts(self.in_subfmt)
         for subfmt, dtype, convert, _ in subfmts:
-            if np.issubdtype(val1.dtype, dtype):
+            if np.issubdtype(val_dtype, dtype):
                 break
         else:
             raise ValueError('input type not among selected sub-formats.')
@@ -487,7 +578,7 @@ class TimeDecimalYear(TimeNumeric):
         dt_end = (jd1_end - jd1_start) + (jd2_end - jd2_start)
         decimalyear = iy_start + dt / dt_end
 
-        return super().to_value(jd1=decimalyear, jd2=0., **kwargs)
+        return super().to_value(jd1=decimalyear, jd2=np.float64(0.0), **kwargs)
 
     value = property(to_value)
 
@@ -499,17 +590,18 @@ class TimeFromEpoch(TimeNumeric):
     or days).
     """
 
-    def __init__(self, val1, val2, scale, precision,
-                 in_subfmt, out_subfmt, from_jd=False):
-        self.scale = scale
-        # Initialize the reference epoch (a single time defined in subclasses)
-        epoch = Time(self.epoch_val, self.epoch_val2, scale=self.epoch_scale,
-                     format=self.epoch_format)
-        self.epoch = epoch
+    @classproperty(lazy=True)
+    def _epoch(cls):
+        # Ideally we would use `def epoch(cls)` here and not have the instance
+        # property below. However, this breaks the sphinx API docs generation
+        # in a way that was not resolved. See #10406 for details.
+        return Time(cls.epoch_val, cls.epoch_val2, scale=cls.epoch_scale,
+                    format=cls.epoch_format)
 
-        # Now create the TimeFormat object as normal
-        super().__init__(val1, val2, scale, precision, in_subfmt, out_subfmt,
-                         from_jd)
+    @property
+    def epoch(self):
+        """Reference epoch time from which the time interval is measured"""
+        return self._epoch
 
     def set_jds(self, val1, val2):
         """
@@ -532,6 +624,19 @@ class TimeFromEpoch(TimeNumeric):
 
         jd1 = self.epoch.jd1 + day
         jd2 = self.epoch.jd2 + frac
+
+        # For the usual case that scale is the same as epoch_scale, we only need
+        # to ensure that abs(jd2) <= 0.5. Since abs(self.epoch.jd2) <= 0.5 and
+        # abs(frac) <= 0.5, we can do simple (fast) checks and arithmetic here
+        # without another call to day_frac(). Note also that `round(jd2.item())`
+        # is about 10x faster than `np.round(jd2)`` for a scalar.
+        if self.epoch.scale == self.scale:
+            jd1_extra = np.round(jd2) if jd2.shape else round(jd2.item())
+            jd1 += jd1_extra
+            jd2 -= jd1_extra
+
+            self.jd1, self.jd2 = jd1, jd2
+            return
 
         # Create a temporary Time object corresponding to the new (jd1, jd2) in
         # the epoch scale (e.g. UTC for TimeUnix) then convert that to the
@@ -585,7 +690,8 @@ class TimeFromEpoch(TimeNumeric):
 
 class TimeUnix(TimeFromEpoch):
     """
-    Unix time: seconds from 1970-01-01 00:00:00 UTC.
+    Unix time: seconds from 1970-01-01 00:00:00 UTC, ignoring leap seconds.
+
     For example, 946684800.0 in Unix time is midnight on January 1, 2000.
 
     NOTE: this quantity is not exactly unix time and differs from the strict
@@ -600,6 +706,43 @@ class TimeUnix(TimeFromEpoch):
     epoch_val2 = None
     epoch_scale = 'utc'
     epoch_format = 'iso'
+
+
+class TimeUnixTai(TimeUnix):
+    """
+    Seconds from 1970-01-01 00:00:08 TAI (see notes), including leap seconds.
+
+    This will generally differ from Unix time by the cumulative integral number
+    of leap seconds since 1970-01-01 UTC.  This convention matches the definition
+    for linux CLOCK_TAI (https://www.cl.cam.ac.uk/~mgk25/posix-clocks.html).
+
+    Caveats:
+
+    - Before 1972, fractional adjustments to UTC were made, so the difference
+      between ``unix`` and ``unix_tai`` time is no longer an integer.
+    - Because of the fractional adjustments, to be very precise, ``unix_tai``
+      is the number of seconds since ``1970-01-01 00:00:08 TAI`` or equivalently
+      ``1969-12-31 23:59:59.999918 UTC``.  The difference between TAI and UTC
+      at that epoch was 8.000082 sec.
+    - On the day of a leap second the difference between ``unix`` and ``unix_tai``
+      times increases linearly through the day by 1.0.  See also the
+      documentation for the `~astropy.time.TimeUnix` class.
+
+    Examples
+    --------
+
+      >>> from astropy.time import Time
+      >>> t = Time('2020-01-01', scale='utc')
+      >>> t.unix_tai - t.unix
+      29.0
+
+      >>> t = Time('1970-01-01', scale='utc')
+      >>> t.unix_tai - t.unix  # doctest: +FLOAT_CMP
+      8.200000198854696e-05
+    """
+    name = 'unix_tai'
+    epoch_val = '1970-01-01 00:00:08'
+    epoch_scale = 'tai'
 
 
 class TimeCxcSec(TimeFromEpoch):
@@ -663,6 +806,27 @@ class TimePlotDate(TimeFromEpoch):
     epoch_scale = 'utc'
     epoch_format = 'jd'
 
+    @lazyproperty
+    def epoch(self):
+        """Reference epoch time from which the time interval is measured"""
+        try:
+            # Matplotlib >= 3.3 has a get_epoch() function
+            from matplotlib.dates import get_epoch
+        except ImportError:
+            # If no get_epoch() then the epoch is '0001-01-01'
+            _epoch = self._epoch
+        else:
+            # Get the matplotlib date epoch as an ISOT string in UTC
+            epoch_utc = get_epoch()
+            from erfa import ErfaWarning
+            with warnings.catch_warnings():
+                # Catch possible dubious year warnings from erfa
+                warnings.filterwarnings('ignore', category=ErfaWarning)
+                _epoch = Time(epoch_utc, scale='utc', format='isot')
+            _epoch.format = 'jd'
+
+        return _epoch
+
 
 class TimeStardate(TimeFromEpoch):
     """
@@ -709,17 +873,39 @@ class TimeAstropyTime(TimeUnique):
 
         if scale is None:
             scale = val1_0.scale
+
         if val1.shape:
             vals = [getattr(val, scale)._time for val in val1]
             jd1 = np.concatenate([np.atleast_1d(val.jd1) for val in vals])
             jd2 = np.concatenate([np.atleast_1d(val.jd2) for val in vals])
+
+            # Collect individual location values and merge into a single location.
+            if any(tm.location is not None for tm in val1):
+                if any(tm.location is None for tm in val1):
+                    raise ValueError('cannot concatenate times unless all locations '
+                                     'are set or no locations are set')
+                locations = []
+                for tm in val1:
+                    location = np.broadcast_to(tm.location, tm._time.jd1.shape,
+                                               subok=True)
+                    locations.append(np.atleast_1d(location))
+
+                location = np.concatenate(locations)
+
+            else:
+                location = None
         else:
             val = getattr(val1_0, scale)._time
             jd1, jd2 = val.jd1, val.jd2
+            location = val1_0.location
 
         OutTimeFormat = val1_0._time.__class__
         self = OutTimeFormat(jd1, jd2, scale, precision, in_subfmt, out_subfmt,
                              from_jd=True)
+
+        # Make a temporary hidden attribute to transfer location back to the
+        # parent Time object where it needs to live.
+        self._location = location
 
         return self
 
@@ -772,7 +958,7 @@ class TimeDatetime(TimeUnique):
                               *iterator.operands[1:])
         self.jd1, self.jd2 = day_frac(jd1, jd2)
 
-    def to_value(self, timezone=None, parent=None):
+    def to_value(self, timezone=None, parent=None, out_subfmt=None):
         """
         Convert to (potentially timezone-aware) `~datetime.datetime` object.
 
@@ -789,6 +975,11 @@ class TimeDatetime(TimeUnique):
         `~datetime.datetime`
             If ``timezone`` is not ``None``, output will be timezone-aware.
         """
+        if out_subfmt is not None:
+            # Out_subfmt not allowed for this format, so raise the standard
+            # exception by trying to validate the value.
+            self._select_subfmts(out_subfmt)
+
         if timezone is not None:
             if self._scale != 'utc':
                 raise ScaleValueError("scale is {}, must be 'utc' when timezone "
@@ -1019,13 +1210,81 @@ class TimeString(TimeUnique):
     This class assumes that anything following the last decimal point to the
     right is a fraction of a second.
 
-    This is a reference implementation can be made much faster with effort.
+    **Fast C-based parser**
+
+    Time format classes can take advantage of a fast C-based parser if the times
+    are represented as fixed-format strings with year, month, day-of-month,
+    hour, minute, second, OR year, day-of-year, hour, minute, second. This can
+    be a factor of 20 or more faster than the pure Python parser.
+
+    Fixed format means that the components always have the same number of
+    characters. The Python parser will accept ``2001-9-2`` as a date, but the C
+    parser would require ``2001-09-02``.
+
+    A subclass in this case must define a class attribute ``fast_parser_pars``
+    which is a `dict` with all of the keys below. An inherited attribute is not
+    checked, only an attribute in the class ``__dict__``.
+
+    - ``delims`` (tuple of int): ASCII code for character at corresponding
+      ``starts`` position (0 => no character)
+
+    - ``starts`` (tuple of int): position where component starts (including
+      delimiter if present). Use -1 for the month component for format that use
+      day of year.
+
+    - ``stops`` (tuple of int): position where component ends. Use -1 to
+      continue to end of string, or for the month component for formats that use
+      day of year.
+
+    - ``break_allowed`` (tuple of int): if true (1) then the time string can
+          legally end just before the corresponding component (e.g. "2000-01-01"
+          is a valid time but "2000-01-01 12" is not).
+
+    - ``has_day_of_year`` (int): 0 if dates have year, month, day; 1 if year,
+      day-of-year
     """
+
+    @classproperty(lazy=True)
+    def time_struct_dtype(cls):
+        return np.dtype([('year', np.intc),
+                         ('month', np.intc),
+                         ('day', np.intc),
+                         ('hour', np.intc),
+                         ('minute', np.intc),
+                         ('second_int', np.intc),
+                         ('second_frac', np.double)])
+
+    @classproperty(lazy=True)
+    def lib_parse_time(cls):
+        """Class property for ctypes library for fast C parsing of string times."""
+        import numpy.ctypeslib as npct
+        from ctypes import c_int
+
+        # Input types in the parse_times.c code
+        array_1d_char = npct.ndpointer(dtype=np.uint8, ndim=1, flags='C_CONTIGUOUS')
+        array_1d_int = npct.ndpointer(dtype=np.intc, ndim=1, flags='C_CONTIGUOUS')
+
+        array_1d_time_struct = npct.ndpointer(dtype=cls.time_struct_dtype,
+                                              ndim=1, flags='C_CONTIGUOUS')
+
+        # load the library, using numpy mechanisms
+        libpt = npct.load_library("_parse_times", Path(__file__).parent)
+
+        # Set up the return types and argument types for parse_ymdhms_times()
+        # int parse_ymdhms_times(char *times, int n_times, int max_str_len,
+        #                    char *delims, int *starts, int *stops, int *break_allowed,
+        #                    int *years, int *months, int *days, int *hours,
+        #                    int *minutes, double *seconds)
+        libpt.parse_ymdhms_times.restype = c_int
+        libpt.parse_ymdhms_times.argtypes = [array_1d_char, c_int, c_int, c_int,
+                                             array_1d_char, array_1d_int, array_1d_int,
+                                             array_1d_int, array_1d_time_struct]
+
+        return libpt
 
     def _check_val_type(self, val1, val2):
         if val1.dtype.kind not in ('S', 'U') and val1.size:
-            raise TypeError('Input values for {} class must be strings'
-                            .format(self.name))
+            raise TypeError(f'Input values for {self.name} class must be strings')
         if val2 is not None:
             raise ValueError(
                 f'{self.name} objects do not accept a val2 but you provided {val2}')
@@ -1069,11 +1328,33 @@ class TimeString(TimeUnique):
             vals[-1] = vals[-1] + fracsec
             return vals
         else:
-            raise ValueError('Time {} does not match {} format'
-                             .format(timestr, self.name))
+            raise ValueError(f'Time {timestr} does not match {self.name} format')
 
     def set_jds(self, val1, val2):
         """Parse the time strings contained in val1 and set jd1, jd2"""
+        # If specific input subformat is required then use the Python parser.
+        # Also do this if Time format class does not define `use_fast_parser` or
+        # if the fast parser is entirely disabled. Note that `use_fast_parser`
+        # is ignored for format classes that don't have a fast parser.
+        if (self.in_subfmt != '*'
+                or 'fast_parser_pars' not in self.__class__.__dict__
+                or conf.use_fast_parser == 'False'):
+            jd1, jd2 = self.get_jds_python(val1, val2)
+        else:
+            try:
+                jd1, jd2 = self.get_jds_fast(val1, val2)
+            except Exception:
+                # Fall through to the Python parser unless fast is forced.
+                if conf.use_fast_parser == 'force':
+                    raise
+                else:
+                    jd1, jd2 = self.get_jds_python(val1, val2)
+
+        self.jd1 = jd1
+        self.jd2 = jd2
+
+    def get_jds_python(self, val1, val2):
+        """Parse the time strings contained in val1 and get jd1, jd2"""
         # Select subformats based on current self.in_subfmt
         subfmts = self._select_subfmts(self.in_subfmt)
         # Be liberal in what we accept: convert bytes to ascii.
@@ -1091,7 +1372,67 @@ class TimeString(TimeUnique):
 
         jd1, jd2 = erfa.dtf2d(self.scale.upper().encode('ascii'),
                               *iterator.operands[1:])
-        self.jd1, self.jd2 = day_frac(jd1, jd2)
+        jd1, jd2 = day_frac(jd1, jd2)
+
+        return jd1, jd2
+
+    def get_jds_fast(self, val1, val2):
+        """Use fast C parser to parse time strings in val1 and get jd1, jd2"""
+        # Handle bytes or str input and flatten down to a single array of uint8.
+        if val1.dtype.kind == 'U':
+            val1_str_len = val1.dtype.itemsize // 4
+            # Check that this is pure ASCII.
+            if np.any(val1.view((np.uint32, val1_str_len)) > 127):
+                raise ValueError('input is not pure ASCII')
+
+            # It might be possible to avoid having ravel() make a copy with
+            # cleverness in parse_times.c but leave that for another day.
+            if sys.byteorder == 'big':  # pragma: no cover
+                chars = val1.view((np.uint8, 4*val1_str_len))[..., 3::4].ravel()
+            else:
+                chars = val1.view((np.uint8, 4*val1_str_len))[..., ::4].ravel()
+
+        else:
+            val1_str_len = val1.dtype.itemsize
+            chars = val1.view((np.uint8, val1_str_len)).ravel()
+
+        # Pre-allocate output components
+        n_times = val1.size
+        time_struct = np.empty(n_times, dtype=self.time_struct_dtype)
+
+        # Set up parser parameters as numpy arrays for passing to C parser
+        pars = self.fast_parser_pars
+        delims = np.array(pars['delims'], dtype=np.uint8)
+        starts = np.array(pars['starts'], dtype=np.intc)
+        stops = np.array(pars['stops'], dtype=np.intc)
+        break_allowed = np.array(pars['break_allowed'], dtype=np.intc)
+
+        # Call C parser
+        status = self.lib_parse_time.parse_ymdhms_times(
+            chars, n_times, val1_str_len, pars['has_day_of_year'],
+            delims, starts, stops, break_allowed, time_struct)
+
+        if status == 0:
+            # All went well, finish the job
+            jd1, jd2 = erfa.dtf2d(self.scale.upper().encode('ascii'),
+                                  time_struct['year'],
+                                  time_struct['month'],
+                                  time_struct['day'],
+                                  time_struct['hour'],
+                                  time_struct['minute'],
+                                  time_struct['second_int'] + time_struct['second_frac'])
+            jd1.shape = val1.shape
+            jd2.shape = val1.shape
+            jd1, jd2 = day_frac(jd1, jd2)
+        else:
+            msgs = {1: 'time string ends at beginning of component where break is not allowed',
+                    2: 'time string ends in middle of component',
+                    3: 'required delimiter character not found',
+                    4: 'non-digit found where digit (0-9) required',
+                    5: 'bad day of year (1 <= doy <= 365 or 366 for leap year'}
+            raise ValueError(f'fast C time string parser failed: {msgs[status]}')
+
+        return jd1, jd2
 
     def str_kwargs(self):
         """
@@ -1177,6 +1518,23 @@ class TimeISO(TimeString):
                 '%Y-%m-%d',
                 '{year:d}-{mon:02d}-{day:02d}'))
 
+    # Define positions and starting delimiter for year, month, day, hour,
+    # minute, seconds components of an ISO time. This is used by the fast
+    # C-parser parse_ymdhms_times()
+    #
+    #  "2000-01-12 13:14:15.678"
+    #   01234567890123456789012
+    #   yyyy-mm-dd hh:mm:ss.fff
+    # Parsed as ('yyyy', '-mm', '-dd', ' hh', ':mm', ':ss', '.fff')
+    fast_parser_pars = dict(
+        delims=(0, ord('-'), ord('-'), ord(' '), ord(':'), ord(':'), ord('.')),
+        starts=(0, 4, 7, 10, 13, 16, 19),
+        stops=(3, 6, 9, 12, 15, 18, -1),
+        # Break allowed *before*
+        #              y  m  d  h  m  s  f
+        break_allowed=(0, 0, 0, 1, 0, 1, 1),
+        has_day_of_year=0)
+
     def parse_string(self, timestr, subfmts):
         # Handle trailing 'Z' for UTC time
         if timestr.endswith('Z'):
@@ -1212,6 +1570,16 @@ class TimeISOT(TimeISO):
                 '%Y-%m-%d',
                 '{year:d}-{mon:02d}-{day:02d}'))
 
+    # See TimeISO for expanation
+    fast_parser_pars = dict(
+        delims=(0, ord('-'), ord('-'), ord('T'), ord(':'), ord(':'), ord('.')),
+        starts=(0, 4, 7, 10, 13, 16, 19),
+        stops=(3, 6, 9, 12, 15, 18, -1),
+        # Break allowed *before*
+        #              y  m  d  h  m  s  f
+        break_allowed=(0, 0, 0, 1, 0, 1, 1),
+        has_day_of_year=0)
+
 
 class TimeYearDayTime(TimeISO):
     """
@@ -1236,6 +1604,28 @@ class TimeYearDayTime(TimeISO):
                ('date',
                 '%Y:%j',
                 '{year:d}:{yday:03d}'))
+
+    # Define positions and starting delimiter for year, month, day, hour,
+    # minute, seconds components of an ISO time. This is used by the fast
+    # C-parser parse_ymdhms_times()
+    #
+    #  "2000:123:13:14:15.678"
+    #   012345678901234567890
+    #   yyyy:ddd:hh:mm:ss.fff
+    # Parsed as ('yyyy', ':ddd', ':hh', ':mm', ':ss', '.fff')
+    #
+    # delims: character at corresponding `starts` position (0 => no character)
+    # starts: position where component starts (including delimiter if present)
+    # stops: position where component ends (-1 => continue to end of string)
+
+    fast_parser_pars = dict(
+        delims=(0, 0, ord(':'), ord(':'), ord(':'), ord(':'), ord('.')),
+        starts=(0, -1, 4, 8, 11, 14, 17),
+        stops=(3, -1, 7, 10, 13, 16, -1),
+        # Break allowed before:
+        #              y  m  d  h  m  s  f
+        break_allowed=(0, 0, 0, 1, 0, 1, 1),
+        has_day_of_year=1)
 
 
 class TimeDatetime64(TimeISOT):
@@ -1333,8 +1723,7 @@ class TimeFITS(TimeString):
             if tm:
                 break
         else:
-            raise ValueError('Time {} does not match {} format'
-                             .format(timestr, self.name))
+            raise ValueError(f'Time {timestr} does not match {self.name} format')
         tm = tm.groupdict()
         # Scale and realization are deprecated and strings in this form
         # are no longer created.  We issue a warning but still use the value.
@@ -1389,7 +1778,7 @@ class TimeEpochDate(TimeNumeric):
     def to_value(self, **kwargs):
         jd_to_epoch = getattr(erfa, self.jd_to_epoch)
         value = jd_to_epoch(self.jd1, self.jd2)
-        return super().to_value(jd1=value, jd2=0., **kwargs)
+        return super().to_value(jd1=value, jd2=np.float64(0.0), **kwargs)
 
     value = property(to_value)
 
@@ -1440,8 +1829,7 @@ class TimeEpochDateString(TimeString):
                 if epoch_type.upper() != epoch_prefix:
                     raise ValueError
             except (IndexError, ValueError, UnicodeEncodeError):
-                raise ValueError('Time {} does not match {} format'
-                                 .format(time_str, self.name))
+                raise ValueError(f'Time {time_str} does not match {self.name} format')
             else:
                 years[...] = year
 
@@ -1603,4 +1991,6 @@ def _broadcast_writeable(jd1, jd2):
     return s_jd1, s_jd2
 
 
+# Import symbols from core.py that are used in this module. This succeeds
+# because __init__.py imports format.py just before core.py.
 from .core import Time, TIME_SCALES, TIME_DELTA_SCALES, ScaleValueError  # noqa

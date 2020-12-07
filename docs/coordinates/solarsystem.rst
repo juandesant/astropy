@@ -7,7 +7,7 @@ Solar System Ephemerides
 
 `astropy.coordinates` can calculate the |SkyCoord| of some of the major solar
 system objects. By default, it uses approximate orbital elements calculated
-using built-in `ERFA <https://github.com/liberfa/erfa>`_ routines, but it can
+using PyERFA_ routines, but it can
 also use more precise ones using the JPL ephemerides (which are derived from
 dynamical models). The default JPL ephemerides (DE430) provide predictions
 valid roughly for the years between 1550 and 2650. The file is 115 MB and will
@@ -27,6 +27,13 @@ return |SkyCoord| objects in the `~astropy.coordinates.GCRS` frame, while the
 latter returns a `~astropy.coordinates.CartesianRepresentation` of the
 barycentric position of a body (i.e., in the `~astropy.coordinates.ICRS` frame).
 
+Examples
+--------
+
+..
+  EXAMPLE START
+  Using the Solar System Ephemerides
+
 Here is an example of using these functions with built-in ephemerides (i.e.,
 without the need to download a large ephemerides file)::
 
@@ -38,8 +45,8 @@ without the need to download a large ephemerides file)::
   >>> with solar_system_ephemeris.set('builtin'):
   ...     jup = get_body('jupiter', t, loc) # doctest: +REMOTE_DATA +IGNORE_OUTPUT
   >>> jup  # doctest: +FLOAT_CMP +REMOTE_DATA
-  <SkyCoord (GCRS: obstime=2014-09-22 23:22:00.000, obsgeoloc=(3949481.68990863, -550931.91188162, 4961151.73733451) m, obsgeovel=(40.15954083, 287.47876693, -0.04597867) m / s): (ra, dec, distance) in (deg, deg, AU)
-      (136.91116209, 17.02935409, 5.94386022)>
+  <SkyCoord (GCRS: obstime=2014-09-22 23:22:00.000, obsgeoloc=(3949481.69182405, -550931.91022387, 4961151.73597633) m, obsgeovel=(40.159527, 287.47873161, -0.04597922) m / s): (ra, dec, distance) in (deg, deg, AU)
+      (136.91116253, 17.02935396, 5.94386022)>
 
 Above, we used ``solar_system_ephemeris`` as a context, which sets the default
 ephemeris while in the ``with`` clause, and resets it at the end.
@@ -56,11 +63,11 @@ ephemeris is set):
   >>> solar_system_ephemeris.set('de432s') # doctest: +REMOTE_DATA, +IGNORE_OUTPUT
   <ScienceState solar_system_ephemeris: 'de432s'>
   >>> get_body('jupiter', t, loc) # doctest: +REMOTE_DATA, +FLOAT_CMP
-  <SkyCoord (GCRS: obstime=2014-09-22 23:22:00.000, obsgeoloc=(3949481.69230491, -550931.90674055, 4961151.73597586) m, obsgeovel=(40.15954083, 287.47863521, -0.0459789) m / s): (ra, dec, distance) in (deg, deg, km)
-      (136.90234802, 17.03160667, 8.89196021e+08)>
+  <SkyCoord (GCRS: obstime=2014-09-22 23:22:00.000, obsgeoloc=(3949481.69182405, -550931.91022387, 4961151.73597633) m, obsgeovel=(40.159527, 287.47873161, -0.04597922) m / s): (ra, dec, distance) in (deg, deg, km)
+      (136.90234846, 17.03160654, 8.89196021e+08)>
   >>> get_moon(t, loc) # doctest: +REMOTE_DATA, +FLOAT_CMP
-  <SkyCoord (GCRS: obstime=2014-09-22 23:22:00.000, obsgeoloc=(3949481.69230491, -550931.90674055, 4961151.73597586) m, obsgeovel=(40.15954083, 287.47863521, -0.0459789) m / s): (ra, dec, distance) in (deg, deg, km)
-      (165.51849203, 2.32863886, 407229.6503193)>
+  <SkyCoord (GCRS: obstime=2014-09-22 23:22:00.000, obsgeoloc=(3949481.69182405, -550931.91022387, 4961151.73597633) m, obsgeovel=(40.159527, 287.47873161, -0.04597922) m / s): (ra, dec, distance) in (deg, deg, km)
+      (165.51854528, 2.32861794, 407229.55638763)>
   >>> get_body_barycentric('moon', t) # doctest: +REMOTE_DATA, +FLOAT_CMP
   <CartesianRepresentation (x, y, z) in km
       (  1.50107535e+08, -866789.11996916, -418963.55218495)>
@@ -78,6 +85,9 @@ to the various functions:
   ... # doctest: +FLOAT_CMP
   <CartesianRepresentation (x, y, z) in km
       (  1.50107516e+08, -866828.92702829, -418980.15907332)>
+
+..
+  EXAMPLE END
 
 For a list of the bodies for which positions can be calculated, do:
 
@@ -123,19 +133,16 @@ For a list of the bodies for which positions can be calculated, do:
 
 .. _astropy-coordinates-solarsystem-erfa-precision:
 
-Precision of the built-in ephemeris
+Precision of the Built-In Ephemeris
 ===================================
 
-The algorithm for calcuting positions and velocities for planets other than
-Earth used by ERFA is due to J.L. Simon, P. Bretagnon, J. Chapront,
+The algorithm for calculating positions and velocities for planets other than
+Earth used by ERFA_ is due to J.L. Simon, P. Bretagnon, J. Chapront,
 M. Chapront-Touze, G. Francou and J. Laskar (Bureau des Longitudes, Paris,
 France).  From comparisons with JPL ephemeris DE102, they quote the maximum
-errors over the interval 1800-2050 below. For more details see
-`cextern/erfa/plan94.c
-<https://github.com/astropy/astropy/blob/master/cextern/erfa/plan94.c>`_.
+errors over the interval 1800-2050 below. For more details, see the PyERFA_ routine, `erfa.plan94`.
 For the Earth, the rms errors in position and velocity are about 4.6 km and
-1.4 mm/s, respectively (see `cextern/erfa/epv00.c
-<https://github.com/astropy/astropy/blob/master/cextern/erfa/epv00.c>`_).
+1.4 mm/s, respectively (see `erfa.epv00`).
 
 .. list-table::
 

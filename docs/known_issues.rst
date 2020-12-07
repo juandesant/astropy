@@ -119,6 +119,27 @@ Both will throw an exception if units do not cancel, e.g.::
 
 See: https://github.com/astropy/astropy/issues/7582
 
+Numpy array creation functions cannot be used to initialize Quantity
+--------------------------------------------------------------------
+Trying the following example will throw an UnitConversionError
+on NumPy before version 1.20 and ignore the unit in later versions:
+
+.. doctest-requires:: numpy<1.20
+
+    >>> my_quantity = u.Quantity(1, u.m)
+    >>> np.full(10, my_quantity)  # doctest: +IGNORE_EXCEPTION_DETAIL
+    Traceback (most recent call last):
+    ...
+    UnitConversionError: 'm' (length) and '' (dimensionless) are not convertible
+
+A workaround for this at the moment would be to do::
+
+    >>> np.full(10, 1) << u.m
+    <Quantity [1., 1., 1., 1., 1., 1., 1., 1., 1., 1.] m>
+
+As well as with `~numpy.full` one cannot do `~numpy.zeros`, `~numpy.ones`, and `~numpy.empty`.
+
+
 Quantities Lose Their Units When Broadcasted
 --------------------------------------------
 
@@ -209,7 +230,7 @@ supported in the basic Python command-line interpreter on Windows.
 ``numpy.int64`` does not decompose input ``Quantity`` objects
 -------------------------------------------------------------
 
-Python's ``int()`` (and therefore ``numpy.int``) goes through ``__index__``
+Python's ``int()`` goes through ``__index__``
 while ``numpy.int64`` or ``numpy.int_`` do not go through ``__index__``. This
 means that an upstream fix in ``numpy` is required in order for
 ``astropy.units`` to control decomposing the input in these functions::
@@ -218,13 +239,23 @@ means that an upstream fix in ``numpy` is required in order for
     1
     >>> np.int_((15 * u.km) / (15 * u.imperial.foot))
     1
-    >>> np.int((15 * u.km) / (15 * u.imperial.foot))
-    3280
     >>> int((15 * u.km) / (15 * u.imperial.foot))
     3280
 
 To convert a dimensionless `~astropy.units.Quantity` to an integer, it is
 therefore recommended to use ``int(...)``.
+
+Inconsistent behavior when converting complex numbers to floats
+---------------------------------------------------------------
+
+Attempting to use `float` or NumPy's ``numpy.float`` on a standard
+complex number (e.g., ``5 + 6j``) results in a `TypeError`.  In
+contrast, using `float` or ``numpy.float`` on a complex number from
+NumPy (e.g., ``numpy.complex128``) drops the imaginary component and
+issues a ``numpy.ComplexWarning``.  This inconsistency persists between
+`~astropy.units.Quantity` instances based on standard and NumPy
+complex numbers.  To get the real part of a complex number, it is
+recommended to use ``numpy.real``.
 
 Build/Installation/Test Issues
 ==============================
@@ -243,7 +274,7 @@ versions with ``conda search astropy``.
 Locale Errors in MacOS X and Linux
 ----------------------------------
 
-On MacOS X, you may see the following error when running ``setup.py``::
+On MacOS X, you may see the following error when running ``pip``::
 
     ...
     ValueError: unknown locale: UTF-8
@@ -284,44 +315,8 @@ see something like::
     LC_TIME="en_US.UTF-8"
     LC_ALL="en_US.UTF-8"
 
-If so, you can go ahead and try running ``setup.py`` again (in the new
+If so, you can go ahead and try running ``pip`` again (in the new
 terminal).
-
-
-Creating a Time Object Fails with ValueError After Upgrading ``astropy``
-------------------------------------------------------------------------
-
-In some cases, when users have upgraded ``astropy`` from an older version to v1.0
-or greater, they have run into the following crash when trying to create an
-`~astropy.time.Time` object::
-
-    >>> from astropy.time import Time
-    >>> datetime = Time('2012-03-01T13:08:00', scale='utc') # doctest: +SKIP
-    Traceback (most recent call last):
-    ...
-    ValueError: Input values did not match any of the formats where
-    the format keyword is optional [u'astropy_time', u'datetime',
-    u'jyear_str', u'iso', u'isot', u'yday', u'byear_str']
-
-This problem can occur when there is a version mismatch between the compiled
-ERFA library (included as part of ``astropy`` in most distributions), and
-the version of the ``astropy`` Python source.
-
-This can be from a number of causes. The most likely is that when installing the
-new ``astropy`` version, your previous ``astropy`` version was not fully uninstalled
-first, resulting in a mishmash of versions. Your best bet is to fully remove
-``astropy`` from its installation path and reinstall from scratch using your
-preferred installation method. Removing the old version may be achieved by
-removing the entire ``astropy/`` directory from within the
-``site-packages`` directory it is installed in. However, if in doubt, ask
-how best to uninstall packages from your preferred Python distribution.
-
-Another possible cause of this error, in particular for people developing on
-Astropy and installing from a source checkout, is that your Astropy build
-directory is unclean. To fix this, run ``git clean -dfx``. This removes
-*all* build artifacts from the repository that aren't normally tracked by git.
-Make sure before running this that there are no untracked files in the
-repository you intend to save. Then rebuild/reinstall from the clean repo.
 
 
 Failing Logging Tests When Running the Tests in IPython
@@ -330,7 +325,7 @@ Failing Logging Tests When Running the Tests in IPython
 When running the Astropy tests using ``astropy.test()`` in an IPython
 interpreter, some of the tests in the ``astropy/tests/test_logger.py`` *might*
 fail depending on the version of IPython or other factors.
-This is due to mutually incompatible behaviors in IPython and py.test, and is
+This is due to mutually incompatible behaviors in IPython and pytest, and is
 not due to a problem with the test itself or the feature being tested.
 
 See: https://github.com/astropy/astropy/issues/717

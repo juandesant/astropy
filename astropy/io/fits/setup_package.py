@@ -4,7 +4,7 @@ import os
 import sys
 from collections import defaultdict
 
-from distutils.core import Extension
+from setuptools import Extension
 from glob import glob
 
 import numpy
@@ -18,27 +18,31 @@ def _get_compression_extension():
 
     cfg = defaultdict(list)
     cfg['include_dirs'].append(numpy.get_include())
-    cfg['sources'].append(os.path.join(os.path.dirname(__file__), 'src', 'compressionmodule.c'))
+    cfg['sources'].append(os.path.join(os.path.dirname(__file__),
+                                       'src', 'compressionmodule.c'))
 
     if (int(os.environ.get('ASTROPY_USE_SYSTEM_CFITSIO', 0)) or
             int(os.environ.get('ASTROPY_USE_SYSTEM_ALL', 0))):
-        cfg.update(setup_helpers.pkg_config(['cfitsio'], ['cfitsio']))
+        for k, v in pkg_config(['cfitsio'], ['cfitsio']).items():
+            cfg[k].extend(v)
     else:
         if get_compiler() == 'msvc':
             # These come from the CFITSIO vcc makefile, except the last
             # which ensures on windows we do not include unistd.h (in regular
             # compilation of cfitsio, an empty file would be generated)
             cfg['extra_compile_args'].extend(
-                ['/D', '"WIN32"',
-                 '/D', '"_WINDOWS"',
-                 '/D', '"_MBCS"',
-                 '/D', '"_USRDLL"',
-                 '/D', '"_CRT_SECURE_NO_DEPRECATE"',
-                 '/D', '"FF_NO_UNISTD_H"'])
+                ['/D', 'WIN32',
+                 '/D', '_WINDOWS',
+                 '/D', '_MBCS',
+                 '/D', '_USRDLL',
+                 '/D', '_CRT_SECURE_NO_DEPRECATE',
+                 '/D', 'FF_NO_UNISTD_H'])
         else:
             cfg['extra_compile_args'].extend([
                 '-Wno-declaration-after-statement'
             ])
+
+            cfg['define_macros'].append(('HAVE_UNISTD_H', None))
 
             if not debug:
                 # these switches are to silence warnings from compiling CFITSIO

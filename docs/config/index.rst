@@ -39,6 +39,9 @@ Note that ``XDG_CONFIG_HOME`` comes from a Linux-centric specification (see
 more details), but Astropy will use this on any OS as a more general means to
 know where user-specific configurations should be written.
 
+.. note::
+    See :ref:`astropy_config_file` for the content of this configuration file.
+
 Once you have found the configuration file, open it with your favorite editor.
 It should have all of the sections you might want, with descriptions and the
 type of value that is accepted. Feel free to edit this as you wish, and
@@ -83,8 +86,14 @@ configuration file as described above. Values can also, however, be
 modified in an active Python session by setting any of the properties
 on a ``conf`` object.
 
-For example, if there is a part of your configuration file that looks
-like:
+Example
+^^^^^^^
+
+..
+  EXAMPLE START
+  Changing the Persistent State of Configuration Values at Runtime
+
+If there is a part of your configuration file that looks like:
 
 .. code-block:: ini
 
@@ -110,12 +119,23 @@ You should be able to modify the values at runtime this way::
     >>> conf.remote_timeout
     4.5
 
+..
+  EXAMPLE END
+
 Reloading Configuration
 -----------------------
 
 Instead of modifying the variables in Python, you can also modify the
-configuration files and then reload them. For example, if you modify the
-configuration file to say:
+configuration files and then reload them.
+
+Example
+^^^^^^^
+
+..
+  EXAMPLE START
+  Modifying and Reloading Configuration Files
+
+If you modify the configuration file to say:
 
 .. code-block:: ini
 
@@ -147,6 +167,7 @@ once by calling ``reload`` with no parameters::
 Or if you want to reload all Astropy configuration at once, use the
 `~astropy.config.reload_config` function::
 
+    >>> from astropy import config
     >>> config.reload_config('astropy')
 
 You can also reset a configuration parameter back to its default value. Note
@@ -156,6 +177,40 @@ do with the configuration file on disk::
     >>> conf.reset('dataurl')
     >>> conf.dataurl
     'http://data.astropy.org/'
+
+..
+  EXAMPLE END
+
+Exploring Configuration
+-----------------------
+
+To see what configuration parameters are defined for a given ``conf``::
+
+    >>> from astropy.utils.iers import conf
+    >>> [key for key in conf]
+    ['auto_download',
+     'auto_max_age',
+     ...,
+     'ietf_leap_second_auto_url']
+    >>> conf.auto_max_age
+    30.0
+
+You can also iterate through ``conf`` in a dictionary-like fashion::
+
+    >>> [key for key in conf.keys()]
+    ['auto_download',
+     'auto_max_age',
+     ...,
+     'ietf_leap_second_auto_url']
+    >>> [cfgitem for cfgitem in conf.values()]
+    [<ConfigItem: name='auto_download' value=True at ...>,
+     <ConfigItem: name='auto_max_age' value=30.0 at ...>,
+     ...,
+     <ConfigItem: name='ietf_leap_second_auto_url' value=...>]
+    >>> for (key, cfgitem) in conf.items():
+    ...     if key == 'auto_max_age':
+    ...         print(f'{cfgitem.description} Value is {cfgitem()}')
+    Maximum age (days) of predictive data before auto-downloading. Default is 30. Value is 30.0
 
 Upgrading ``astropy``
 ---------------------
@@ -353,19 +408,18 @@ Or, if the option needs to be available as a function parameter::
         return (conf.some_setting if val is None else val) + 2
 
 
-
-Customising Config in Affiliated Packages
+Customizing Config in Affiliated Packages
 =========================================
 
-The `astropy.config` package can be used by other pacakges. By default creating
+The `astropy.config` package can be used by other packages. By default creating
 a config object in another package will lead to a configuration file taking the
-name of that package in the astropy config directory. i.e.
-``<astropy_config>/packagename.cfg``.
+name of that package in the ``astropy`` config directory (i.e.,
+``<astropy_config>/packagename.cfg``).
 
 
 It is possible to configure this behavior so that the a custom configuration
-directory is created for your package, for example
-``~/.packagename/packagename.cfg``. To do this create a ``packagename.config``
+directory is created for your package, for example,
+``~/.packagename/packagename.cfg``. To do this, create a ``packagename.config``
 subpackage and put the following into the ``__init__.py`` file::
 
   import astropy.config as astropyconfig
@@ -387,6 +441,7 @@ See Also
 .. toctree::
    :maxdepth: 2
 
+   astropy_config
    config_0_4_transition
 
 :doc:`/logging` (overview of `astropy.logger`)

@@ -9,23 +9,31 @@ configuration files for Astropy and affiliated packages.
     found at http://www.voidspace.org.uk/python/configobj.html.
 """
 
-from contextlib import contextmanager
-import hashlib
 import io
-from os import path
 import re
+import hashlib
+import pathlib
+import pkgutil
+import warnings
+import importlib
+import contextlib
+from os import path
+from textwrap import TextWrapper
 from warnings import warn
+from contextlib import contextmanager
 
 from astropy.extern.configobj import configobj, validate
-from astropy.utils.exceptions import AstropyWarning, AstropyDeprecationWarning
-from astropy.utils import find_current_module
+from astropy.utils import find_current_module, silence
+from astropy.utils.exceptions import AstropyDeprecationWarning, AstropyWarning
 from astropy.utils.introspection import resolve_name
-from .paths import get_config_dir
+from astropy.utils.compat.context import nullcontext
 
+from .paths import get_config_dir
 
 __all__ = ['InvalidConfigurationItemWarning',
            'ConfigurationMissingWarning', 'get_config',
-           'reload_config', 'ConfigNamespace', 'ConfigItem']
+           'reload_config', 'ConfigNamespace', 'ConfigItem',
+           'generate_config']
 
 
 class InvalidConfigurationItemWarning(AstropyWarning):
@@ -91,6 +99,25 @@ class ConfigNamespace(metaclass=_ConfigNamespaceMeta):
                 aliases=['astropy.utils.console.USE_COLOR'])
         conf = Conf()
     """
+    def __iter__(self):
+        for key, val in self.__class__.__dict__.items():
+            if isinstance(val, ConfigItem):
+                yield key
+
+    keys = __iter__
+    """Iterate over configuration item names."""
+
+    def values(self):
+        """Iterate over configuration item values."""
+        for val in self.__class__.__dict__.values():
+            if isinstance(val, ConfigItem):
+                yield val
+
+    def items(self):
+        """Iterate over configuration item ``(name, value)`` pairs."""
+        for key, val in self.__class__.__dict__.items():
+            if isinstance(val, ConfigItem):
+                yield key, val
 
     def set_temp(self, attr, value):
         """
@@ -131,9 +158,8 @@ class ConfigNamespace(metaclass=_ConfigNamespaceMeta):
                 return self.__class__.__dict__[attr].reload()
             raise AttributeError(f"No configuration parameter '{attr}'")
 
-        for item in self.__class__.__dict__.values():
-            if isinstance(item, ConfigItem):
-                item.reload()
+        for item in self.values():
+            item.reload()
 
     def reset(self, attr=None):
         """
@@ -152,9 +178,8 @@ class ConfigNamespace(metaclass=_ConfigNamespaceMeta):
                 return
             raise AttributeError(f"No configuration parameter '{attr}'")
 
-        for item in self.__class__.__dict__.values():
-            if isinstance(item, ConfigItem):
-                item.set(item.defaultvalue)
+        for item in self.values():
+            item.set(item.defaultvalue)
 
 
 class ConfigItem:
@@ -570,6 +595,90 @@ def get_config(packageormod=None, reload=False, rootname=None):
         return cobj
 
 
+def generate_config(pkgname='astropy', filename=None, verbose=False):
+    """Generates a configuration file, from the list of `ConfigItem`
+    objects for each subpackage.
+
+    .. versionadded:: 4.1
+
+    Parameters
+    ----------
+    pkgname : str or None
+        The package for which to retrieve the configuration object.
+    filename : str or file object or None
+        If None, the default configuration path is taken from `get_config`.
+
+    """
+    if verbose:
+        verbosity = nullcontext
+        filter_warnings = AstropyDeprecationWarning
+    else:
+        verbosity = silence
+        filter_warnings = Warning
+
+    package = importlib.import_module(pkgname)
+    with verbosity(), warnings.catch_warnings():
+        warnings.simplefilter('ignore', category=filter_warnings)
+        for mod in pkgutil.walk_packages(path=package.__path__,
+                                         prefix=package.__name__ + '.'):
+
+            if (mod.module_finder.path.endswith(('test', 'tests')) or
+                    mod.name.endswith('setup_package')):
+                # Skip test and setup_package modules
+                continue
+            if mod.name.split('.')[-1].startswith('_'):
+                # Skip private modules
+                continue
+
+            with contextlib.suppress(ImportError):
+                importlib.import_module(mod.name)
+
+    wrapper = TextWrapper(initial_indent="## ", subsequent_indent='## ',
+                          width=78)
+
+    if filename is None:
+        filename = get_config(pkgname).filename
+
+    with contextlib.ExitStack() as stack:
+        if isinstance(filename, (str, pathlib.Path)):
+            fp = stack.enter_context(open(filename, 'w'))
+        else:
+            # assume it's a file object, or io.StringIO
+            fp = filename
+
+        # Parse the subclasses, ordered by their module name
+        subclasses = ConfigNamespace.__subclasses__()
+        processed = set()
+
+        for conf in sorted(subclasses, key=lambda x: x.__module__):
+            mod = conf.__module__
+
+            # Skip modules for other packages, e.g. astropy modules that
+            # would be imported when running the function for astroquery.
+            if mod.split('.')[0] != pkgname:
+                continue
+
+            # Check that modules are not processed twice, which can happen
+            # when they are imported in another module.
+            if mod in processed:
+                continue
+            else:
+                processed.add(mod)
+
+            print_module = True
+            for item in conf().values():
+                if print_module:
+                    # If this is the first item of the module, we print the
+                    # module name, but not if this is the root package...
+                    if item.module != pkgname:
+                        modname = item.module.replace(f'{pkgname}.', '')
+                        fp.write(f"[{modname}]\n\n")
+                    print_module = False
+
+                fp.write(wrapper.fill(item.description) + '\n')
+                fp.write(f'# {item.name} = {item.defaultvalue}\n\n')
+
+
 def reload_config(packageormod=None, rootname=None):
     """ Reloads configuration settings from a configuration file for the root
     package of the requested package/module.
@@ -714,7 +823,7 @@ def update_default_config(pkg, default_cfg_dir_or_fn, version=None, rootname='as
 
     # Don't install template files for dev versions, or we'll end up
     # spamming `~/.astropy/config`.
-    if 'dev' not in version and cfgfn is not None:
+    if version and 'dev' not in version and cfgfn is not None:
         template_path = path.join(
             get_config_dir(rootname=rootname), f'{pkg}.{version}.cfg')
         needs_template = not path.exists(template_path)

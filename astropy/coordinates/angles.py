@@ -31,26 +31,51 @@ class Angle(u.SpecificTypeQuantity):
     below), string, `~astropy.units.Quantity` or another
     :class:`~astropy.coordinates.Angle`.
 
-    The input parser is flexible and supports a variety of formats::
+    The input parser is flexible and supports a variety of formats.
+    The examples below illustrate common ways of initializing an `Angle`
+    object. First some imports::
 
-      Angle('10.2345d')
-      Angle(['10.2345d', '-20d'])
-      Angle('1:2:30.43 degrees')
-      Angle('1 2 0 hours')
-      Angle(np.arange(1, 8), unit=u.deg)
-      Angle('1°2′3″')
-      Angle('1°2′3″N')
-      Angle('1d2m3.4s')
-      Angle('1d2m3.4sS')
-      Angle('-1h2m3s') 
-      Angle('-1h2m3sE')
-      Angle('-1h2.5m')
-      Angle('-1h2.5mW')
-      Angle('-1:2.5', unit=u.deg)
-      Angle((10, 11, 12), unit='hourangle')  # (h, m, s)
-      Angle((-1, 2, 3), unit=u.deg)  # (d, m, s)
-      Angle(10.2345 * u.deg)
-      Angle(Angle(10.2345 * u.deg))
+      >>> from . import angle_utilities as util
+      >>> from astropy import units as u
+
+    The angle values can now be provided::
+
+      >>> Angle('10.2345d')
+      <Angle 10.2345 deg>
+      >>> Angle(['10.2345d', '-20d'])
+      <Angle [ 10.2345, -20.    ] deg>
+      >>> Angle('1:2:30.43 degrees')
+      <Angle 1.04178611 deg>
+      >>> Angle('1 2 0 hours')
+      <Angle 1.03333333 hourangle>
+      >>> Angle(np.arange(1, 8), unit=u.deg)
+      <Angle [1., 2., 3., 4., 5., 6., 7.] deg>
+      >>> Angle('1°2′3″')
+      <Angle 1.03416667 deg>
+      >>> Angle('1°2′3″N')
+      <Angle 1.03416667 deg>
+      >>> Angle('1d2m3.4s')
+      <Angle 1.03427778 deg>
+      >>> Angle('1d2m3.4sS')
+      <Angle -1.03427778 deg>
+      >>> Angle('-1h2m3s')
+      <Angle -1.03416667 hourangle>
+      >>> Angle('-1h2m3sE')
+      <Angle -1.03416667 hourangle>
+      >>> Angle('-1h2.5m')
+      <Angle -1.04166667 hourangle>
+      >>> Angle('-1h2.5mW')
+      <Angle 1.04166667 hourangle>
+      >>> Angle('-1:2.5', unit=u.deg)
+      <Angle -1.04166667 deg>
+      >>> Angle((10, 11, 12), unit='hourangle')  # (h, m, s)
+      <Angle 10.18666667 hourangle>
+      >>> Angle((-1, 2, 3), unit=u.deg)  # (d, m, s)
+      <Angle -1.03416667 deg>
+      >>> Angle(10.2345 * u.deg)
+      <Angle 10.2345 deg>
+      >>> Angle(Angle(10.2345 * u.deg))
+      <Angle 10.2345 deg>
 
     Parameters
     ----------
@@ -83,7 +108,7 @@ class Angle(u.SpecificTypeQuantity):
     _equivalent_unit = u.radian
     _include_easy_conversion_members = True
 
-    def __new__(cls, angle, unit=None, dtype=None, copy=True):
+    def __new__(cls, angle, unit=None, dtype=None, copy=True, **kwargs):
 
         if not isinstance(angle, u.Quantity):
             if unit is not None:
@@ -109,7 +134,8 @@ class Angle(u.SpecificTypeQuantity):
                        angle.dtype.kind not in 'SUVO')):
                 angle = [Angle(x, unit, copy=False) for x in angle]
 
-        return super().__new__(cls, angle, unit, dtype=dtype, copy=copy)
+        return super().__new__(cls, angle, unit, dtype=dtype, copy=copy,
+                               **kwargs)
 
     @staticmethod
     def _tuple_to_float(angle, unit):
@@ -123,8 +149,7 @@ class Angle(u.SpecificTypeQuantity):
         elif unit == u.degree:
             return util.dms_to_degrees(*angle)
         else:
-            raise u.UnitsError("Can not parse '{}' as unit '{}'"
-                               .format(angle, unit))
+            raise u.UnitsError(f"Can not parse '{angle}' as unit '{unit}'")
 
     @staticmethod
     def _convert_unit_to_angle_unit(unit):
@@ -317,9 +342,7 @@ class Angle(u.SpecificTypeQuantity):
                     func = plain_unit_format
             else:
                 raise ValueError(
-                    "'{}' can not be represented in sexagesimal "
-                    "notation".format(
-                        unit.name))
+                    f"'{unit.name}' can not be represented in sexagesimal notation")
 
         else:
             raise u.UnitsError(
@@ -523,7 +546,12 @@ class Latitude(Angle):
             angles = self
         lower = u.degree.to(angles.unit, -90.0)
         upper = u.degree.to(angles.unit, 90.0)
-        if np.any(angles.value < lower) or np.any(angles.value > upper):
+        # This invalid catch block can be removed when the minimum numpy
+        # version is >= 1.19 (NUMPY_LT_1_19)
+        with np.errstate(invalid='ignore'):
+            invalid_angles = (np.any(angles.value < lower) or
+                              np.any(angles.value > upper))
+        if invalid_angles:
             raise ValueError('Latitude angle(s) must be within -90 deg <= angle <= 90 deg, '
                              'got {}'.format(angles.to(u.degree)))
 
@@ -636,6 +664,9 @@ class Longitude(Angle):
         wrap_angle_floor = wrap_angle - a360
         self_angle = self.value
         # Do the wrapping, but only if any angles need to be wrapped
+        #
+        # This invalid catch block can be removed when the minimum numpy
+        # version is >= 1.19 (NUMPY_LT_1_19)
         with np.errstate(invalid='ignore'):
             wraps = (self_angle - wrap_angle_floor) // a360
         if np.any(wraps != 0):

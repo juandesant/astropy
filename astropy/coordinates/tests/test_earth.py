@@ -286,7 +286,7 @@ def test_repr_latex():
 
 @pytest.mark.remote_data
 # TODO: this parametrize should include a second option with a valid Google API
-# key. For example, we should make an API key for Astropy, and add it to Travis
+# key. For example, we should make an API key for Astropy, and add it to GitHub Actions
 # as an environment variable (for security).
 @pytest.mark.parametrize('google_api_key', [None])
 def test_of_address(google_api_key):
@@ -302,7 +302,7 @@ def test_of_address(google_api_key):
     try:
         loc = EarthLocation.of_address("New York, NY")
     except NameResolveError as e:
-        # API limit might surface even here in Travis CI.
+        # API limit might surface even here in CI.
         if 'unknown failure with' not in str(e):
             pytest.xfail(str(e))
     else:
@@ -404,3 +404,9 @@ def test_read_only_input():
     lon.flags.writeable = lat.flags.writeable = False
     loc = EarthLocation.from_geodetic(lon=lon, lat=lat)
     assert quantity_allclose(loc[1].x, loc[0].x)
+
+
+def test_info():
+    EarthLocation._get_site_registry(force_builtin=True)
+    greenwich = EarthLocation.of_site('greenwich')
+    assert str(greenwich.info).startswith('name = Royal Observatory Greenwich')

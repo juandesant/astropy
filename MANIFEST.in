@@ -7,7 +7,6 @@ include CITATION
 include astropy/CITATION
 include pyproject.toml
 
-include ah_bootstrap.py
 include setup.cfg
 recursive-include astropy *.pyx *.c *.h *.map *.templ
 
@@ -25,6 +24,10 @@ recursive-include licenses *
 recursive-include cextern *
 recursive-include scripts *
 recursive-include static *
+
+# This subpckage is only used in development checkouts and should not be
+# included in built tarballs
+prune astropy/_dev
 
 prune docs/_build
 prune build

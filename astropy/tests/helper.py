@@ -9,13 +9,12 @@ import types
 import pickle
 import warnings
 import functools
-from distutils.version import LooseVersion
 
 import pytest
 
 try:
     # Import pkg_resources to prevent it from issuing warnings upon being
-    # imported from within py.test.  See
+    # imported from within pytest.  See
     # https://github.com/astropy/astropy/pull/537 for a detailed explanation.
     import pkg_resources  # pylint: disable=W0611  # noqa
 except ImportError:
@@ -90,6 +89,8 @@ def _save_coverage(cov, result, rootdir, testing_path):
     cov.html_report(directory=os.path.join(rootdir, 'htmlcov'))
 
 
+# TODO: Plan a roadmap of deprecation as pytest.raises has matured over the years.
+# See https://github.com/astropy/astropy/issues/6761
 class raises:
     """
     A decorator to mark that a test should raise a given exception.
@@ -103,6 +104,9 @@ class raises:
     an alias for the ``pytest.raises`` context manager (because the
     two have the same name this help avoid confusion by being
     flexible).
+
+    .. note:: Usage of ``pytest.raises`` is preferred.
+
     """
 
     # pep-8 naming exception -- this is a decorator class
@@ -127,7 +131,7 @@ class raises:
 _deprecations_as_exceptions = False
 _include_astropy_deprecations = True
 _modules_to_ignore_on_import = set([
-    r'compiler',  # A deprecated stdlib module used by py.test
+    r'compiler',  # A deprecated stdlib module used by pytest
     r'scipy',
     r'pygments',
     r'ipykernel',
@@ -139,7 +143,7 @@ _warnings_to_ignore_by_pyver = {
         # https://github.com/astropy/astropy/pull/7372
         (r"Importing from numpy\.testing\.decorators is deprecated, "
          r"import from numpy\.testing instead\.", DeprecationWarning),
-        # inspect raises this slightly different warning on Python 3.6-3.7.
+        # inspect raises this slightly different warning on Python 3.7.
         # Keeping it since e.g. lxml as of 3.8.0 is still calling getargspec()
         (r"inspect\.getargspec\(\) is deprecated, use "
          r"inspect\.signature\(\) or inspect\.getfullargspec\(\)",
@@ -238,7 +242,7 @@ def treat_deprecations_as_exceptions():
     # Hide the next couple of DeprecationWarnings
     warnings.simplefilter('ignore', DeprecationWarning)
     # Here's the wrinkle: a couple of our third-party dependencies
-    # (py.test and scipy) are still using deprecated features
+    # (pytest and scipy) are still using deprecated features
     # themselves, and we'd like to ignore those.  Fortunately, those
     # show up only at import time, so if we import those things *now*,
     # before we turn the warnings into exceptions, we're golden.
@@ -280,11 +284,13 @@ def treat_deprecations_as_exceptions():
     except ImportError:
         pass
     else:
-        if LooseVersion(matplotlib.__version__) < '3':
+        if matplotlib.__version__[0] < '3':
             warnings.filterwarnings('ignore', category=DeprecationWarning,
                                     module='numpy.lib.type_check')
 
 
+# TODO: Plan a roadmap of deprecation as pytest.warns has matured over the years.
+# See https://github.com/astropy/astropy/issues/6761
 class catch_warnings(warnings.catch_warnings):
     """
     A high-powered version of warnings.catch_warnings to use for testing
@@ -302,6 +308,9 @@ class catch_warnings(warnings.catch_warnings):
         with catch_warnings(MyCustomWarning) as w:
             do.something.bad()
         assert len(w) > 0
+
+    .. note:: Usage of :ref:`pytest.warns <pytest:warns>` is preferred.
+
     """
 
     def __init__(self, *classes):

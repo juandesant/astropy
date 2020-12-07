@@ -1,20 +1,20 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
 import os
-import urllib.request
 import warnings
+from pathlib import Path
 
 import pytest
 import numpy as np
 
-from astropy.tests.helper import assert_quantity_allclose, catch_warnings
+from astropy.tests.helper import assert_quantity_allclose
+from astropy.utils.data import get_pkg_data_filename
 from astropy.utils.iers import iers
 from astropy import units as u
 from astropy.table import QTable
 from astropy.time import Time, TimeDelta
 
-
-TRAVIS = os.environ.get('TRAVIS', False)
+CI = os.environ.get('CI', False)
 
 FILE_NOT_FOUND_ERROR = getattr(__builtins__, 'FileNotFoundError', OSError)
 
@@ -25,7 +25,18 @@ except OSError:
 else:
     HAS_IERS_A = True
 
-IERS_A_EXCERPT = os.path.join(os.path.dirname(__file__), 'data', 'iers_a_excerpt')
+IERS_A_EXCERPT = get_pkg_data_filename(os.path.join('data', 'iers_a_excerpt'))
+
+
+def setup_module():
+    # Need auto_download so that IERS_B won't be loaded and cause tests to
+    # fail. Files to be downloaded are handled appropriately in the tests.
+    iers.conf.auto_download = True
+
+
+def teardown_module():
+    # This setting is to be consistent with astropy/conftest.py
+    iers.conf.auto_download = False
 
 
 class TestBasic():
@@ -86,7 +97,7 @@ class TestBasic():
 
     def test_open_network_url(self):
         iers.IERS_A.close()
-        iers.IERS_A.open("file:" + urllib.request.pathname2url(IERS_A_EXCERPT))
+        iers.IERS_A.open(Path(IERS_A_EXCERPT).as_uri())
         assert iers.IERS_A.iers_table is not None
         assert isinstance(iers.IERS_A.iers_table, QTable)
         iers.IERS_A.close()
@@ -194,10 +205,12 @@ class TestIERS_Auto():
         """
         self.N = 40
         self.ame = 30.0
-        self.iers_a_file_1 = os.path.join(os.path.dirname(__file__), 'data', 'finals2000A-2016-02-30-test')
-        self.iers_a_file_2 = os.path.join(os.path.dirname(__file__), 'data', 'finals2000A-2016-04-30-test')
-        self.iers_a_url_1 = os.path.normpath('file://' + os.path.abspath(self.iers_a_file_1))
-        self.iers_a_url_2 = os.path.normpath('file://' + os.path.abspath(self.iers_a_file_2))
+        self.iers_a_file_1 = get_pkg_data_filename(
+            os.path.join('data', 'finals2000A-2016-02-30-test'))
+        self.iers_a_file_2 = get_pkg_data_filename(
+            os.path.join('data', 'finals2000A-2016-04-30-test'))
+        self.iers_a_url_1 = Path(self.iers_a_file_1).as_uri()
+        self.iers_a_url_2 = Path(self.iers_a_file_2).as_uri()
         self.t = Time.now() + TimeDelta(10, format='jd') * np.arange(self.N)
 
     def teardown_method(self, method):
@@ -241,10 +254,9 @@ class TestIERS_Auto():
             with iers.conf.set_temp('auto_max_age', 5.0):
                 with pytest.raises(ValueError) as err:
                     iers_table = iers.IERS_Auto.open()
-                    delta = iers_table.ut1_utc(self.t.jd1, self.t.jd2)
+                    _ = iers_table.ut1_utc(self.t.jd1, self.t.jd2)
         assert str(err.value) == 'IERS auto_max_age configuration value must be larger than 10 days'
 
-    @pytest.mark.remote_data
     def test_no_auto_download(self):
         with iers.conf.set_temp('auto_download', False):
             t = iers.IERS_Auto.open()
@@ -266,33 +278,31 @@ class TestIERS_Auto():
             # Look at times before and after the test file begins.  0.1292905 is
             # the IERS-B value from MJD=57359.  The value in
             # finals2000A-2016-02-30-test has been replaced at this point.
-            assert np.allclose(dat.ut1_utc(Time(50000, format='mjd').jd).value, 0.1292905)
+            assert np.allclose(dat.ut1_utc(Time(50000, format='mjd').jd).value, 0.1293286)
             assert np.allclose(dat.ut1_utc(Time(60000, format='mjd').jd).value, -0.2246227)
 
             # Now pretend we are accessing at time 60 days after start of predictive data.
             # There will be a warning when downloading the file doesn't give new data
             # and an exception when extrapolating into the future with insufficient data.
             dat._time_now = Time(predictive_mjd, format='mjd') + 60 * u.d
-            assert np.allclose(dat.ut1_utc(Time(50000, format='mjd').jd).value, 0.1292905)
-            with catch_warnings(iers.IERSStaleWarning) as warns:
-                with pytest.raises(ValueError) as err:
-                    dat.ut1_utc(Time(60000, format='mjd').jd)
-            assert 'interpolating from IERS_Auto using predictive values' in str(err.value)
+            assert np.allclose(dat.ut1_utc(Time(50000, format='mjd').jd).value, 0.1293286)
+            with pytest.warns(iers.IERSStaleWarning, match='IERS_Auto predictive '
+                              'values are older') as warns, \
+                 pytest.raises(ValueError, match='interpolating from IERS_Auto '
+                               'using predictive values'):
+                dat.ut1_utc(Time(60000, format='mjd').jd)
             assert len(warns) == 1
-            assert 'IERS_Auto predictive values are older' in str(warns[0].message)
 
             # Warning only if we are getting return status
-            with catch_warnings(iers.IERSStaleWarning) as warns:
+            with pytest.warns(iers.IERSStaleWarning, match='IERS_Auto '
+                              'predictive values are older') as warns:
                 dat.ut1_utc(Time(60000, format='mjd').jd, return_status=True)
             assert len(warns) == 1
-            assert 'IERS_Auto predictive values are older' in str(warns[0].message)
 
             # Now set auto_max_age = None which says that we don't care how old the
             # available IERS-A file is.  There should be no warnings or exceptions.
             with iers.conf.set_temp('auto_max_age', None):
-                with catch_warnings(iers.IERSStaleWarning) as warns:
-                    dat.ut1_utc(Time(60000, format='mjd').jd)
-                assert not warns
+                dat.ut1_utc(Time(60000, format='mjd').jd)
 
         # Now point to a later file with same values but MJD increased by
         # 60 days and see that things work.  dat._time_now is still the same value
@@ -301,7 +311,7 @@ class TestIERS_Auto():
         with iers.conf.set_temp('iers_auto_url', self.iers_a_url_2):
 
             # Look at times before and after the test file begins.  This forces a new download.
-            assert np.allclose(dat.ut1_utc(Time(50000, format='mjd').jd).value, 0.1292905)
+            assert np.allclose(dat.ut1_utc(Time(50000, format='mjd').jd).value, 0.1293286)
             assert np.allclose(dat.ut1_utc(Time(60000, format='mjd').jd).value, -0.3)
 
             # Now the time range should be different.
@@ -317,6 +327,10 @@ def test_IERS_B_parameters_loading_into_IERS_Auto():
     ok_A = A["MJD"] <= B["MJD"][-1]
     assert not np.all(ok_A), "IERS B covers all of IERS A: should not happen"
 
+    # We only overwrite IERS_B values in the IERS_A table that were already
+    # there in the first place.  Better take that into account.
+    ok_A &= np.isfinite(A["UT1_UTC_B"])
+
     i_B = np.searchsorted(B["MJD"], A["MJD"][ok_A])
 
     assert np.all(np.diff(i_B) == 1), "Valid region not contiguous"
@@ -331,7 +345,7 @@ def test_IERS_B_parameters_loading_into_IERS_Auto():
 
 
 # Issue with FTP, rework test into previous one when it's fixed
-@pytest.mark.xfail('TRAVIS')
+@pytest.mark.skipif("CI", reason="Flaky on CI")
 @pytest.mark.remote_data
 def test_iers_a_dl():
     iersa_tab = iers.IERS_A.open(iers.IERS_A_URL, cache=False)

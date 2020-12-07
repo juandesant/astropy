@@ -42,14 +42,17 @@ Parameters for ``read()``
 **table** : input table
   There are four ways to specify the table to be read:
 
-  - Name of a file (string)
+  - Path to a file (string)
   - Single string containing all table lines separated by newlines
   - File-like object with a callable read() method
   - List of strings where each list element is a table line
 
   The first two options are distinguished by the presence of a newline in the
   string. This assumes that valid file names will not normally contain a
-  newline.
+  newline, and a valid table input will at least contain two rows.
+  Note that a table read in ``no_header`` format can legitimately consist
+  of a single row; in this case passing the string as a list with a single
+  item will ensure that it is not interpreted as a file name.
 
 **format** : file format (default='basic')
   This specifies the top-level format of the ASCII table; for example,
@@ -57,7 +60,7 @@ Parameters for ``read()``
   a CDS-compatible table, etc. The value of this parameter must
   be one of the :ref:`supported_formats`.
 
-**guess** : try to guess table format (default=True)
+**guess** : try to guess table format (default=None)
   If set to True, then |read| will try to guess the table format by cycling
   through a number of possible table format permutations and attempting to read
   the table in each case. See the `Guess table format`_ section for further details.
@@ -120,11 +123,16 @@ Parameters for ``read()``
   for more information and examples. The default is that any blank table
   values are treated as missing.
 
-**fill_include_names** : list of column names, which are affected by ``fill_values``.
-  If not supplied, then ``fill_values`` can affect all columns.
+**fill_include_names** : list of column names affected by ``fill_values``
+  This is a list of column names (found from the header or the ``names``
+  parameter) for all columns where values will be filled. `None` (the default) will
+  apply ``fill_values`` to all columns.
 
-**fill_exclude_names** : list of column names, which are not affected by ``fill_values``.
-  If not supplied, then ``fill_values`` can affect all columns.
+**fill_exclude_names** : list of column names not affected by ``fill_values``
+  This is a list of column names (found from the header or the ``names``
+  parameter) for all columns where values will be **not** be filled.
+  This parameter takes precedence over ``fill_include_names``.  A value
+  of `None` (default) does not exclude any columns.
 
 **Outputter** : Outputter class
   This converts the raw data tables value into the
@@ -320,12 +328,55 @@ values in with typical placeholders::
 ..
   EXAMPLE END
 
+Selecting columns for masking
+-----------------------------
+The |read| function provides the parameters ``fill_include_names`` and ``fill_exclude_names``
+to select which columns will be used in the ``fill_values`` masking process described above.
+
+..
+  EXAMPLE START
+  Using the ``fill_include_names`` and ``fill_exclude_names`` parameters for ASCII tables
+
+The use of these parameters is not common but in some cases can considerably simplify
+the code required to read a table. The following gives a simple example to illustrate how
+``fill_include_names`` and ``fill_exclude_names`` can be used
+in the most basic and typical cases::
+
+  >>> from astropy.io import ascii
+  >>> lines = ['a,b,c,d', '1.0,2.0,3.0,4.0', ',,,']
+  >>> ascii.read(lines)
+  <Table length=2>
+     a       b       c       d
+  float64 float64 float64 float64
+  ------- ------- ------- -------
+      1.0     2.0     3.0     4.0
+       --      --      --      --
+
+  >>> ascii.read(lines, fill_include_names=['a', 'c'])
+  <Table length=2>
+     a     b      c     d
+  float64 str3 float64 str3
+  ------- ---- ------- ----
+      1.0  2.0     3.0  4.0
+       --           --
+
+  >>> ascii.read(lines, fill_exclude_names=['a', 'c'])
+  <Table length=2>
+   a      b     c      d
+  str3 float64 str3 float64
+  ---- ------- ---- -------
+   1.0     2.0  3.0     4.0
+            --           --
+
+..
+  EXAMPLE END
+
 .. _guess_formats:
 
 Guess Table Format
 ==================
 
-If the ``guess`` parameter in |read| is set to True (which is the default) then
+If the ``guess`` parameter in |read| is set to True, then
 |read| will try to guess the table format by cycling through a number of
 possible table format permutations and attempting to read the table in each
 case. The first format which succeeds and will be used to read the table. To
@@ -461,7 +512,7 @@ These take advantage of the :func:`~astropy.io.ascii.convert_numpy`
 function which returns a two-element tuple ``(converter_func, converter_type)``
 as described in the previous section. The type provided to
 :func:`~astropy.io.ascii.convert_numpy` must be a valid `NumPy type
-<https://docs.scipy.org/doc/numpy/user/basics.types.html>`_ such as
+<https://numpy.org/doc/stable/user/basics.types.html>`_ such as
 ``numpy.int``, ``numpy.uint``, ``numpy.int8``, ``numpy.int64``,
 ``numpy.float``, ``numpy.float64``, or ``numpy.str``.
 

@@ -1,13 +1,14 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 # -*- coding: utf-8 -*-
 
-import io
 import pytest
 
-from astropy import units
-from astropy import __minimum_asdf_version__
+asdf = pytest.importorskip('asdf')
 
-asdf = pytest.importorskip('asdf', minversion=__minimum_asdf_version__)
+import io
+
+from astropy import units
+
 from asdf.tests import helpers
 
 
@@ -26,11 +27,11 @@ def roundtrip_quantity(yaml, quantity):
 def test_value_scalar(tmpdir):
     testval = 2.71828
     testunit = units.kpc
-    yaml = """
+    yaml = f"""
 quantity: !unit/quantity-1.1.0
-    value: {}
-    unit: {}
-""".format(testval, testunit)
+    value: {testval}
+    unit: {testunit}
+"""
 
     quantity = units.Quantity(testval, unit=testunit)
     roundtrip_quantity(yaml, quantity)
@@ -39,11 +40,11 @@ quantity: !unit/quantity-1.1.0
 def test_value_array(tmpdir):
     testval = [3.14159]
     testunit = units.kg
-    yaml = """
+    yaml = f"""
 quantity: !unit/quantity-1.1.0
-    value: !core/ndarray-1.0.0 {}
-    unit: {}
-""".format(testval, testunit)
+    value: !core/ndarray-1.0.0 {testval}
+    unit: {testunit}
+"""
 
     quantity = units.Quantity(testval, unit=testunit)
     roundtrip_quantity(yaml, quantity)
@@ -52,11 +53,11 @@ quantity: !unit/quantity-1.1.0
 def test_value_multiarray(tmpdir):
     testval = [x*2.3081 for x in range(10)]
     testunit = units.ampere
-    yaml = """
+    yaml = f"""
 quantity: !unit/quantity-1.1.0
-    value: !core/ndarray-1.0.0 {}
-    unit: {}
-""".format(testval, testunit)
+    value: !core/ndarray-1.0.0 {testval}
+    unit: {testunit}
+"""
 
     quantity = units.Quantity(testval, unit=testunit)
     roundtrip_quantity(yaml, quantity)
@@ -66,14 +67,14 @@ def test_value_ndarray(tmpdir):
     from numpy import array, float64
     testval = [[1,2,3],[4,5,6]]
     testunit = units.km
-    yaml = """
+    yaml = f"""
 quantity: !unit/quantity-1.1.0
     value: !core/ndarray-1.0.0
         datatype: float64
         data:
-            {}
-    unit: {}
-""".format(testval, testunit)
+            {testval}
+    unit: {testunit}
+"""
 
     data = array(testval, float64)
     quantity = units.Quantity(data, unit=testunit)

@@ -9,20 +9,47 @@ from .table import Table, QTable, has_info_class
 from astropy.units.quantity import QuantityInfo
 
 
-__construct_mixin_classes = ('astropy.time.core.Time',
-                             'astropy.time.core.TimeDelta',
-                             'astropy.units.quantity.Quantity',
-                             'astropy.units.function.logarithmic.Magnitude',
-                             'astropy.units.function.logarithmic.Decibel',
-                             'astropy.units.function.logarithmic.Dex',
-                             'astropy.coordinates.angles.Latitude',
-                             'astropy.coordinates.angles.Longitude',
-                             'astropy.coordinates.angles.Angle',
-                             'astropy.coordinates.distances.Distance',
-                             'astropy.coordinates.earth.EarthLocation',
-                             'astropy.coordinates.sky_coordinate.SkyCoord',
-                             'astropy.table.table.NdarrayMixin',
-                             'astropy.table.column.MaskedColumn')
+# TODO: some of this might be better done programmatically, through
+# code like
+# __construct_mixin_classes += tuple(
+#        f'astropy.coordinates.representation.{cls.__name__}'
+#        for cls in (list(coorep.REPRESENTATION_CLASSES.values())
+#                    + list(coorep.DIFFERENTIAL_CLASSES.values()))
+#        if cls.__name__ in coorep.__all__)
+# However, to avoid very hard to track import issues, the definition
+# should then be done at the point where it is actually needed,
+# using local imports.  See also
+# https://github.com/astropy/astropy/pull/10210#discussion_r419087286
+__construct_mixin_classes = (
+    'astropy.time.core.Time',
+    'astropy.time.core.TimeDelta',
+    'astropy.units.quantity.Quantity',
+    'astropy.units.function.logarithmic.Magnitude',
+    'astropy.units.function.logarithmic.Decibel',
+    'astropy.units.function.logarithmic.Dex',
+    'astropy.coordinates.angles.Latitude',
+    'astropy.coordinates.angles.Longitude',
+    'astropy.coordinates.angles.Angle',
+    'astropy.coordinates.distances.Distance',
+    'astropy.coordinates.earth.EarthLocation',
+    'astropy.coordinates.sky_coordinate.SkyCoord',
+    'astropy.table.table.NdarrayMixin',
+    'astropy.table.column.MaskedColumn',
+    'astropy.coordinates.representation.CartesianRepresentation',
+    'astropy.coordinates.representation.UnitSphericalRepresentation',
+    'astropy.coordinates.representation.RadialRepresentation',
+    'astropy.coordinates.representation.SphericalRepresentation',
+    'astropy.coordinates.representation.PhysicsSphericalRepresentation',
+    'astropy.coordinates.representation.CylindricalRepresentation',
+    'astropy.coordinates.representation.CartesianDifferential',
+    'astropy.coordinates.representation.UnitSphericalDifferential',
+    'astropy.coordinates.representation.SphericalDifferential',
+    'astropy.coordinates.representation.UnitSphericalCosLatDifferential',
+    'astropy.coordinates.representation.SphericalCosLatDifferential',
+    'astropy.coordinates.representation.RadialDifferential',
+    'astropy.coordinates.representation.PhysicsSphericalDifferential',
+    'astropy.coordinates.representation.CylindricalDifferential',
+)
 
 
 class SerializedColumn(dict):
@@ -235,6 +262,7 @@ class _TableLite(OrderedDict):
     When this happens in a real table then all other columns are immediately
     Masked and a warning is issued. This is not desirable.
     """
+
     def add_column(self, col, index=0):
         colnames = self.colnames
         self[col.info.name] = col
@@ -257,8 +285,9 @@ def _construct_mixin_from_columns(new_name, obj_attrs, out):
             if 'name' in val:
                 data_attrs_map[val['name']] = name
             else:
-                _construct_mixin_from_columns(name, val, out)
-                data_attrs_map[name] = name
+                out_name = f'{new_name}.{name}'
+                _construct_mixin_from_columns(out_name, val, out)
+                data_attrs_map[out_name] = name
 
     for name in data_attrs_map.values():
         del obj_attrs[name]

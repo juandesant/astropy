@@ -39,7 +39,7 @@ doc_footer = """
     -----
     .. [1] Blaauw, A.; Gum, C. S.; Pawsey, J. L.; Westerhout, G. (1960), "The
        new I.A.U. system of galactic coordinates (1958 revision),"
-       `MNRAS, Vol 121, pp.123 <http://adsabs.harvard.edu/abs/1960MNRAS.121..123B>`_.
+       `MNRAS, Vol 121, pp.123 <https://ui.adsabs.harvard.edu/abs/1960MNRAS.121..123B>`_.
 """
 
 
@@ -87,7 +87,7 @@ class Galactic(BaseCoordinateFrame):
     # These are *not* from Reid & Brunthaler 2004 - instead, they were
     # derived by doing:
     #
-    # >>> FK4NoETerms(ra=192.25*u.degree, dec=27.4*u.degree).transform_to(FK5)
+    # >>> FK4NoETerms(ra=192.25*u.degree, dec=27.4*u.degree).transform_to(FK5())
     #
     # This gives better consistency with other codes than using the values
     # from Reid & Brunthaler 2004 and the best self-consistency between FK5

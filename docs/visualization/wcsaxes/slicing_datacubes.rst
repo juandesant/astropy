@@ -3,7 +3,7 @@ Slicing Multidimensional Data
 *****************************
 
 WCSAxes can either plot one or two dimensional data. If we have a dataset with
-higher dimensonality than the plot we want to make, we have to select which
+higher dimensionality than the plot we want to make, we have to select which
 dimensions to use for the x or x and y axes of the plot. This example will show
 how to slice a FITS data cube and plot an image from it.
 
@@ -12,7 +12,7 @@ Slicing the WCS object
 
 Like the example introduced in :ref:`initialization`, we will read in the
 data using `astropy.io.fits
-<http://docs.astropy.org/en/stable/io/fits/index.html>`_ and parse the WCS
+<https://docs.astropy.org/en/stable/io/fits/index.html>`_ and parse the WCS
 information. The original FITS file can be downloaded from `here
 <http://www.astropy.org/astropy-data/l1448/l1448_13co.fits>`_.
 

@@ -105,7 +105,7 @@ class FITS_record:
         outlist = []
         for idx in range(len(self)):
             outlist.append(repr(self[idx]))
-        return '({})'.format(', '.join(outlist))
+        return f"({', '.join(outlist)})"
 
     def field(self, field):
         """
@@ -479,6 +479,26 @@ class FITS_rec(np.recarray):
         # one added for recarray in Numpy 1.10) for backwards compat
         return np.ndarray.__repr__(self)
 
+    def __getattribute__(self, attr):
+        # First, see if ndarray has this attr, and return it if so. Note that
+        # this means a field with the same name as an ndarray attr cannot be
+        # accessed by attribute, this is Numpy's default behavior.
+        # We avoid using np.recarray.__getattribute__ here because after doing
+        # this check it would access the columns without doing the conversions
+        # that we need (with .field, see below).
+        try:
+            return object.__getattribute__(self, attr)
+        except AttributeError:
+            pass
+
+        # attr might still be a fieldname.  If we have column definitions,
+        # we should access this via .field, as the data may have to be scaled.
+        if self._coldefs is not None and attr in self.columns.names:
+            return self.field(attr)
+
+        # If not, just let the usual np.recarray override deal with it.
+        return super().__getattribute__(attr)
+
     def __getitem__(self, key):
         if self._coldefs is None:
             return super().__getitem__(key)
@@ -823,7 +843,7 @@ class FITS_rec(np.recarray):
         """
 
         format = column.format
-        recformat = ASCII2NUMPY[format[0]]
+        recformat = getattr(format, 'recformat', ASCII2NUMPY[format[0]])
         # if the string = TNULL, return ASCIITNULL
         nullval = str(column.null).strip().encode('ascii')
         if len(nullval) > format.width:
@@ -981,7 +1001,7 @@ class FITS_rec(np.recarray):
                 field = field[:, :nitems]
             if _str:
                 fmt = field.dtype.char
-                dtype = ('|{}{}'.format(fmt, dim[-1]), dim[:-1])
+                dtype = (f'|{fmt}{dim[-1]}', dim[:-1])
                 field.dtype = dtype
             else:
                 field.shape = (field.shape[0],) + dim
@@ -1306,7 +1326,7 @@ def _ascii_encode(inarray, out=None):
     the item that couldn't be encoded.
     """
 
-    out_dtype = np.dtype(('S{}'.format(inarray.dtype.itemsize // 4),
+    out_dtype = np.dtype((f'S{inarray.dtype.itemsize // 4}',
                          inarray.dtype.shape))
     if out is not None:
         out = out.view(out_dtype)

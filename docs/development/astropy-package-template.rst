@@ -28,7 +28,7 @@ by ``CHANGES.md`` in the instructions.
           we recommend that you read over the more complete astropy
           :doc:`releasing` and adapt them for your package.
 
-#. Make sure that Travis and any other continuous integration is passing.
+#. Make sure that continuous integration is passing.
 
 #. Update the ``CHANGES.rst`` file to make sure that all the changes are listed,
    and update the release date, which should currently be set to
@@ -48,14 +48,19 @@ by ``CHANGES.md`` in the instructions.
 
         python setup.py build sdist --format=gztar
 
-   If it does, then first make sure the `pep517 <https://pypi.org/project/pep517/>`_
+   If it does, then first make sure the `build <https://pypi.org/project/build/>`_
    package is installed and up-to-date::
 
-        pip install pep517 --upgrade
+        pip install build --upgrade
 
    then create the source distribution with::
 
-        python -m pep517.build --source .
+        python -m build --sdist .
+
+   All following instructions will assume you have ``pyproject.toml``.
+   If you do not use ``pyproject.toml`` yet, please see
+   https://docs.astropy.org/en/v4.0.x/development/astropy-package-template.html
+   instead.
 
    In both cases, make sure that generated file is good to go by going inside
    ``dist``, expanding the tar file, going inside the expanded directory, and
@@ -112,7 +117,7 @@ by ``CHANGES.md`` in the instructions.
 
        conda create -n myaffilpkg_rel_test astropy <any more dependencies here>
        source activate myaffilpkg_rel_test
-       python setup.py sdist
+       python -m build --sdist .
        cd dist
        pip install myaffilpkg-version.tar.gz
        python -c 'import myaffilpkg; myaffilpkg.test()'
@@ -124,7 +129,7 @@ by ``CHANGES.md`` in the instructions.
    all pass, you can proceed on.
 
 #. If you did the previous step, do ``git clean -fxd`` again to remove anything
-   you made there.  Run ``python setup.py build sdist --format=gztar`` to
+   you made there.  Run ``python -m build --sdist .`` to
    create the files for upload.  Then you can upload to PyPI via ``twine``::
 
         twine upload dist/*
@@ -159,7 +164,7 @@ Modifications for a beta/release candidate release
 
    * When entering the new version number, instead of just removing the
      ``.dev``, enter "1.2b1" or "1.2rc1".  It is critical that you follow this
-     numbering scheme (``x.yb#`` or ``x.y.zrc#``), as it will ensure the release
+     numbering scheme (``X.Yb#`` or ``X.Y.Zrc#``), as it will ensure the release
      is ordered "before" the main release by various automated tools, and also
      tells PyPI that this is a "pre-release".
 

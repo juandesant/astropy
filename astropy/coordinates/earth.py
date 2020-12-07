@@ -9,15 +9,18 @@ import urllib.error
 import urllib.parse
 
 import numpy as np
+import erfa
+
 from astropy import units as u
 from astropy import constants as consts
 from astropy.units.quantity import QuantityInfoBase
 from astropy.utils.exceptions import AstropyUserWarning
 from .angles import Angle, Longitude, Latitude
 from .representation import CartesianRepresentation, CartesianDifferential
+from .matrix_utilities import matrix_transpose
 from .errors import UnknownSiteException
 from astropy.utils import data
-from astropy import _erfa as erfa
+
 
 __all__ = ['EarthLocation']
 
@@ -26,12 +29,17 @@ GeodeticLocation = collections.namedtuple('GeodeticLocation', ['lon', 'lat', 'he
 # Available ellipsoids (defined in erfam.h, with numbers exposed in erfa).
 ELLIPSOIDS = ('WGS84', 'GRS80', 'WGS72')
 
-OMEGA_EARTH = u.Quantity(7.292115855306589e-5, 1./u.s)
+OMEGA_EARTH = ((1.002_737_811_911_354_48 * u.cycle/u.day)
+               .to(1/u.s, u.dimensionless_angles()))
 """
-Rotational velocity of Earth. In UT1 seconds, this would be 2 pi / (24 * 3600),
-but we need the value in SI seconds.
-See Explanatory Supplement to the Astronomical Almanac, ed. P. Kenneth Seidelmann (1992),
-University Science Books.
+Rotational velocity of Earth, following SOFA's pvtob.
+
+In UT1 seconds, this would be 2 pi / (24 * 3600), but we need the value
+in SI seconds, so multiply by the ratio of stellar to solar day.
+See Explanatory Supplement to the Astronomical Almanac, ed. P. Kenneth
+Seidelmann (1992), University Science Books. The constant is the
+convential, exact one (IERS conventions 2003); see
+http://hpiers.obspm.fr/eop-pc/index.php?index=constants.
 """
 
 
@@ -39,8 +47,7 @@ def _check_ellipsoid(ellipsoid=None, default='WGS84'):
     if ellipsoid is None:
         ellipsoid = default
     if ellipsoid not in ELLIPSOIDS:
-        raise ValueError('Ellipsoid {} not among known ones ({})'
-                         .format(ellipsoid, ELLIPSOIDS))
+        raise ValueError(f'Ellipsoid {ellipsoid} not among known ones ({ELLIPSOIDS})')
     return ellipsoid
 
 
@@ -341,18 +348,25 @@ class EarthLocation(u.Quantity):
         >>> keck = EarthLocation.of_site('Keck Observatory')  # doctest: +REMOTE_DATA
         >>> keck.geodetic  # doctest: +REMOTE_DATA +FLOAT_CMP
         GeodeticLocation(lon=<Longitude -155.47833333 deg>, lat=<Latitude 19.82833333 deg>, height=<Quantity 4160. m>)
+        >>> keck.info  # doctest: +REMOTE_DATA
+        name = W. M. Keck Observatory
+        dtype = void192
+        unit = m
+        class = EarthLocation
+        n_bad = 0
         >>> keck.info.meta  # doctest: +REMOTE_DATA
         {'source': 'IRAF Observatory Database', 'timezone': 'US/Aleutian'}
 
         See Also
         --------
         get_site_names : the list of sites that this function can access
-        """
+        """  # noqa
         registry = cls._get_site_registry()
         try:
             el = registry[site_name]
         except UnknownSiteException as e:
-            raise UnknownSiteException(e.site, 'EarthLocation.get_site_names', close_names=e.close_names)
+            raise UnknownSiteException(e.site, 'EarthLocation.get_site_names',
+                                       close_names=e.close_names)
 
         if cls is el.__class__:
             return el
@@ -416,27 +430,25 @@ class EarthLocation(u.Quantity):
 
         # Fail fast if invalid options are passed:
         if not use_google and get_height:
-            raise ValueError('Currently, `get_height` only works when using '
-                             'the Google geocoding API, which requires passing '
-                             'a Google API key with `google_api_key`. See: '
-                             'https://developers.google.com/maps/documentation/geocoding/get-api-key '
-                             'for information on obtaining an API key.')
+            raise ValueError(
+                'Currently, `get_height` only works when using '
+                'the Google geocoding API, which requires passing '
+                'a Google API key with `google_api_key`. See: '
+                'https://developers.google.com/maps/documentation/geocoding/get-api-key '
+                'for information on obtaining an API key.')
 
         if use_google:  # Google
             pars = urllib.parse.urlencode({'address': address,
                                            'key': google_api_key})
-            geo_url = ("https://maps.googleapis.com/maps/api/geocode/json?{}"
-                       .format(pars))
+            geo_url = f"https://maps.googleapis.com/maps/api/geocode/json?{pars}"
 
         else:  # OpenStreetMap
             pars = urllib.parse.urlencode({'q': address,
                                            'format': 'json'})
-            geo_url = ("https://nominatim.openstreetmap.org/search?{}"
-                       .format(pars))
+            geo_url = f"https://nominatim.openstreetmap.org/search?{pars}"
 
         # get longitude and latitude location
-        err_str = ("Unable to retrieve coordinates for address '{address}'; "
-                   "{{msg}}".format(address=address))
+        err_str = f"Unable to retrieve coordinates for address '{address}'; {{msg}}"
         geo_result = _get_json_result(geo_url, err_str=err_str,
                                       use_google=use_google)
 
@@ -454,11 +466,9 @@ class EarthLocation(u.Quantity):
             pars = {'locations': f'{lat:.8f},{lon:.8f}',
                     'key': google_api_key}
             pars = urllib.parse.urlencode(pars)
-            ele_url = ("https://maps.googleapis.com/maps/api/elevation/json?{}"
-                       .format(pars))
+            ele_url = f"https://maps.googleapis.com/maps/api/elevation/json?{pars}"
 
-            err_str = ("Unable to retrieve elevation for address '{address}'; "
-                       "{{msg}}".format(address=address))
+            err_str = f"Unable to retrieve elevation for address '{address}'; {{msg}}"
             ele_result = _get_json_result(ele_url, err_str=err_str,
                                           use_google=use_google)
             height = ele_result[0]['elevation']*u.meter
@@ -517,6 +527,9 @@ class EarthLocation(u.Quantity):
         -------
         reg : astropy.coordinates.sites.SiteRegistry
         """
+        # need to do this here at the bottom to avoid circular dependencies
+        from .sites import get_builtin_sites, get_downloaded_sites
+
         if force_builtin and force_download:
             raise ValueError('Cannot have both force_builtin and force_download True')
 
@@ -634,7 +647,7 @@ class EarthLocation(u.Quantity):
         """
         # Broadcast for a single position at multiple times, but don't attempt
         # to be more general here.
-        if obstime and self.size == 1 and obstime.size > 1:
+        if obstime and self.size == 1 and obstime.shape:
             self = np.broadcast_to(self, obstime.shape, subok=True)
 
         # do this here to prevent a series of complicated circular imports
@@ -660,14 +673,43 @@ class EarthLocation(u.Quantity):
         """
         # do this here to prevent a series of complicated circular imports
         from .builtin_frames import GCRS
+        loc, vel = self.get_gcrs_posvel(obstime)
+        loc.differentials['s'] = CartesianDifferential.from_cartesian(vel)
+        return GCRS(loc, obstime=obstime)
 
-        itrs = self.get_itrs(obstime)
-        # Assume the observatory itself is fixed on the ground.
-        # We do a direct assignment rather than an update to avoid validation
-        # and creation of a new object.
-        zeros = np.broadcast_to(0. * u.km / u.s, (3,) + itrs.shape, subok=True)
-        itrs.data.differentials['s'] = CartesianDifferential(zeros)
-        return itrs.transform_to(GCRS(obstime=obstime))
+    def _get_gcrs_posvel(self, obstime, ref_to_itrs, gcrs_to_ref):
+        """Calculate GCRS position and velocity given transformation matrices.
+
+        The reference frame z axis must point to the Celestial Intermediate Pole
+        (as is the case for CIRS and TETE).
+
+        This private method is used in intermediate_rotation_transforms,
+        where some of the matrices are already available for the coordinate
+        transformation.
+
+        The method is faster by an order of magnitude than just adding a zero
+        velocity to ITRS and transforming to GCRS, because it avoids calculating
+        the velocity via finite differencing of the results of the transformation
+        at three separate times.
+        """
+        # The simplest route is to transform to the reference frame where the
+        # z axis is properly aligned with the Earth's rotation axis (CIRS or
+        # TETE), then calculate the velocity, and then transform this
+        # reference position and velocity to GCRS.  For speed, though, we
+        # transform the coordinates to GCRS in one step, and calculate the
+        # velocities by rotating around the earth's axis transformed to GCRS.
+        ref_to_gcrs = matrix_transpose(gcrs_to_ref)
+        itrs_to_gcrs = ref_to_gcrs @ matrix_transpose(ref_to_itrs)
+        # Earth's rotation vector in the ref frame is rot_vec_ref = (0,0,OMEGA_EARTH),
+        # so in GCRS it is rot_vec_gcrs[..., 2] @ OMEGA_EARTH.
+        rot_vec_gcrs = CartesianRepresentation(ref_to_gcrs[..., 2] * OMEGA_EARTH,
+                                               xyz_axis=-1, copy=False)
+        # Get the position in the GCRS frame.
+        # Since we just need the cartesian representation of ITRS, avoid get_itrs().
+        itrs_cart = CartesianRepresentation(self.x, self.y, self.z, copy=False)
+        pos = itrs_cart.transform(itrs_to_gcrs)
+        vel = rot_vec_gcrs.cross(pos)
+        return pos, vel
 
     def get_gcrs_posvel(self, obstime):
         """
@@ -686,11 +728,14 @@ class EarthLocation(u.Quantity):
         obsgeovel : `~astropy.coordinates.CartesianRepresentation`
             The GCRS velocity of the object
         """
-        # GCRS position
-        gcrs_data = self.get_gcrs(obstime).data
-        obsgeopos = gcrs_data.without_differentials()
-        obsgeovel = gcrs_data.differentials['s'].to_cartesian()
-        return obsgeopos, obsgeovel
+        # Local import to prevent circular imports.
+        from .builtin_frames.intermediate_rotation_transforms import (
+            cirs_to_itrs_mat, gcrs_to_cirs_mat)
+
+        # Get gcrs_posvel by transforming via CIRS (slightly faster than TETE).
+        return self._get_gcrs_posvel(obstime,
+                                     cirs_to_itrs_mat(obstime),
+                                     gcrs_to_cirs_mat(obstime))
 
     def gravitational_redshift(self, obstime,
                                bodies=['sun', 'jupiter', 'moon'],
@@ -803,7 +848,3 @@ class EarthLocation(u.Quantity):
             equivalencies = self._equivalencies
         new_array = self.unit.to(unit, array_view, equivalencies=equivalencies)
         return new_array.view(self.dtype).reshape(self.shape)
-
-
-# need to do this here at the bottom to avoid circular dependencies
-from .sites import get_builtin_sites, get_downloaded_sites

@@ -4,7 +4,6 @@ import os
 import glob
 
 from asdf import tagged
-from asdf.yamlutil import custom_tree_to_tagged_tree
 
 import astropy.units as u
 import astropy.coordinates
@@ -12,18 +11,13 @@ from astropy.coordinates.baseframe import frame_transform_graph
 from astropy.units import Quantity
 from astropy.coordinates import ICRS, Longitude, Latitude, Angle
 
-from astropy.io.misc.asdf.tags.unit.quantity import QuantityType
 from astropy.io.misc.asdf.types import AstropyType
 
 
 __all__ = ['CoordType']
 
-SCHEMA_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                           '..', '..',
-                                           'data',
-                                           'schemas',
-                                           'astropy.org',
-                                           'astropy'))
+SCHEMA_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..', '..', 'data', 'schemas', 'astropy.org', 'astropy'))
 
 
 def _get_frames():
@@ -85,13 +79,13 @@ class BaseCoordType:
 
         node = {}
         if frame.has_data:
-            node['data'] = custom_tree_to_tagged_tree(frame.data, ctx)
+            node['data'] = frame.data
         frame_attributes = {}
         for attr in frame.frame_attributes.keys():
             value = getattr(frame, attr, None)
             if value is not None:
                 frame_attributes[attr] = value
-        node['frame_attributes'] = custom_tree_to_tagged_tree(frame_attributes, ctx)
+        node['frame_attributes'] = frame_attributes
 
         return tagged.tag_object(cls._frame_name_to_tag(frame.name), node, ctx=ctx)
 
@@ -129,8 +123,7 @@ class ICRSType10(AstropyType):
 
     @classmethod
     def from_tree(cls, node, ctx):
-        angle = Angle(QuantityType.from_tree(node['ra']['wrap_angle'], ctx))
-        wrap_angle = Angle(angle)
+        wrap_angle = Angle(node['ra']['wrap_angle'])
         ra = Longitude(
             node['ra']['value'],
             unit=node['ra']['unit'],
@@ -147,7 +140,7 @@ class ICRSType10(AstropyType):
         node['ra'] = {
             'value': frame.ra.value,
             'unit': frame.ra.unit.to_string(),
-            'wrap_angle': custom_tree_to_tagged_tree(wrap_angle, ctx)
+            'wrap_angle': wrap_angle
         }
         node['dec'] = {
             'value': frame.dec.value,

@@ -1,9 +1,11 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
 import numpy as np
+from numpy.testing import assert_array_equal
 import pytest
 
 from astropy import units as u
+from astropy.units.quantity_helper.function_helpers import ARRAY_FUNCTION_ENABLED
 from astropy.coordinates import Longitude, Latitude, EarthLocation, SkyCoord
 
 # test on frame with most complicated frame attributes.
@@ -11,7 +13,17 @@ from astropy.coordinates.builtin_frames import ICRS, AltAz, GCRS
 from astropy.time import Time
 
 
-@pytest.mark.remote_data
+@pytest.fixture(params=[True, False] if ARRAY_FUNCTION_ENABLED
+                else [True])
+def method(request):
+    return request.param
+
+
+needs_array_function = pytest.mark.xfail(
+    not ARRAY_FUNCTION_ENABLED,
+    reason="Needs __array_function__ support")
+
+
 class TestManipulation():
     """Manipulation of Frame shapes.
 
@@ -20,42 +32,97 @@ class TestManipulation():
     Even more exhaustive tests are done in time.tests.test_methods
     """
 
-    def setup(self):
+    def setup_class(cls):
+        # For these tests, we set up frames and coordinates using copy=False,
+        # so we can check that broadcasting is handled correctly.
         lon = Longitude(np.arange(0, 24, 4), u.hourangle)
         lat = Latitude(np.arange(-90, 91, 30), u.deg)
-        # With same-sized arrays, no attributes
-        self.s0 = ICRS(lon[:, np.newaxis] * np.ones(lat.shape),
-                       lat * np.ones(lon.shape)[:, np.newaxis])
+        # With same-sized arrays, no attributes.
+        cls.s0 = ICRS(lon[:, np.newaxis] * np.ones(lat.shape),
+                      lat * np.ones(lon.shape)[:, np.newaxis], copy=False)
         # Make an AltAz frame since that has many types of attributes.
         # Match one axis with times.
-        self.obstime = (Time('2012-01-01') +
-                        np.arange(len(lon))[:, np.newaxis] * u.s)
+        cls.obstime = (Time('2012-01-01') +
+                       np.arange(len(lon))[:, np.newaxis] * u.s)
         # And another with location.
-        self.location = EarthLocation(20.*u.deg, lat, 100*u.m)
+        cls.location = EarthLocation(20.*u.deg, lat, 100*u.m)
         # Ensure we have a quantity scalar.
-        self.pressure = 1000 * u.hPa
+        cls.pressure = 1000 * u.hPa
         # As well as an array.
-        self.temperature = np.random.uniform(
+        cls.temperature = np.random.uniform(
             0., 20., size=(lon.size, lat.size)) * u.deg_C
-        self.s1 = AltAz(az=lon[:, np.newaxis], alt=lat,
-                        obstime=self.obstime,
-                        location=self.location,
-                        pressure=self.pressure,
-                        temperature=self.temperature)
+        cls.s1 = AltAz(az=lon[:, np.newaxis], alt=lat,
+                       obstime=cls.obstime,
+                       location=cls.location,
+                       pressure=cls.pressure,
+                       temperature=cls.temperature, copy=False)
         # For some tests, also try a GCRS, since that has representation
         # attributes.  We match the second dimension (via the location)
-        self.obsgeoloc, self.obsgeovel = self.location.get_gcrs_posvel(
-            self.obstime[0, 0])
-        self.s2 = GCRS(ra=lon[:, np.newaxis], dec=lat,
-                       obstime=self.obstime,
-                       obsgeoloc=self.obsgeoloc,
-                       obsgeovel=self.obsgeovel)
+        cls.obsgeoloc, cls.obsgeovel = cls.location.get_gcrs_posvel(
+            cls.obstime[0, 0])
+        cls.s2 = GCRS(ra=lon[:, np.newaxis], dec=lat,
+                      obstime=cls.obstime,
+                      obsgeoloc=cls.obsgeoloc,
+                      obsgeovel=cls.obsgeovel, copy=False)
         # For completeness, also some tests on an empty frame.
-        self.s3 = GCRS(obstime=self.obstime,
-                       obsgeoloc=self.obsgeoloc,
-                       obsgeovel=self.obsgeovel)
+        cls.s3 = GCRS(obstime=cls.obstime,
+                      obsgeoloc=cls.obsgeoloc,
+                      obsgeovel=cls.obsgeovel, copy=False)
         # And make a SkyCoord
-        self.sc = SkyCoord(ra=lon[:, np.newaxis], dec=lat, frame=self.s3)
+        cls.sc = SkyCoord(ra=lon[:, np.newaxis], dec=lat, frame=cls.s3,
+                          copy=False)
+
+    def test_getitem0101(self):
+        # We on purpose take a slice with only one element, as for the
+        # general tests it doesn't matter, but it allows us to check
+        # for a few cases that shapes correctly become scalar if we
+        # index our size-1 array down to a scalar.  See gh-10113.
+        item = (slice(0, 1), slice(0, 1))
+        s0_0101 = self.s0[item]
+        assert s0_0101.shape == (1, 1)
+        assert_array_equal(s0_0101.data.lon, self.s0.data.lon[item])
+        assert np.may_share_memory(s0_0101.data.lon, self.s0.data.lon)
+        assert np.may_share_memory(s0_0101.data.lat, self.s0.data.lat)
+        s0_0101_00 = s0_0101[0, 0]
+        assert s0_0101_00.shape == ()
+        assert s0_0101_00.data.lon.shape == ()
+        assert_array_equal(s0_0101_00.data.lon, self.s0.data.lon[0, 0])
+        s1_0101 = self.s1[item]
+        assert s1_0101.shape == (1, 1)
+        assert_array_equal(s1_0101.data.lon, self.s1.data.lon[item])
+        assert np.may_share_memory(s1_0101.data.lat, self.s1.data.lat)
+        assert np.all(s1_0101.obstime == self.s1.obstime[item])
+        assert np.may_share_memory(s1_0101.obstime.jd1, self.s1.obstime.jd1)
+        assert_array_equal(s1_0101.location, self.s1.location[0, 0])
+        assert np.may_share_memory(s1_0101.location, self.s1.location)
+        assert_array_equal(s1_0101.temperature, self.s1.temperature[item])
+        assert np.may_share_memory(s1_0101.temperature, self.s1.temperature)
+        # scalar should just be transferred.
+        assert s1_0101.pressure is self.s1.pressure
+        s1_0101_00 = s1_0101[0, 0]
+        assert s1_0101_00.shape == ()
+        assert s1_0101_00.obstime.shape == ()
+        assert s1_0101_00.obstime == self.s1.obstime[0, 0]
+        s2_0101 = self.s2[item]
+        assert s2_0101.shape == (1, 1)
+        assert np.all(s2_0101.data.lon == self.s2.data.lon[item])
+        assert np.may_share_memory(s2_0101.data.lat, self.s2.data.lat)
+        assert np.all(s2_0101.obstime == self.s2.obstime[item])
+        assert np.may_share_memory(s2_0101.obstime.jd1, self.s2.obstime.jd1)
+        assert_array_equal(s2_0101.obsgeoloc.xyz, self.s2.obsgeoloc[item].xyz)
+        s3_0101 = self.s3[item]
+        assert s3_0101.shape == (1, 1)
+        assert s3_0101.obstime.shape == (1, 1)
+        assert np.all(s3_0101.obstime == self.s3.obstime[item])
+        assert np.may_share_memory(s3_0101.obstime.jd1, self.s3.obstime.jd1)
+        assert_array_equal(s3_0101.obsgeoloc.xyz, self.s3.obsgeoloc[item].xyz)
+        sc_0101 = self.sc[item]
+        assert sc_0101.shape == (1, 1)
+        assert_array_equal(sc_0101.data.lon, self.sc.data.lon[item])
+        assert np.may_share_memory(sc_0101.data.lat, self.sc.data.lat)
+        assert np.all(sc_0101.obstime == self.sc.obstime[item])
+        assert np.may_share_memory(sc_0101.obstime.jd1, self.sc.obstime.jd1)
+        assert_array_equal(sc_0101.obsgeoloc.xyz, self.sc.obsgeoloc[item].xyz)
 
     def test_ravel(self):
         s0_ravel = self.s0.ravel()
@@ -257,8 +324,11 @@ class TestManipulation():
         assert np.all(s0_squeeze.data.lat == self.s0.data.lat.reshape(3, 2, 7))
         assert np.may_share_memory(s0_squeeze.data.lat, self.s0.data.lat)
 
-    def test_add_dimension(self):
-        s0_adddim = self.s0[:, np.newaxis, :]
+    def test_add_dimension(self, method):
+        if method:
+            s0_adddim = self.s0[:, np.newaxis, :]
+        else:
+            s0_adddim = np.expand_dims(self.s0, 1)
         assert s0_adddim.shape == (6, 1, 7)
         assert np.all(s0_adddim.data.lon == self.s0.data.lon[:, np.newaxis, :])
         assert np.may_share_memory(s0_adddim.data.lat, self.s0.data.lat)
@@ -267,3 +337,12 @@ class TestManipulation():
         s0_take = self.s0.take((5, 2))
         assert s0_take.shape == (2,)
         assert np.all(s0_take.data.lon == self.s0.data.lon.take((5, 2)))
+
+    # Much more detailed tests of shape manipulation via numpy functions done
+    # in test_representation_methods.
+    @needs_array_function
+    def test_broadcast_to(self):
+        s1_broadcast = np.broadcast_to(self.s1, (20, 6, 7))
+        assert s1_broadcast.shape == (20, 6, 7)
+        assert np.all(s1_broadcast.data.lon == self.s1.data.lon[np.newaxis])
+        assert np.may_share_memory(s1_broadcast.data.lat, self.s1.data.lat)

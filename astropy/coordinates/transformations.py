@@ -21,8 +21,8 @@ import subprocess
 from warnings import warn
 
 from abc import ABCMeta, abstractmethod
-from collections import defaultdict, OrderedDict
-from contextlib import suppress
+from collections import defaultdict
+from contextlib import suppress, contextmanager
 from inspect import signature
 
 import numpy as np
@@ -242,8 +242,7 @@ class TransformGraph:
                 if fromsys:
                     break
             else:
-                raise ValueError('Could not find transform {} in the '
-                                 'graph'.format(transform))
+                raise ValueError(f'Could not find transform {transform} in the graph')
 
         else:
             if transform is None:
@@ -675,6 +674,37 @@ class TransformGraph:
             return func
         return deco
 
+    @contextmanager
+    def impose_finite_difference_dt(self, dt):
+        """
+        Context manager to impose a finite-difference time step on all applicable transformations
+
+        For each transformation in this transformation graph that has the attribute
+        ``finite_difference_dt``, that attribute is set to the provided value.  The only standard
+        transformation with this attribute is
+        `~astropy.coordinates.transformations.FunctionTransformWithFiniteDifference`.
+
+        Parameters
+        ----------
+        dt : `~astropy.units.Quantity` or callable
+            If a quantity, this is the size of the differential used to do the finite difference.
+            If a callable, should accept ``(fromcoord, toframe)`` and return the ``dt`` value.
+        """
+        key = 'finite_difference_dt'
+        saved_settings = []
+
+        try:
+            for to_frames in self._graph.values():
+                for transform in to_frames.values():
+                    if hasattr(transform, key):
+                        old_setting = (transform, key, getattr(transform, key))
+                        saved_settings.append(old_setting)
+                        setattr(transform, key, dt)
+            yield
+        finally:
+            for setting in saved_settings:
+                setattr(*setting)
+
 
 # <-------------------Define the builtin transform classes-------------------->
 
@@ -831,7 +861,7 @@ class FunctionTransform(CoordinateTransform):
         res = self.func(fromcoord, toframe)
         if not isinstance(res, self.tosys):
             raise TypeError(f'the transformation function yielded {res} but '
-                            'should have been of type {self.tosys}')
+                            f'should have been of type {self.tosys}')
         if fromcoord.data.differentials and not res.data.differentials:
             warn("Applied a FunctionTransform to a coordinate frame with "
                  "differentials, but the FunctionTransform does not handle "
@@ -1397,7 +1427,7 @@ class CompositeTransform(CoordinateTransform):
 
 
 # map class names to colorblind-safe colors
-trans_to_color = OrderedDict()
+trans_to_color = {}
 trans_to_color[AffineTransform] = '#555555'  # gray
 trans_to_color[FunctionTransform] = '#783001'  # dark red-ish/brown
 trans_to_color[FunctionTransformWithFiniteDifference] = '#d95f02'  # red-ish

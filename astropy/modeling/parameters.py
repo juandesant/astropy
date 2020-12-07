@@ -46,8 +46,7 @@ def _tofloat(value):
             # catch arrays with strings or user errors like different
             # types of parameters in a parameter set
             raise InputParameterError(
-                "Parameter of {} could not be converted to "
-                "float".format(type(value)))
+                f"Parameter of {type(value)} could not be converted to float")
     elif isinstance(value, Quantity):
         # Quantities are fine as is
         pass
@@ -61,8 +60,7 @@ def _tofloat(value):
             "Expected parameter to be of numerical type, not boolean")
     else:
         raise InputParameterError(
-            "Don't know how to convert parameter of {} to "
-            "float".format(type(value)))
+            f"Don't know how to convert parameter of {type(value)} to float")
     return value
 
 
@@ -251,6 +249,8 @@ class Parameter(OrderedDescriptor):
         self._prior = None
         self._posterior = None
 
+        self._std = None
+
     def __len__(self):
         val = self.value
         if val.shape == ():
@@ -429,6 +429,17 @@ class Parameter(OrderedDescriptor):
         """The size of this parameter's value array."""
 
         return np.size(self.value)
+
+    @property
+    def std(self):
+        """Standard deviation, if available from fit."""
+
+        return self._std
+
+    @std.setter
+    def std(self, value):
+
+        self._std = value
 
     @property
     def prior(self):

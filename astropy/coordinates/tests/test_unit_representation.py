@@ -2,7 +2,6 @@
 This file tests the behavior of subclasses of Representation and Frames
 """
 from copy import deepcopy
-from collections import OrderedDict
 
 import pytest
 
@@ -36,7 +35,6 @@ def teardown_function(func):
     _invalidate_reprdiff_cls_hash()
 
 
-@pytest.mark.remote_data
 def test_unit_representation_subclass():
 
     class Longitude180(Longitude):
@@ -46,13 +44,13 @@ def test_unit_representation_subclass():
             return self
 
     class UnitSphericalWrap180Representation(UnitSphericalRepresentation):
-        attr_classes = OrderedDict([('lon', Longitude180),
-                                    ('lat', Latitude)])
+        attr_classes = {'lon': Longitude180,
+                        'lat': Latitude}
 
     class SphericalWrap180Representation(SphericalRepresentation):
-        attr_classes = OrderedDict([('lon', Longitude180),
-                                    ('lat', Latitude),
-                                    ('distance', u.Quantity)])
+        attr_classes = {'lon': Longitude180,
+                        'lat': Latitude,
+                        'distance': u.Quantity}
 
         _unit_representation = UnitSphericalWrap180Representation
 
@@ -76,7 +74,7 @@ def test_unit_representation_subclass():
     assert isinstance(f._data, UnitSphericalWrap180Representation)
     assert isinstance(f.ra, Longitude180)
 
-    g = f.transform_to(astropy.coordinates.ICRS)
+    g = f.transform_to(astropy.coordinates.ICRS())
     assert isinstance(g, astropy.coordinates.ICRS)
     assert isinstance(g._data, UnitSphericalWrap180Representation)
 

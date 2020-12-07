@@ -432,7 +432,8 @@ class WCSAxes(Axes):
 
         self.coords.frame.draw(renderer)
 
-    def draw(self, renderer, inframe=False):
+    def draw(self, renderer, **kwargs):
+        """Draw the axes."""
 
         # In Axes.draw, the following code can result in the xlim and ylim
         # values changing, so we need to force call this here to make sure that
@@ -455,26 +456,25 @@ class WCSAxes(Axes):
         # We need to make sure that that frame path is up to date
         self.coords.frame._update_patch_path()
 
-        super().draw(renderer, inframe=inframe)
+        super().draw(renderer, **kwargs)
 
         self._drawn = True
 
-    # MATPLOTLIB_LT_30: The ``kwargs.pop('label', None)`` is to ensure
-    # compatibility with Matplotlib 2.x (which has label) and 3.x (which has
-    # xlabel). While these are meant to be a single positional argument,
-    # Matplotlib internally sometimes specifies e.g. set_xlabel(xlabel=...).
-
+    # Matplotlib internally sometimes calls set_xlabel(label=...).
     def set_xlabel(self, xlabel=None, labelpad=1, loc=None, **kwargs):
+        """Set x-label."""
         if xlabel is None:
             xlabel = kwargs.pop('label', None)
             if xlabel is None:
                 raise TypeError("set_xlabel() missing 1 required positional argument: 'xlabel'")
         for coord in self.coords:
-            if 'b' in coord.axislabels.get_visible_axes():
+            if ('b' in coord.axislabels.get_visible_axes() or
+                'h' in coord.axislabels.get_visible_axes()):
                 coord.set_axislabel(xlabel, minpad=labelpad, **kwargs)
                 break
 
     def set_ylabel(self, ylabel=None, labelpad=1, loc=None, **kwargs):
+        """Set y-label"""
         if ylabel is None:
             ylabel = kwargs.pop('label', None)
             if ylabel is None:
@@ -484,13 +484,15 @@ class WCSAxes(Axes):
             return super().set_ylabel(ylabel, labelpad=labelpad, **kwargs)
 
         for coord in self.coords:
-            if 'l' in coord.axislabels.get_visible_axes():
+            if ('l' in coord.axislabels.get_visible_axes() or
+                'c' in coord.axislabels.get_visible_axes()):
                 coord.set_axislabel(ylabel, minpad=labelpad, **kwargs)
                 break
 
     def get_xlabel(self):
         for coord in self.coords:
-            if 'b' in coord.axislabels.get_visible_axes():
+            if ('b' in coord.axislabels.get_visible_axes() or
+                'h' in coord.axislabels.get_visible_axes()):
                 return coord.get_axislabel()
 
     def get_ylabel(self):
@@ -498,7 +500,8 @@ class WCSAxes(Axes):
             return super().get_ylabel()
 
         for coord in self.coords:
-            if 'l' in coord.axislabels.get_visible_axes():
+            if ('l' in coord.axislabels.get_visible_axes() or
+                'c' in coord.axislabels.get_visible_axes()):
                 return coord.get_axislabel()
 
     def get_coords_overlay(self, frame, coord_meta=None):
@@ -583,7 +586,7 @@ class WCSAxes(Axes):
                                             transform_world2pixel.frame_in) +
                         transform_world2pixel)
 
-        elif frame == 'pixel':
+        elif isinstance(frame, str) and frame == 'pixel':
 
             return Affine2D()
 
@@ -593,7 +596,7 @@ class WCSAxes(Axes):
 
         else:
 
-            if frame == 'world':
+            if isinstance(frame, str) and frame == 'world':
 
                 return self._transform_pixel2world
 
@@ -610,12 +613,13 @@ class WCSAxes(Axes):
 
         # FIXME: we should determine what to do with the extra arguments here.
         # Note that the expected signature of this method is different in
-        # Matplotlib 3.x compared to 2.x.
+        # Matplotlib 3.x compared to 2.x, but we only support 3.x now.
 
         if not self.get_visible():
             return
 
         bb = [b for b in self._bboxes if b and (b.width != 0 or b.height != 0)]
+        bb.append(super().get_tightbbox(renderer, *args, **kwargs))
 
         if bb:
             _bbox = Bbox.union(bb)
@@ -636,6 +640,10 @@ class WCSAxes(Axes):
         ----------
         b : bool
             Whether to show the gridlines.
+        axis : 'both', 'x', 'y'
+            Which axis to turn the gridlines on/off for.
+        which : str
+            Currently only ``'major'`` is supported.
         """
 
         if not hasattr(self, 'coords'):

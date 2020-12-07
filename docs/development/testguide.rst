@@ -19,11 +19,6 @@ package template <astropy-package-template>`) is the `pytest`_ framework.
 
 .. _pytest: https://pytest.org/en/latest/
 
-.. note::
-
-    The ``pytest`` project was formerly called ``py.test``, and you may
-    see the two spellings used interchangeably in the documentation.
-
 .. _testing-dependencies:
 
 Testing Dependencies
@@ -304,7 +299,7 @@ If we place this in a ``test.py`` file and then run::
 The result is::
 
     ============================= test session starts ==============================
-    python: platform darwin -- Python 3.6.0 -- pytest-3.2.0
+    python: platform darwin -- Python 3.x.x -- pytest-x.x.x
     test object 1: /Users/username/tmp/test.py
 
     test.py F
@@ -575,11 +570,54 @@ These take one argument, which is the function being tested::
     def teardown_function(function):
         pass
 
+Property-based tests
+====================
+
+`Property-based testing
+<https://increment.com/testing/in-praise-of-property-based-testing/>`_
+lets you focus on the parts of your test that matter, by making more
+general claims - "works for any two numbers" instead of "works for 1 + 2".
+Imagine if random testing gave you minimal, non-flaky failing examples,
+and a clean way to describe even the most complicated data - that's
+property-based testing!
+
+``pytest-astropy`` includes a dependency on `Hypothesis
+<https://hypothesis.readthedocs.io/>`_, so installation is easy -
+you can just read the docs or `work through the tutorial
+<https://github.com/Zac-HD/escape-from-automanual-testing/>`_
+and start writing tests like::
+
+    from astropy.coordinates import SkyCoord
+    from hypothesis import given, strategies as st
+
+    @given(
+        st.builds(SkyCoord, ra=st.floats(0, 360), dec=st.floats(-90, 90))
+    )
+    def test_coordinate_transform(coord):
+        """Test that sky coord can be translated from ICRS to Galactic and back."""
+        assert coord == coord.galactic.icrs  # floating-point precision alert!
+
+Other properties that you could test include:
+
+- Round-tripping from image to sky coordinates and back should be lossless
+  for distortion-free mappings, and otherwise always below 10^-5 px.
+- Take a moment in time, round-trip it through various frames, and check it
+  hasn't changed or lost precision. (or at least not by more than a nanosecond)
+- IO routines losslessly round-trip data that they are expected to handle
+- Optimised routines calculate the same result as unoptimised, within tolerances
+
+This is a great way to start contributing to Astropy, and has already found
+bugs in time handling.  See issue #9017 and pull request #9532 for details!
+
+(and if you find Hypothesis useful in your research,
+`please cite it <https://doi.org/10.21105/joss.01891>`_!)
+
+
 Parametrizing tests
 ===================
 
-If you want to run a test several times for slightly different values, then
-it can be advantageous to use the ``pytest`` option to parametrize tests.
+If you want to run a test several times for slightly different values,
+you can use ``pytest`` to avoid writing separate tests.
 For example, instead of writing::
 
     def test1():
@@ -591,13 +629,18 @@ For example, instead of writing::
     def test3():
         assert type('c') == str
 
-You can use the ``parametrize`` decorator to loop over the different
-inputs::
+You can use the ``@pytest.mark.parametrize`` decorator to concisely
+create a test function for each input::
 
     @pytest.mark.parametrize(('letter'), ['a', 'b', 'c'])
     def test(letter):
         """Check that the input is a string."""
         assert type(letter) == str
+
+As a guideline, use ``parametrize`` if you can enumerate all possible
+test cases and each failure would be a distinct issue, and Hypothesis
+when there are many possible inputs or you only want a single simple
+failure to be reported.
 
 Tests requiring optional dependencies
 =====================================
@@ -636,32 +679,15 @@ Testing warnings
 ================
 
 In order to test that warnings are triggered as expected in certain
-situations, you can use the `astropy.tests.helper.catch_warnings`
-context manager.  Unlike the `warnings.catch_warnings` context manager
-in the standard library, this one will reset all warning state before
-hand so one is assured to get the warnings reported, regardless of
-what errors or warnings may have been emitted by other tests previously.
-Here is a real-world example::
-
-  from astropy.tests.helper import catch_warnings
-
-  with catch_warnings(MergeConflictWarning) as warning_lines:
-      # Test code which triggers a MergeConflictWarning
-      out = table.vstack([t1, t2, t4], join_type='outer')
-
-      assert warning_lines[0].category == metadata.MergeConflictWarning
-      assert ("In merged column 'a' the 'units' attribute does not match (cm != m)"
-              in str(warning_lines[0].message))
-
+situations,
 `pytest`_ provides its own context manager
 :ref:`pytest.warns <pytest:warns>` that, completely
 analogously to ``pytest.raises`` (see below) allows to probe explicitly
 for specific warning classes and, through the optional ``match`` argument,
 messages. Note that when no warning of the specified type is
 triggered, this will make the test fail. When checking for optional,
-but not mandatory warnings, Astropy's ``catch_warnings`` is therefore the
-better option, as it will collect any number of warning lines (including
-zero).
+but not mandatory warnings, ``pytest.warns(None)`` can be used to catch and
+inspect them.
 
 .. note::
 
@@ -669,11 +695,7 @@ zero).
    :ref:`recwarn <pytest:recwarn>` function argument to test that
    warnings are triggered within the entire embedding function.
    This method has been found to be problematic in at least one case
-   (`pull request 1174 <https://github.com/astropy/astropy/pull/1174#issuecomment-20249309>`_)
-   and the alternative of calling ``pytest.warns`` with a warning type
-   argument of ``None`` requires further processing of the recorded
-   warning(s), so the `astropy.tests.helper.catch_warnings` context
-   manager is preferred in such cases.
+   (`pull request 1174 <https://github.com/astropy/astropy/pull/1174#issuecomment-20249309>`_).
 
 Testing exceptions
 ==================
@@ -1039,8 +1061,12 @@ Overview
 
 Astropy uses the following continuous integration (CI) services:
 
-* `Travis <https://travis-ci.org/astropy/astropy>`_ for
+* `GitHub Actions <https://github.com/astropy/astropy/actions>`_ for
   64-bit Linux, OS X, and Windows setups
+  (Note: GitHub Actions does not have "allowed failures" yet, so you might
+  see a fail job reported for your PR with "(Allowed Failure)" in its name.
+  Still, some failures might be real and related to your changes, so check
+  it anyway!)
 * `CircleCI <https://circleci.com>`_ for 32-bit Linux,
   documentation build, and visualization tests
 
@@ -1049,12 +1075,10 @@ pushed to GitHub to notice when something breaks.
 
 Astropy and many affiliated packages use an external package called
 `ci-helpers <https://github.com/astropy/ci-helpers>`_ to provide
-support for the generic parts of the CI systems. ``ci-helpers`` consists of
-a set of scripts that are used by the ``.travis.yml`` and ``appveyor.yml``
-files to set up the conda environment, and install dependencies.
+support for the generic parts of the CI systems.
 
 Dependencies can be customized for different packages using the appropriate
-environment variables in ``.travis.yml`` and ``appveyor.yml``. For more
+environment variables in the relevant YAML files. For more
 details on how to set up this machinery, see the `package-template
 <https://github.com/astropy/package-template>`_ and `ci-helpers`_.
 

@@ -239,12 +239,14 @@ class DataInfoMeta(type):
                 # automatically defined look-up-on-parent attribute?
                 cls_attr = getattr(cls, attr, None)
                 if attr in cls.attrs_from_parent:
-                    # If the attribute is stored on the parent, and it
-                    # was not the case on the superclass, override it.
-                    if not isinstance(cls_attr, ParentAttribute):
+                    # If the attribute is supposed to be stored on the parent,
+                    # and that is stated by this class yet it was not the case
+                    # on the superclass, override it.
+                    if 'attrs_from_parent' in dct and not isinstance(cls_attr, ParentAttribute):
                         setattr(cls, attr, ParentAttribute(attr))
                 elif not cls_attr or isinstance(cls_attr, ParentAttribute):
-                    # Otherwise, if not defined already or previously defined
+                    # If the attribute is not meant to be stored on the parent,
+                    # and if it was not defined already or was previously defined
                     # as an attribute on the parent, define a regular
                     # look-up-on-info attribute
                     setattr(cls, attr,
@@ -258,7 +260,7 @@ class DataInfo(metaclass=DataInfoMeta):
     called ``info`` so that the DataInfo() object can be stored in the
     ``instance`` using the ``info`` key.  Because owner_cls.x is a descriptor,
     Python doesn't use __dict__['x'] normally, and the descriptor can safely
-    store stuff there.  Thanks to http://nbviewer.ipython.org/urls/gist.github.com/ChrisBeaumont/5758381/raw/descriptor_writeup.ipynb
+    store stuff there.  Thanks to https://nbviewer.jupyter.org/urls/gist.github.com/ChrisBeaumont/5758381/raw/descriptor_writeup.ipynb
     for this trick that works for non-hashable classes.
 
     Parameters
@@ -344,7 +346,14 @@ reference with ``c = col[3:5]`` followed by ``c.info``.""")
 
         if isinstance(value, DataInfo):
             info = instance.__dict__['info'] = self.__class__(bound=True)
-            for attr in info.attr_names - info.attrs_from_parent - info._attrs_no_copy:
+            attr_names = info.attr_names
+            if value.__class__ is self.__class__:
+                # For same class, attributes are guaranteed to be stored in
+                # _attrs, so speed matters up by not accessing defaults.
+                # Doing this before difference in for loop helps speed.
+                attr_names = attr_names & set(value._attrs)  # NOT in-place!
+
+            for attr in attr_names - info.attrs_from_parent - info._attrs_no_copy:
                 info._attrs[attr] = deepcopy(getattr(value, attr))
 
         else:
@@ -468,7 +477,7 @@ reference with ``c = col[3:5]`` followed by ``c.info``.""")
 
         try:
             info['length'] = len(dat)
-        except TypeError:
+        except (TypeError, IndexError):
             pass
 
         if out is None:
@@ -499,7 +508,7 @@ class BaseColumnInfo(DataInfo):
     without importing the table package.
     """
     attr_names = DataInfo.attr_names.union(['parent_table', 'indices'])
-    _attrs_no_copy = set(['parent_table'])
+    _attrs_no_copy = set(['parent_table', 'indices'])
 
     # Context for serialization.  This can be set temporarily via
     # ``serialize_context_as(context)`` context manager to allow downstream
@@ -533,6 +542,16 @@ class BaseColumnInfo(DataInfo):
         if bound:
             self._format_funcs = {}
 
+    def __set__(self, instance, value):
+        # For Table columns do not set `info` when the instance is a scalar.
+        try:
+            if not instance.shape:
+                return
+        except AttributeError:
+            pass
+
+        super().__set__(instance, value)
+
     def iter_str_vals(self):
         """
         This is a mixin-safe version of Column.iter_str_vals.
@@ -546,6 +565,18 @@ class BaseColumnInfo(DataInfo):
         _pformat_col_iter = formatter._pformat_col_iter
         for str_val in _pformat_col_iter(col, -1, False, False, {}):
             yield str_val
+
+    @property
+    def indices(self):
+        # Implementation note: the auto-generation as an InfoAttribute cannot
+        # be used here, since on access, one should not just return the
+        # default (empty list is this case), but set _attrs['indices'] so that
+        # if the list is appended to, it is registered here.
+        return self._attrs.setdefault('indices', [])
+
+    @indices.setter
+    def indices(self, indices):
+        self._attrs['indices'] = indices
 
     def adjust_indices(self, index, value, col_len):
         '''
@@ -610,7 +641,6 @@ class BaseColumnInfo(DataInfo):
             if isinstance(item, np.ndarray) and item.dtype.kind == 'b':
                 # boolean mask
                 item = np.where(item)[0]
-            threshold = 0.6
             # Empirical testing suggests that recreating a BST/RBT index is
             # more effective than relabelling when less than ~60% of
             # the total number of rows are involved, and is in general

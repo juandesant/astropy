@@ -145,7 +145,7 @@ For convenience, the command-line tool ``showtable`` can be used to print the
 content of tables for the formats supported by the unified I/O interface.
 
 Example
--------
+^^^^^^^
 
 ..
   EXAMPLE START
@@ -231,7 +231,7 @@ that all supported ASCII table formats will be tried in order to successfully
 parse the input.
 
 Examples
---------
+^^^^^^^^
 
 ..
   EXAMPLE START
@@ -374,7 +374,7 @@ a table you can view the available keywords in a readable format using:
 .. doctest-skip::
 
   >>> for key, value in t.meta.items():
-  ...     print('{0} = {1}'.format(key, value))
+  ...     print(f'{key} = {value}')
 
 This does not include the "internal" FITS keywords that are required to specify
 the FITS table properties (e.g., ``NAXIS``, ``TTYPE1``). ``HISTORY`` and
@@ -807,7 +807,7 @@ Time as a dimension in astronomical data presents challenges in its
 representation in FITS files. The standard has therefore been extended to
 describe rigorously the time coordinate in the ``World Coordinate System``
 framework. Refer to `FITS WCS paper IV
-<http://adsabs.harvard.edu/abs/2015A%26A...574A..36R/>`_ for details.
+<https://ui.adsabs.harvard.edu/abs/2015A%26A...574A..36R/>`_ for details.
 
 Allowing ``Time`` columns to be written as time coordinate
 columns in FITS tables thus involves storing time values in a way that
@@ -925,7 +925,7 @@ Since HDF5 files can contain multiple tables, the full path to the table
 should be specified via the ``path=`` argument when reading and writing.
 
 Examples
---------
+^^^^^^^^
 
 ..
   EXAMPLE START
@@ -971,7 +971,7 @@ and ``meta``.
 
 By default, when writing a table to HDF5 the code will attempt to store each
 key/value pair within the table ``meta`` as HDF5 attributes of the table
-dataset. This will fail as the values within ``meta`` are not objects that can
+dataset. This will fail if the values within ``meta`` are not objects that can
 be stored as HDF5 attributes. In addition, if the table columns being stored
 have defined values for any of the above-listed column attributes, these
 metadata will *not* be stored and a warning will be issued.
@@ -987,30 +987,16 @@ the call to ``write()``::
 
     >>> t.write('observations.hdf5', path='data', serialize_meta=True)
 
+The table metadata are stored as a dataset of strings by serializing the
+metadata in YAML following the `ECSV header format
+<https://github.com/astropy/astropy-APEs/blob/master/APE6.rst#header-details>`_
+definition. Since there are YAML parsers for most common languages, one can
+easily access and use the table metadata if reading the HDF5 in a non-astropy
+application.
+
 As of ``astropy`` 3.0, by specifying ``serialize_meta=True`` one can also store
 to HDF5 tables that contain :ref:`mixin_columns` such as `~astropy.time.Time` or
 `~astropy.coordinates.SkyCoord` columns.
-
-compatibility_mode
-~~~~~~~~~~~~~~~~~~
-
-The way metadata are saved in the HDF5 dataset has changed in ``astropy`` 3.0.
-Previously, the metadata were serialized with YAML and this was stored as an
-HDF5 attribute. This process was subject to a fixed limit on the size of an
-attribute. Starting with 3.0 the YAML-serialized metadata are stored as a
-separate dataset as described above, with no size limit.
-
-Files using the old convention are automatically recognized and will always be
-read correctly.
-
-If for some reason you need to *write* in the old format, you should
-specify the deprecated ``compatibility_mode`` keyword::
-
-    >>> t.write('observations.hdf5', path='updated_data', serialize_meta=True,
-    ...         compatibility_mode=True)
-
-.. warning:: The ``compatibility_mode`` keyword will be removed in a future
-   version of ``astropy``, so your code should be changed.
 
 .. _table_io_pandas:
 
@@ -1059,7 +1045,7 @@ allow to visualize interactively an HTML table (with columns sorting, search,
 and pagination).
 
 Example
--------
+^^^^^^^
 
 ..
   EXAMPLE START
@@ -1097,7 +1083,7 @@ file, but if not, or if writing to disk, then the format should be explicitly
 specified.
 
 Examples
---------
+^^^^^^^^
 
 ..
   EXAMPLE START

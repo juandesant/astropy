@@ -42,21 +42,14 @@ import numpy as np
 
 from astropy.units.core import (
     UnitsError, UnitTypeError, dimensionless_unscaled)
-from astropy.utils.compat import NUMPY_LT_1_17, NUMPY_LT_1_18
+from astropy.utils.compat import NUMPY_LT_1_18, NUMPY_LT_1_20
 from astropy.utils import isiterable
 
-
-if NUMPY_LT_1_17:  # pragma: no cover
-    # pre 1.16, overrides.py did not exist; in 1.16, it existed, but
-    # __array_function__ overrides were turned off by default.
-    ARRAY_FUNCTION_ENABLED = (hasattr(np.core, 'overrides') and
-                              np.core.overrides.ENABLE_ARRAY_FUNCTION)
-else:
-    # In 1.17, overrides are enabled by default, but it is still possible to
-    # turn them off using an environment variable.  We use getattr since it
-    # is planned to remove that possibility in later numpy versions.
-    ARRAY_FUNCTION_ENABLED = getattr(np.core.overrides,
-                                     'ENABLE_ARRAY_FUNCTION', True)
+# In 1.17, overrides are enabled by default, but it is still possible to
+# turn them off using an environment variable.  We use getattr since it
+# is planned to remove that possibility in later numpy versions.
+ARRAY_FUNCTION_ENABLED = getattr(np.core.overrides,
+                                 'ENABLE_ARRAY_FUNCTION', True)
 SUBCLASS_SAFE_FUNCTIONS = set()
 """Functions with implementations supporting subclasses like Quantity."""
 FUNCTION_HELPERS = {}
@@ -128,10 +121,12 @@ IGNORED_FUNCTIONS = {
     np.save, np.savez, np.savetxt, np.savez_compressed,
     # Polynomials
     np.poly, np.polyadd, np.polyder, np.polydiv, np.polyfit, np.polyint,
-    np.polymul, np.polysub, np.polyval, np.roots, np.vander,
+    np.polymul, np.polysub, np.polyval, np.roots, np.vander}
+if NUMPY_LT_1_20:
     # financial
-    np.fv, np.ipmt, np.irr, np.mirr, np.nper, np.npv, np.pmt, np.ppmt,
-    np.pv, np.rate}
+    IGNORED_FUNCTIONS |= {np.fv, np.ipmt, np.irr, np.mirr, np.nper,
+                          np.npv, np.pmt, np.ppmt, np.pv, np.rate}
+
 if NUMPY_LT_1_18:
     IGNORED_FUNCTIONS |= {np.rank}
 else:
@@ -442,8 +437,7 @@ def piecewise(x, condlist, funclist, *args, **kw):
         n += 1
     elif n != n2:
         raise ValueError(
-            "with {} condition(s), either {} or {} functions are expected"
-            .format(n, n, n+1)
+            f"with {n} condition(s), either {n} or {n + 1} functions are expected"
         )
 
     y = np.zeros(x.shape, x.dtype)

@@ -19,7 +19,6 @@ from cpython.buffer cimport PyObject_GetBuffer, PyBuffer_Release
 
 from ...utils.data import get_readable_fileobj
 from ...utils.exceptions import AstropyWarning
-from ...table import pprint
 from . import core
 
 
@@ -50,6 +49,7 @@ cdef extern from "src/tokenizer.h":
         char comment           # comment character
         char quotechar         # quote character
         char expchar           # exponential character in scientific notation
+        char newline           # EOL character
         char **output_cols     # array of output strings for each column
         char **col_ptrs        # array of pointers to current output position for each col
         int *output_len        # length of each output column string
@@ -219,6 +219,19 @@ cdef class CParser:
                 expchar = 'A'
         parallel = fast_reader.pop('parallel', False)
 
+        # FIXME: for now the parallel mode does not work correctly and is worse
+        # than non-parallel mode so we disable parallel mode if set and emit a
+        # warning. We keep the parallel code below so that it can be fixed in
+        # future, but if it cannot be fixed we should remove the parallel code
+        # and deprecate the option itself. For now the warning is not a
+        # deprecation warning since we may still fix it in future. See
+        # https://github.com/astropy/astropy/issues/8858 for more details.
+        if parallel:
+            warnings.warn('parallel reading does not currently work, '
+                          'so falling back to serial reading (see '
+                          'https://github.com/astropy/astropy/issues/8858 for more details)', AstropyWarning)
+            parallel = False
+
         if fast_reader:
             raise core.FastOptionsError("Invalid parameter in fast_reader dict")
 
@@ -245,6 +258,12 @@ cdef class CParser:
         self.fill_names = None
         self.fill_extra_cols = fill_extra_cols
 
+        if self.names is not None:
+            if None in self.names:
+                raise TypeError('Cannot have None for column name')
+            if len(set(self.names)) != len(self.names):
+                raise ValueError('Duplicate column names')
+
         # parallel=True indicates that we should use the CPU count
         if parallel is True:
             parallel = multiprocessing.cpu_count()
@@ -255,7 +274,7 @@ cdef class CParser:
 
     def __dealloc__(self):
         if self.tokenizer:
-            delete_tokenizer(self.tokenizer) # perform C memory cleanup
+            delete_tokenizer(self.tokenizer)  # perform C memory cleanup
 
     cdef get_error(self, code, num_rows, msg):
         err_msg = ERR_CODES.get(code, "unknown error")
@@ -272,7 +291,7 @@ cdef class CParser:
     cpdef setup_tokenizer(self, source):
         cdef FileString fstring
 
-        if isinstance(source, str): # filename or data
+        if isinstance(source, str):  # filename or data
             if '\n' not in source and '\r' not in source: # filename
                 fstring = FileString(source)
                 self.tokenizer.source = <char *>fstring.mmap_ptr
@@ -281,7 +300,7 @@ cdef class CParser:
                 self.tokenizer.source_len = <size_t>len(fstring)
                 return
             # Otherwise, source is the actual data so we leave it be
-        elif hasattr(source, 'read'): # file-like object
+        elif hasattr(source, 'read'):  # file-like object
             with get_readable_fileobj(source) as file_obj:
                 source = file_obj.read()
         elif isinstance(source, FileString):
@@ -290,8 +309,13 @@ cdef class CParser:
             self.tokenizer.source_len = <size_t>len(source)
             return
         else:
+            # Iterable sequence of lines, merge with newline character
             try:
-                source = '\n'.join(source) # iterable sequence of lines
+                if self.tokenizer.delimiter == ord('\n'):
+                    newline = '\r'
+                else:
+                    newline = '\n'
+                source = newline.join(source)
             except TypeError:
                 raise TypeError('Input "table" must be a file-like object, a '
                                 'string (filename or data), or an iterable')
@@ -303,7 +327,7 @@ cdef class CParser:
         self.tokenizer.source = self.source_bytes
         self.tokenizer.source_len = <size_t>len(self.source_bytes)
 
-    def read_header(self):
+    def read_header(self, deduplicate=True, filter_names=True):
         self.tokenizer.source_pos = 0
 
         # header_start is a valid line number
@@ -316,9 +340,9 @@ cdef class CParser:
             self.header_names = []
             name = ''
 
-            for i in range(self.tokenizer.output_len[0]): # header is in first col string
-                c = self.tokenizer.output_cols[0][i] # next char in header string
-                if not c: # zero byte -- field terminator
+            for i in range(self.tokenizer.output_len[0]):  # header is in first col string
+                c = self.tokenizer.output_cols[0][i]       # next char in header string
+                if not c:  # zero byte -- field terminator
                     if name:
                         # replace empty placeholder with ''
                         self.header_names.append(name.replace('\x01', ''))
@@ -328,23 +352,25 @@ cdef class CParser:
                 else:
                     name += chr(c)
             self.width = <int>len(self.header_names)
+            if deduplicate and not self.names:  # skip if custom names were provided
+                self._deduplicate_names()
 
         else:
             # Get number of columns from first data row
             if tokenize(self.tokenizer, -1, 1, 0) != 0:
                 self.raise_error("an error occurred while tokenizing the first line of data")
             self.width = 0
-            for i in range(self.tokenizer.output_len[0]): # header is in first col string
+            for i in range(self.tokenizer.output_len[0]):  # header is in first col string
                 # zero byte -- field terminator
                 if not self.tokenizer.output_cols[0][i]:
                     # ends valid field
                     if i > 0 and self.tokenizer.output_cols[0][i - 1]:
                         self.width += 1
-                    else: # end of line
+                    else:  # end of line
                         break
-            if self.width == 0: # no data
+            if self.width == 0:  # no data
                 raise core.InconsistentTableError('No data lines found, C reader '
-                                            'cannot autogenerate column names')
+                                                  'cannot autogenerate column names')
             # auto-generate names
             self.header_names = ['col{0}'.format(i + 1) for i in range(self.width)]
 
@@ -355,9 +381,9 @@ cdef class CParser:
 
         # self.use_cols should only contain columns included in output
         self.use_cols = set(self.names)
-        if self.include_names is not None:
+        if filter_names and self.include_names is not None:
             self.use_cols.intersection_update(self.include_names)
-        if self.exclude_names is not None:
+        if filter_names and self.exclude_names is not None:
             self.use_cols.difference_update(self.exclude_names)
 
         self.width = <int>len(self.names)
@@ -789,7 +815,7 @@ cdef class CParser:
                 max_len = field_len
             row += 1
 
-        cdef np.ndarray col = np.array(fields_list, dtype=(np.str, max_len))
+        cdef np.ndarray col = np.array(fields_list, dtype=(str, max_len))
 
         if mask:
             return ma.masked_array(col, mask=[1 if i in mask else 0 for i in
@@ -806,6 +832,26 @@ cdef class CParser:
 
     def get_header_names(self):
         return self.header_names
+
+    def _deduplicate_names(self):
+        """Ensure there are no duplicates in ``self.header_names``
+        Cythonic version of  core._deduplicate_names.
+        """
+        cdef int i
+        new_names = []
+        existing_names = set()
+
+        for name in self.header_names:
+            base_name = name + '_'
+            i = 1
+            while name in existing_names:
+                # Iterate until a unique name is found
+                name = base_name + str(i)
+                i += 1
+            new_names.append(name)
+            existing_names.add(name)
+
+        self.header_names = new_names
 
     def __reduce__(self):
         cdef bytes source = self.source_ptr if self.source_ptr else self.source_bytes
@@ -926,6 +972,8 @@ cdef class FastWriter:
                   fill_include_names=None,
                   fill_exclude_names=None,
                   fast_writer=True):
+
+        from ...table import pprint  # Here to avoid circular import
 
         if fast_writer is True:
             fast_writer = {}

@@ -62,7 +62,7 @@ def test_faux_lsr(dt, symmetric):
                pm_ra_cosdec=0*u.marcsec/u.yr, pm_dec=10*u.marcsec/u.yr,
                radial_velocity=1000*u.km/u.s)
     lsrc2 = ic2.transform_to(LSR2())
-    ic2_roundtrip = lsrc2.transform_to(ICRS)
+    ic2_roundtrip = lsrc2.transform_to(ICRS())
 
     tot = np.sum(lsrc2.cartesian.differentials['s'].d_xyz**2)**0.5
     assert np.abs(tot.to('km/s') - 1000*u.km/u.s) < 20*u.km/u.s
@@ -99,8 +99,8 @@ def test_faux_fk5_galactic():
     c1 = FK5(ra=150*u.deg, dec=-17*u.deg, radial_velocity=83*u.km/u.s,
              pm_ra_cosdec=-41*u.mas/u.yr, pm_dec=16*u.mas/u.yr,
              distance=150*u.pc)
-    c2 = c1.transform_to(Galactic2)
-    c3 = c1.transform_to(Galactic)
+    c2 = c1.transform_to(Galactic2())
+    c3 = c1.transform_to(Galactic())
 
     # compare the matrix and finite-difference calculations
     assert quantity_allclose(c2.pm_l_cosb, c3.pm_l_cosb, rtol=1e-4)
@@ -138,20 +138,19 @@ def test_gcrs_diffs():
     assert np.abs(qtrsung.radial_velocity) < 40*u.km/u.s
     assert np.abs(sung.radial_velocity) < 1*u.km/u.s
 
-    suni2 = sung.transform_to(ICRS)
+    suni2 = sung.transform_to(ICRS())
     assert np.all(np.abs(suni2.data.differentials['s'].d_xyz) < 3e-5*u.km/u.s)
-    qtrisun2 = qtrsung.transform_to(ICRS)
+    qtrisun2 = qtrsung.transform_to(ICRS())
     assert np.all(np.abs(qtrisun2.data.differentials['s'].d_xyz) < 3e-5*u.km/u.s)
 
 
-@pytest.mark.remote_data
 def test_altaz_diffs():
     time = Time('J2015') + np.linspace(-1, 1, 1000)*u.day
     loc = get_builtin_sites()['greenwich']
     aa = AltAz(obstime=time, location=loc)
 
-    icoo = ICRS(np.zeros_like(time)*u.deg, 10*u.deg, 100*u.au,
-                pm_ra_cosdec=np.zeros_like(time)*u.marcsec/u.yr,
+    icoo = ICRS(np.zeros(time.shape)*u.deg, 10*u.deg, 100*u.au,
+                pm_ra_cosdec=np.zeros(time.shape)*u.marcsec/u.yr,
                 pm_dec=0*u.marcsec/u.yr,
                 radial_velocity=0*u.km/u.s)
 
@@ -164,7 +163,7 @@ def test_altaz_diffs():
     assert np.ptp(acoo.radial_velocity)/2 < (2*np.pi*constants.R_earth/u.day)*1.2  # MAGIC NUMBER
 
     cdiff = acoo.data.differentials['s'].represent_as(CartesianDifferential,
-                                                    acoo.data)
+                                                      acoo.data)
 
     # The "total" velocity should be > c, because the *tangential* velocity
     # isn't a True velocity, but rather an induced velocity due to the Earth's

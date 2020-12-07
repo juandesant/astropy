@@ -1,7 +1,6 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-from distutils.version import LooseVersion
-
+from packaging.version import Version
 import pytest
 import numpy as np
 from numpy import ma
@@ -10,19 +9,22 @@ from numpy.testing import assert_allclose, assert_equal
 from astropy.utils.exceptions import AstropyDeprecationWarning
 from astropy.visualization.mpl_normalize import ImageNormalize, simple_norm, imshow_norm
 from astropy.visualization.interval import ManualInterval, PercentileInterval
-from astropy.visualization.stretch import SqrtStretch
+from astropy.visualization.stretch import LogStretch, PowerStretch, SqrtStretch
 
 try:
     import matplotlib    # pylint: disable=W0611
     from matplotlib import pyplot as plt
     HAS_MATPLOTLIB = True
-    MATPLOTLIB_LT_32 = LooseVersion(matplotlib.__version__) < '3.2'
+    MATPLOTLIB_LT_32 = Version(matplotlib.__version__) < Version('3.2')
 except ImportError:
     HAS_MATPLOTLIB = False
 
 DATA = np.linspace(0., 15., 6)
 DATA2 = np.arange(3)
 DATA2SCL = 0.5 * DATA2
+DATA3 = np.linspace(-3., 3., 7)
+STRETCHES = (SqrtStretch(), PowerStretch(0.5), LogStretch())
+INVALID = (None, -np.inf, -1)
 
 
 @pytest.mark.skipif('HAS_MATPLOTLIB')
@@ -70,9 +72,10 @@ class TestNormalize:
 
     def test_noclip(self):
         norm = ImageNormalize(vmin=2., vmax=10., stretch=SqrtStretch(),
-                              clip=False)
+                              clip=False, invalid=None)
         norm2 = ImageNormalize(DATA, interval=ManualInterval(2, 10),
-                               stretch=SqrtStretch(), clip=False)
+                               stretch=SqrtStretch(), clip=False,
+                               invalid=None)
         output = norm(DATA)
         expected = [np.nan, 0.35355339, 0.70710678, 0.93541435, 1.11803399,
                     1.27475488]
@@ -100,6 +103,19 @@ class TestNormalize:
         assert norm.vmax == np.max(DATA)
         assert_allclose(output, norm2(DATA))
 
+    def test_call_clip(self):
+        """Test that the clip keyword is used when calling the object."""
+        data = np.arange(5)
+        norm = ImageNormalize(vmin=1., vmax=3., clip=False)
+
+        output = norm(data, clip=True)
+        assert_equal(output.data, [0, 0, 0.5, 1.0, 1.0])
+        assert np.all(~output.mask)
+
+        output = norm(data, clip=False)
+        assert_equal(output.data, [-0.5, 0, 0.5, 1.0, 1.5])
+        assert np.all(~output.mask)
+
     def test_masked_clip(self):
         mdata = ma.array(DATA, mask=[0, 0, 1, 0, 0, 0])
         norm = ImageNormalize(vmin=2., vmax=10., stretch=SqrtStretch(),
@@ -115,9 +131,10 @@ class TestNormalize:
     def test_masked_noclip(self):
         mdata = ma.array(DATA, mask=[0, 0, 1, 0, 0, 0])
         norm = ImageNormalize(vmin=2., vmax=10., stretch=SqrtStretch(),
-                              clip=False)
+                              clip=False, invalid=None)
         norm2 = ImageNormalize(mdata, interval=ManualInterval(2, 10),
-                               stretch=SqrtStretch(), clip=False)
+                               stretch=SqrtStretch(), clip=False,
+                               invalid=None)
         output = norm(mdata)
         expected = [np.nan, 0.35355339, -10, 0.93541435, 1.11803399,
                     1.27475488]
@@ -156,6 +173,21 @@ class TestNormalize:
         norm5 = ImageNormalize(data)
         assert_equal((norm5.vmin, norm5.vmax), (norm4.vmin, norm4.vmax))
 
+    @pytest.mark.parametrize('stretch', STRETCHES)
+    def test_invalid_keyword(self, stretch):
+        norm1 = ImageNormalize(stretch=stretch, vmin=-1, vmax=1, clip=False,
+                               invalid=None)
+        norm2 = ImageNormalize(stretch=stretch, vmin=-1, vmax=1, clip=False)
+        norm3 = ImageNormalize(DATA3, stretch=stretch, vmin=-1, vmax=1,
+                               clip=False, invalid=-1.)
+        result1 = norm1(DATA3)
+        result2 = norm2(DATA3)
+        result3 = norm3(DATA3)
+        assert_equal(result1[0:2], (np.nan, np.nan))
+        assert_equal(result2[0:2], (-1., -1.))
+        assert_equal(result1[2:], result2[2:])
+        assert_equal(result2, result3)
+
 
 @pytest.mark.skipif('not HAS_MATPLOTLIB')
 class TestImageScaling:
@@ -167,8 +199,17 @@ class TestImageScaling:
 
     def test_sqrt(self):
         """Test sqrt scaling."""
-        norm = simple_norm(DATA2, stretch='sqrt')
-        assert_allclose(norm(DATA2), np.sqrt(DATA2SCL), atol=0, rtol=1.e-5)
+        norm1 = simple_norm(DATA2, stretch='sqrt')
+        assert_allclose(norm1(DATA2), np.sqrt(DATA2SCL), atol=0, rtol=1.e-5)
+
+    @pytest.mark.parametrize('invalid', INVALID)
+    def test_sqrt_invalid_kw(self, invalid):
+        stretch = SqrtStretch()
+        norm1 = simple_norm(DATA3, stretch='sqrt', min_cut=-1, max_cut=1,
+                            clip=False, invalid=invalid)
+        norm2 = ImageNormalize(stretch=stretch, vmin=-1, vmax=1, clip=False,
+                               invalid=invalid)
+        assert_equal(norm1(DATA3), norm2(DATA3))
 
     def test_power(self):
         """Test power scaling."""

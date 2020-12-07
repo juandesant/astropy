@@ -176,8 +176,7 @@ def convolve(array, kernel, boundary='fill', fill_value=0.,
     """
 
     if boundary not in BOUNDARY_OPTIONS:
-        raise ValueError("Invalid boundary option: must be one of {}"
-                         .format(BOUNDARY_OPTIONS))
+        raise ValueError(f"Invalid boundary option: must be one of {BOUNDARY_OPTIONS}")
 
     if nan_treatment not in ('interpolate', 'fill'):
         raise ValueError("nan_treatment must be one of 'interpolate','fill'")
@@ -353,6 +352,10 @@ def convolve(array, kernel, boundary='fill', fill_value=0.,
         result[initially_nan] = np.nan
 
     # Convert result to original data type
+    array_unit = getattr(passed_array, "unit", None)
+    if array_unit is not None:
+        result <<= array_unit
+
     if isinstance(passed_array, Kernel):
         if isinstance(passed_array, Kernel1D):
             new_result = Kernel1D(array=result)
@@ -567,6 +570,9 @@ def convolve_fft(array, kernel, boundary='fill', fill_value=0.,
     if nan_treatment not in ('interpolate', 'fill'):
         raise ValueError("nan_treatment must be one of 'interpolate','fill'")
 
+    #Get array quantity if it exists
+    array_unit = getattr(array, "unit", None)
+
     # Convert array dtype to complex
     # and ensure that list inputs become arrays
     array = _copy_input_if_needed(array, dtype=complex, order='C',
@@ -758,6 +764,9 @@ def convolve_fft(array, kernel, boundary='fill', fill_value=0.,
         raise ValueError("Encountered NaNs in convolve.  This is disallowed.")
 
     fftmult *= kernel_scale
+
+    if array_unit is not None:
+        fftmult <<= array_unit
 
     if return_fft:
         return fftmult

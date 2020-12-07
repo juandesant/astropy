@@ -6,6 +6,7 @@ import warnings
 import pytest
 import numpy as np
 from numpy import testing as npt
+import erfa
 
 from astropy import units as u
 from astropy.time import Time
@@ -13,8 +14,6 @@ from astropy.coordinates.builtin_frames import ICRS, AltAz
 from astropy.coordinates.builtin_frames.utils import get_jd12
 from astropy.coordinates import EarthLocation
 from astropy.coordinates import SkyCoord
-from astropy.tests.helper import catch_warnings
-from astropy import _erfa as erfa
 from astropy.utils import iers
 from .utils import randomly_sample_sphere
 
@@ -73,7 +72,6 @@ def _erfa_check(ira, idec, astrom):
     return dct
 
 
-@pytest.mark.remote_data
 def test_iau_fullstack(fullstack_icrs, fullstack_fiducial_altaz,
                        fullstack_times, fullstack_locations,
                        fullstack_obsconditions):
@@ -109,12 +107,12 @@ def test_iau_fullstack(fullstack_icrs, fullstack_fiducial_altaz,
         tol = 750*u.milliarcsecond
 
     # now make sure the full stack round-tripping works
-    icrs2 = aacoo.transform_to(ICRS)
+    icrs2 = aacoo.transform_to(ICRS())
 
     adras = np.abs(fullstack_icrs.ra - icrs2.ra)[msk]
     addecs = np.abs(fullstack_icrs.dec - icrs2.dec)[msk]
-    assert np.all(adras < tol), 'largest RA change is {} mas, > {}'.format(np.max(adras.arcsec*1000), tol)
-    assert np.all(addecs < tol), 'largest Dec change is {} mas, > {}'.format(np.max(addecs.arcsec*1000), tol)
+    assert np.all(adras < tol), f'largest RA change is {np.max(adras.arcsec * 1000)} mas, > {tol}'
+    assert np.all(addecs < tol), f'largest Dec change is {np.max(addecs.arcsec * 1000)} mas, > {tol}'
 
     # check that we're consistent with the ERFA alt/az result
     iers_tab = iers.earth_orientation_table.get()
@@ -139,7 +137,6 @@ def test_iau_fullstack(fullstack_icrs, fullstack_fiducial_altaz,
     npt.assert_allclose(erfadct['az'], aacoo.az.radian, atol=1e-7)
 
 
-@pytest.mark.remote_data
 def test_fiducial_roudtrip(fullstack_icrs, fullstack_fiducial_altaz):
     """
     Test the full transform from ICRS <-> AltAz
@@ -147,7 +144,7 @@ def test_fiducial_roudtrip(fullstack_icrs, fullstack_fiducial_altaz):
     aacoo = fullstack_icrs.transform_to(fullstack_fiducial_altaz)
 
     # make sure the round-tripping works
-    icrs2 = aacoo.transform_to(ICRS)
+    icrs2 = aacoo.transform_to(ICRS())
     npt.assert_allclose(fullstack_icrs.ra.deg, icrs2.ra.deg)
     npt.assert_allclose(fullstack_icrs.dec.deg, icrs2.dec.deg)
 
@@ -166,26 +163,19 @@ def test_future_altaz():
     if hasattr(utils, '__warningregistry__'):
         utils.__warningregistry__.clear()
 
-    with catch_warnings() as found_warnings:
-
-        location = EarthLocation(lat=0*u.deg, lon=0*u.deg)
-        t = Time('J2161')
-
-        SkyCoord(1*u.deg, 2*u.deg).transform_to(AltAz(location=location, obstime=t))
+    location = EarthLocation(lat=0*u.deg, lon=0*u.deg)
+    t = Time('J2161')
 
     # check that these message(s) appear among any other warnings.  If tests are run with
     # --remote-data then the IERS table will be an instance of IERS_Auto which is
     # assured of being "fresh".  In this case getting times outside the range of the
     # table does not raise an exception.  Only if using IERS_B (which happens without
     # --remote-data, i.e. for all CI testing) do we expect another warning.
-    messages_to_find = ["Tried to get polar motions for times after IERS data is valid."]
-    if isinstance(iers.earth_orientation_table.get(), iers.IERS_B):
-        messages_to_find.append("(some) times are outside of range covered by IERS table.")
+    with pytest.warns(AstropyWarning, match=r"Tried to get polar motions for "
+                      "times after IERS data is valid.*") as found_warnings:
+        SkyCoord(1*u.deg, 2*u.deg).transform_to(AltAz(location=location, obstime=t))
 
-    messages_found = [False for _ in messages_to_find]
-    for w in found_warnings:
-        if issubclass(w.category, AstropyWarning):
-            for i, message_to_find in enumerate(messages_to_find):
-                if message_to_find in str(w.message):
-                    messages_found[i] = True
-    assert all(messages_found)
+    if isinstance(iers.earth_orientation_table.get(), iers.IERS_B):
+        messages_found = ["(some) times are outside of range covered by IERS "
+                          "table." in str(w.message) for w in found_warnings]
+        assert any(messages_found)

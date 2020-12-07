@@ -16,12 +16,13 @@ parameters in each model making up the set.
 import abc
 import copy
 import inspect
+import itertools
 import functools
 import operator
 import types
 import warnings
 
-from collections import defaultdict, OrderedDict, deque
+from collections import defaultdict, deque
 from inspect import signature
 from itertools import chain
 
@@ -68,9 +69,6 @@ class _ModelMeta(abc.ABCMeta):
     Currently just handles auto-generating the param_names list based on
     Parameter descriptors declared at the class-level of Model subclasses.
     """
-    @classmethod
-    def __prepare__(mcls, name, bases):
-        return OrderedDict()
 
     _is_dynamic = False
     """
@@ -131,10 +129,9 @@ class _ModelMeta(abc.ABCMeta):
 
     def __init__(cls, name, bases, members):
         super(_ModelMeta, cls).__init__(name, bases, members)
-        if cls.__name__ != "CompoundModel":
-            cls._create_inverse_property(members)
+        cls._create_inverse_property(members)
         cls._create_bounding_box_property(members)
-        pdict = OrderedDict()
+        pdict = {}
         for base in bases:
             for tbase in base.__mro__:
                 if issubclass(tbase, Model):
@@ -351,7 +348,7 @@ class _ModelMeta(abc.ABCMeta):
 
         __call__.__signature__ = sig
 
-        return type('_{0}BoundingBox'.format(cls.name), (_BoundingBox,),
+        return type(f'_{cls.name}BoundingBox', (_BoundingBox,),
                     {'__call__': __call__})
 
     def _handle_special_methods(cls, members, pdict):
@@ -365,8 +362,7 @@ class _ModelMeta(abc.ABCMeta):
             wrapper.__module__ = cls.__module__
             wrapper.__doc__ = getattr(cls, wrapper.__name__).__doc__
             if hasattr(cls, '__qualname__'):
-                wrapper.__qualname__ = '{0}.{1}'.format(
-                    cls.__qualname__, wrapper.__name__)
+                wrapper.__qualname__ = f'{cls.__qualname__}.{wrapper.__name__}'
 
         if ('__call__' not in members and 'n_inputs' in members and
                 isinstance(members['n_inputs'], int) and members['n_inputs'] > 0):
@@ -476,7 +472,7 @@ class _ModelMeta(abc.ABCMeta):
                     break
                 bases.append(base.name)
             if bases:
-                return '{0} ({1})'.format(cls.name, ' -> '.join(bases))
+                return f"{cls.name} ({' -> '.join(bases)})"
             return cls.name
 
         try:
@@ -492,7 +488,7 @@ class _ModelMeta(abc.ABCMeta):
 
             for keyword, value in default_keywords + keywords:
                 if value is not None:
-                    parts.append('{0}: {1}'.format(keyword, value))
+                    parts.append(f'{keyword}: {value}')
 
             return '\n'.join(parts)
         except Exception:
@@ -690,6 +686,11 @@ class Model(metaclass=_ModelMeta):
     # dictionary where each key is a string that corresponds to one of the
     # model inputs. Only has an effect if input_units is defined.
     input_units_equivalencies = None
+
+    # Covariance matrix can be set by fitter if available.
+    # If cov_matrix is availble, then std will set as well
+    _cov_matrix = None
+    _stds = None
 
     def __init__(self, *args, meta=None, name=None, **kwargs):
         super().__init__()
@@ -943,7 +944,7 @@ class Model(metaclass=_ModelMeta):
         new_inputs, kwargs = _keyword2positional(kwargs)
         n_all_args = n_args + len(new_inputs)
 
-        if  n_all_args < self.n_inputs:
+        if n_all_args < self.n_inputs:
             raise ValueError(f"Missing input arguments - expected {self.n_inputs}, got {n_all_args}")
         elif n_all_args > self.n_inputs:
             raise ValueError(f"Too many input arguments - expected {self.n_inputs}, got {n_all_args}")
@@ -1086,6 +1087,18 @@ class Model(metaclass=_ModelMeta):
 
         return self._mconstraints['ineqcons']
 
+    def has_inverse(self):
+        """
+        Returns True if the model has an analytic or user
+        inverse defined.
+        """
+        try:
+            self.inverse
+        except NotImplementedError:
+            return False
+
+        return True
+
     @property
     def inverse(self):
         """
@@ -1111,10 +1124,12 @@ class Model(metaclass=_ModelMeta):
         if self._user_inverse is not None:
             return self._user_inverse
         elif self._inverse is not None:
-            return self._inverse()
+            result = self._inverse()
+            if result is not NotImplemented:
+                return result
 
-        raise NotImplementedError("An analytical inverse transform has not "
-                                  "been implemented for this model.")
+        raise NotImplementedError("No analytical or user-supplied inverse transform "
+                                  "has been implemented for this model.")
 
     @inverse.setter
     def inverse(self, value):
@@ -1133,7 +1148,10 @@ class Model(metaclass=_ModelMeta):
         the model will have no inverse).
         """
 
-        del self._user_inverse
+        try:
+            del self._user_inverse
+        except AttributeError:
+            pass
 
     @property
     def has_user_inverse(self):
@@ -1197,13 +1215,10 @@ class Model(metaclass=_ModelMeta):
         >>> model_1d.bounding_box = None
         >>> model_1d.bounding_box  # doctest: +IGNORE_EXCEPTION_DETAIL
         Traceback (most recent call last):
-          File "<stdin>", line 1, in <module>
-          File "astropy\modeling\core.py", line 980, in bounding_box
-            "No bounding box is defined for this model (note: the "
-        NotImplementedError: No bounding box is defined for this model (note:
-        the bounding box was explicitly disabled for this model; use `del
-        model.bounding_box` to restore the default bounding box, if one is
-        defined for this model).
+        NotImplementedError: No bounding box is defined for this model
+        (note: the bounding box was explicitly disabled for this model;
+        use `del model.bounding_box` to restore the default bounding box,
+        if one is defined for this model).
         """
 
         if self._user_bounding_box is not None:
@@ -1272,6 +1287,46 @@ class Model(metaclass=_ModelMeta):
         return self._user_bounding_box is not None
 
     @property
+    def cov_matrix(self):
+        """
+        Fitter should set covariance matrix, if available.
+        """
+        return self._cov_matrix
+
+    @cov_matrix.setter
+    def cov_matrix(self, cov):
+
+        self._cov_matrix = cov
+
+        unfix_untied_params = [p for p in self.param_names if (self.fixed[p] is False)
+                               and (self.tied[p] is False)]
+        if type(cov) == list:  # model set
+            param_stds = []
+            for c in cov:
+                param_stds.append([np.sqrt(x) if x > 0 else None for x in np.diag(c.cov_matrix)])
+            for p, param_name in enumerate(unfix_untied_params):
+                par = getattr(self, param_name)
+                par.std = [item[p] for item in param_stds]
+                setattr(self, param_name, par)
+        else:
+            param_stds = [np.sqrt(x) if x > 0 else None for x in np.diag(cov.cov_matrix)]
+            for param_name in unfix_untied_params:
+                par = getattr(self, param_name)
+                par.std = param_stds.pop(0)
+                setattr(self, param_name, par)
+
+    @property
+    def stds(self):
+        """
+        Standard deviation of parameters, if covariance matrix is available.
+        """
+        return self._stds
+
+    @stds.setter
+    def stds(self, stds):
+        self._stds = stds
+
+    @property
     def separable(self):
         """ A flag indicating whether a model is separable."""
 
@@ -1307,18 +1362,9 @@ class Model(metaclass=_ModelMeta):
         that takes the input and output units (as two dictionaries) and
         returns a dictionary giving the target units for each parameter.
 
-        For compound models this will only work when the expression only
-        involves the addition or subtraction operators.
         """
-
-        if isinstance(self, CompoundModel):
-            self._make_opset()
-            if not self._opset.issubset(set(('+', '-'))):
-                raise ValueError(
-                    "Fitting a compound model without units can only be performed on"
-                    "compound models that only use the arithmetic operators + and -")
-
         model = self.copy()
+
         inputs_unit = {inp: getattr(kwargs[inp], 'unit', dimensionless_unscaled)
                        for inp in self.inputs if kwargs[inp] is not None}
 
@@ -1326,7 +1372,6 @@ class Model(metaclass=_ModelMeta):
                         for out in self.outputs if kwargs[out] is not None}
         parameter_units = self._parameter_units_for_data_units(inputs_unit,
                                                                outputs_unit)
-
         for name, unit in parameter_units.items():
             parameter = getattr(model, name)
             if parameter.unit is not None:
@@ -1369,7 +1414,6 @@ class Model(metaclass=_ModelMeta):
         """
 
         model = self.copy()
-
         inputs_unit = {inp: getattr(kwargs[inp], 'unit', dimensionless_unscaled)
                        for inp in self.inputs if kwargs[inp] is not None}
 
@@ -1492,7 +1536,7 @@ class Model(metaclass=_ModelMeta):
                 out = np.zeros(coords[0].shape)
 
         if out is not None:
-            out = np.asanyarray(out, dtype=float)
+            out = np.asanyarray(out)
             if out.ndim != ndim:
                 raise ValueError('the array and model must have the same '
                                  'number of dimensions.')
@@ -1590,7 +1634,6 @@ class Model(metaclass=_ModelMeta):
         applicable) the units of the input will be compatible with the evaluate
         method.
         """
-
         # When we instantiate the model class, we make sure that __call__ can
         # take the following two keyword arguments: model_set_axis and
         # equivalencies.
@@ -1624,7 +1667,6 @@ class Model(metaclass=_ModelMeta):
                                              model_set_axis, **kwargs)
 
     def _validate_input_units(self, inputs, equivalencies=None, inputs_map=None):
-
         inputs = list(inputs)
         name = self.name or self.__class__.__name__
         # Check that the units are correct, if applicable
@@ -1762,6 +1804,148 @@ class Model(metaclass=_ModelMeta):
         new_model = self.copy()
         new_model._name = name
         return new_model
+
+    def coerce_units(
+        self,
+        input_units=None,
+        return_units=None,
+        input_units_equivalencies=None,
+        input_units_allow_dimensionless=False
+    ):
+        """
+        Attach units to this (unitless) model.
+
+        Parameters
+        ----------
+        input_units : dict or tuple, optional
+            Input units to attach.  If dict, each key is the name of a model input,
+            and the value is the unit to attach.  If tuple, the elements are units
+            to attach in order corresponding to `Model.inputs`.
+        return_units : dict or tuple, optional
+            Output units to attach.  If dict, each key is the name of a model output,
+            and the value is the unit to attach.  If tuple, the elements are units
+            to attach in order corresponding to `Model.outputs`.
+        input_units_equivalencies : dict, optional
+            Default equivalencies to apply to input values.  If set, this should be a
+            dictionary where each key is a string that corresponds to one of the
+            model inputs.
+        input_units_allow_dimensionless : bool or dict, optional
+            Allow dimensionless input. If this is True, input values to evaluate will
+            gain the units specified in input_units. If this is a dictionary then it
+            should map input name to a bool to allow dimensionless numbers for that
+            input.
+
+        Returns
+        -------
+        `CompoundModel`
+            A `CompoundModel` composed of the current model plus
+            `~astropy.modeling.mappings.UnitsMapping` model(s) that attach the units.
+
+        Raises
+        ------
+        ValueError
+            If the current model already has units.
+
+        Examples
+        --------
+
+        Wrapping a unitless model to require and convert units:
+
+        >>> from astropy.modeling.models import Polynomial1D
+        >>> from astropy import units as u
+        >>> poly = Polynomial1D(1, c0=1, c1=2)
+        >>> model = poly.coerce_units((u.m,), (u.s,))
+        >>> model(u.Quantity(10, u.m))  # doctest: +FLOAT_CMP
+        <Quantity 21. s>
+        >>> model(u.Quantity(1000, u.cm))  # doctest: +FLOAT_CMP
+        <Quantity 21. s>
+        >>> model(u.Quantity(10, u.cm))  # doctest: +FLOAT_CMP
+        <Quantity 1.2 s>
+
+        Wrapping a unitless model but still permitting unitless input:
+
+        >>> from astropy.modeling.models import Polynomial1D
+        >>> from astropy import units as u
+        >>> poly = Polynomial1D(1, c0=1, c1=2)
+        >>> model = poly.coerce_units((u.m,), (u.s,), input_units_allow_dimensionless=True)
+        >>> model(u.Quantity(10, u.m))  # doctest: +FLOAT_CMP
+        <Quantity 21. s>
+        >>> model(10)  # doctest: +FLOAT_CMP
+        <Quantity 21. s>
+        """
+        from .mappings import UnitsMapping
+
+        result = self
+
+        if input_units is not None:
+            if self.input_units is not None:
+                model_units = self.input_units
+            else:
+                model_units = {}
+
+            for unit in [model_units.get(i) for i in self.inputs]:
+                if unit is not None and unit != dimensionless_unscaled:
+                    raise ValueError("Cannot specify input_units for model with existing input units")
+
+            if isinstance(input_units, dict):
+                if input_units.keys() != set(self.inputs):
+                    message = (
+                        f"""input_units keys ({", ".join(input_units.keys())}) """
+                        f"""do not match model inputs ({", ".join(self.inputs)})"""
+                    )
+                    raise ValueError(message)
+                input_units = [input_units[i] for i in self.inputs]
+
+            if len(input_units) != self.n_inputs:
+                message = (
+                    "input_units length does not match n_inputs: "
+                    f"expected {self.n_inputs}, received {len(input_units)}"
+                )
+                raise ValueError(message)
+
+            mapping = tuple((unit, model_units.get(i)) for i, unit in zip(self.inputs, input_units))
+            input_mapping = UnitsMapping(
+                mapping,
+                input_units_equivalencies=input_units_equivalencies,
+                input_units_allow_dimensionless=input_units_allow_dimensionless
+            )
+            input_mapping.inputs = self.inputs
+            input_mapping.outputs = self.inputs
+            result = input_mapping | result
+
+        if return_units is not None:
+            if self.return_units is not None:
+                model_units = self.return_units
+            else:
+                model_units = {}
+
+            for unit in [model_units.get(i) for i in self.outputs]:
+                if unit is not None and unit != dimensionless_unscaled:
+                    raise ValueError("Cannot specify return_units for model with existing output units")
+
+            if isinstance(return_units, dict):
+                if return_units.keys() != set(self.outputs):
+                    message = (
+                        f"""return_units keys ({", ".join(return_units.keys())}) """
+                        f"""do not match model outputs ({", ".join(self.outputs)})"""
+                    )
+                    raise ValueError(message)
+                return_units = [return_units[i] for i in self.outputs]
+
+            if len(return_units) != self.n_outputs:
+                message = (
+                    "return_units length does not match n_outputs: "
+                    f"expected {self.n_outputs}, received {len(return_units)}"
+                )
+                raise ValueError(message)
+
+            mapping = tuple((model_units.get(i), unit) for i, unit in zip(self.outputs, return_units))
+            return_mapping = UnitsMapping(mapping)
+            return_mapping.inputs = self.outputs
+            return_mapping.outputs = self.outputs
+            result = result | return_mapping
+
+        return result
 
     @property
     def n_submodels(self):
@@ -2143,24 +2327,23 @@ class Model(metaclass=_ModelMeta):
         parts = [repr(a) for a in args]
 
         parts.extend(
-            "{0}={1}".format(name,
-                             param_repr_oneline(getattr(self, name)))
+            f"{name}={param_repr_oneline(getattr(self, name))}"
             for name in self.param_names)
 
         if self.name is not None:
-            parts.append('name={0!r}'.format(self.name))
+            parts.append(f'name={self.name!r}')
 
         for kwarg, value in kwargs.items():
-            if kwarg in defaults and defaults[kwarg] != value:
+            if kwarg in defaults and defaults[kwarg] == value:
                 continue
-            parts.append('{0}={1!r}'.format(kwarg, value))
+            parts.append(f'{kwarg}={value!r}')
 
         if len(self) > 1:
-            parts.append("n_models={0}".format(len(self)))
+            parts.append(f"n_models={len(self)}")
 
-        return '<{0}({1})>'.format(self.__class__.__name__, ', '.join(parts))
+        return f"<{self.__class__.__name__}({', '.join(parts)})>"
 
-    def _format_str(self, keywords=[]):
+    def _format_str(self, keywords=[], defaults={}):
         """
         Internal implementation of ``__str__``.
 
@@ -2177,10 +2360,14 @@ class Model(metaclass=_ModelMeta):
             ('Model set size', len(self))
         ]
 
-        parts = ['{0}: {1}'.format(keyword, value)
-                 for keyword, value in default_keywords + keywords
+        parts = [f'{keyword}: {value}'
+                 for keyword, value in default_keywords
                  if value is not None]
 
+        for keyword, value in keywords:
+            if keyword.lower() in defaults and defaults[keyword.lower()] == value:
+                continue
+            parts.append(f'{keyword}: {value}')
         parts.append('Parameters:')
 
         if len(self) == 1:
@@ -2315,13 +2502,17 @@ class CompoundModel(Model):
         self._bounding_box = None
         self._user_bounding_box = None
         self._leaflist = None
-        self._opset = None
         self._tdict = None
         self._parameters = None
         self._parameters_ = None
         self._param_metrics = None
-        self._has_inverse = False  # may be set to True in following code
+
         if inverse:
+            warnings.warn(
+                "The 'inverse' argument is deprecated.  Instead, set the inverse "
+                "property after CompoundModel is initialized.",
+                AstropyDeprecationWarning
+            )
             self.inverse = inverse
 
         if op != 'fix_inputs' and len(left) != len(right):
@@ -2348,19 +2539,6 @@ class CompoundModel(Model):
             self.n_outputs = left.n_outputs + right.n_outputs
             self.inputs = combine_labels(left.inputs, right.inputs)
             self.outputs = combine_labels(left.outputs, right.outputs)
-            if inverse is None and self.both_inverses_exist():
-                self._has_inverse = True
-                inv = CompoundModel('&',
-                                    self.left.inverse,
-                                    self.right.inverse,
-                                    inverse=self)
-                if left._user_inverse is not None or right._user_inverse is not None:
-                    self._user_inverse = inv
-                    if self.inverse._has_inverse:
-                        del self._user_inverse._user_inverse
-                        self.inverse._has_inverse = False
-                else:
-                    self._inverse = inv
         elif op == '|':
             if left.n_outputs != right.n_inputs:
                 raise ModelDefinitionError(
@@ -2375,19 +2553,6 @@ class CompoundModel(Model):
             self.n_outputs = right.n_outputs
             self.inputs = left.inputs
             self.outputs = right.outputs
-            if inverse is None and self.both_inverses_exist():
-                self._has_inverse = True
-                inv = CompoundModel('|',
-                                    self.right.inverse,
-                                    self.left.inverse,
-                                    inverse=self)
-                if left._user_inverse is not None or right._user_inverse is not None:
-                    self._user_inverse = inv
-                    if self.inverse._has_inverse:
-                        del self._user_inverse._user_inverse
-                    self.inverse._has_inverse = False
-                else:
-                    self._inverse = inv
         elif op == 'fix_inputs':
             if not isinstance(left, Model):
                 raise ValueError('First argument to "fix_inputs" must be an instance of an astropy Model.')
@@ -2453,10 +2618,124 @@ class CompoundModel(Model):
             self.linear = False
         self.eqcons = []
         self.ineqcons = []
+        self.n_left_params = len(self.left.parameters)
         self._map_parameters()
 
-    def evaluate(self, *args, **kwargs):
-        pass
+    def _get_left_inputs_from_args(self, args):
+        return args[:self.left.n_inputs]
+
+    def _get_right_inputs_from_args(self, args):
+        op = self.op
+        if op == '&':
+            # Args expected to look lik (*left inputs, *right inputs, *left params, *right params)
+            return args[self.left.n_inputs: self.left.n_inputs + self.right.n_inputs]
+        elif op == '|' or  op == 'fix_inputs':
+            return None
+        else:
+            return args[:self.left.n_inputs]
+
+    def _get_left_params_from_args(self, args):
+        op = self.op
+        if op == '&':
+            # Args expected to look lik (*left inputs, *right inputs, *left params, *right params)
+            n_inputs = self.left.n_inputs + self.right.n_inputs
+            return args[n_inputs: n_inputs + self.n_left_params]
+        else:
+            return args[self.left.n_inputs: self.left.n_inputs + self.n_left_params]
+
+    def _get_right_params_from_args(self, args):
+        op = self.op
+        if op == 'fix_inputs':
+            return None
+        if op == '&':
+            # Args expected to look lik (*left inputs, *right inputs, *left params, *right params)
+            return args[self.left.n_inputs + self.right.n_inputs + self.n_left_params:]
+        else:
+            return args[self.left.n_inputs + self.n_left_params:]
+
+    def _get_kwarg_model_parameters_as_positional(self, args, kwargs):
+        # could do it with inserts but rebuilding seems like simpilist way
+
+        #TODO: Check if any param names are in kwargs maybe as an intersection of sets?
+        if self.op == "&":
+            new_args = list(args[:self.left.n_inputs + self.right.n_inputs])
+            args_pos = self.left.n_inputs + self.right.n_inputs
+        else:
+            new_args = list(args[:self.left.n_inputs])
+            args_pos = self.left.n_inputs
+
+        for param_name in self.param_names:
+            kw_value = kwargs.pop(param_name, None)
+            if kw_value is not None:
+                value = kw_value
+            else:
+                try:
+                    value = args[args_pos]
+                except IndexError:
+                    raise IndexError("Missing parameter or input")
+
+                args_pos += 1
+            new_args.append(value)
+
+        return new_args, kwargs
+
+    def _apply_operators_to_value_lists(self, leftval, rightval, **kw):
+        op = self.op
+        if op == '+':
+            return binary_operation(operator.add, leftval, rightval)
+        elif op == '-':
+            return binary_operation(operator.sub, leftval, rightval)
+        elif op == '*':
+            return binary_operation(operator.mul, leftval, rightval)
+        elif op == '/':
+            return binary_operation(operator.truediv, leftval, rightval)
+        elif op == '**':
+            return binary_operation(operator.pow, leftval, rightval)
+        elif op == '&':
+            if not isinstance(leftval, tuple):
+                leftval = (leftval,)
+            if not isinstance(rightval, tuple):
+                rightval = (rightval,)
+            return leftval + rightval
+        elif op in SPECIAL_OPERATORS:
+            return binary_operation(SPECIAL_OPERATORS[op], leftval, rightval)
+        else:
+            raise ModelDefinitionError('Unrecognized operator {op}')
+
+    def evaluate(self, *args, **kw):
+        op = self.op
+        args, kw = self._get_kwarg_model_parameters_as_positional(args, kw)
+        left_inputs = self._get_left_inputs_from_args(args)
+        left_params = self._get_left_params_from_args(args)
+
+        if op == 'fix_inputs':
+            pos_index = dict(zip(self.left.inputs, range(self.left.n_inputs)))
+            fixed_inputs = {
+                key if isinstance(key, int) else pos_index[key]: value
+                for key, value in self.right.items()
+            }
+            left_inputs = [
+                fixed_inputs[ind] if ind in fixed_inputs.keys() else inp
+                for ind, inp in enumerate(left_inputs)
+            ]
+
+        leftval = self.left.evaluate(*itertools.chain(left_inputs, left_params))
+
+        if op == 'fix_inputs':
+            return leftval
+
+        right_inputs = self._get_right_inputs_from_args(args)
+        right_params = self._get_right_params_from_args(args)
+
+        if op == "|":
+            if isinstance(leftval, tuple):
+                return self.right.evaluate(*itertools.chain(leftval, right_params))
+            else:
+                return self.right.evaluate(leftval, *right_params)
+        else:
+            rightval = self.right.evaluate(*itertools.chain(right_inputs, right_params))
+
+        return self._apply_operators_to_value_lists(leftval, rightval, **kw)
 
     @property
     def n_submodels(self):
@@ -2474,7 +2753,7 @@ class CompoundModel(Model):
         newnames = []
         for item in names:
             if item is None:
-                newnames.append('None_{}'.format(nonecount))
+                newnames.append(f'None_{nonecount}')
                 nonecount += 1
             else:
                 newnames.append(item)
@@ -2484,17 +2763,18 @@ class CompoundModel(Model):
         '''
         if both members of this compound model have inverses return True
         '''
+        warnings.warn(
+            "CompoundModel.both_inverses_exist is deprecated. "
+            "Use has_inverse instead.",
+            AstropyDeprecationWarning
+        )
+
         try:
             linv = self.left.inverse
             rinv = self.right.inverse
         except NotImplementedError:
             return False
-        if isinstance(self.left, CompoundModel):
-            if not self.left.has_inverse():
-                return False
-        if isinstance(self.right, CompoundModel):
-            if not self.right.has_inverse():
-                return False
+
         return True
 
     def __call__(self, *args, **kw):
@@ -2541,36 +2821,22 @@ class CompoundModel(Model):
                 leftval = self.left(*args, **kw)
                 if op != '|':
                     rightval = self.right(*args, **kw)
+                else:
+                    rightval = None
 
             else:
                 leftval = self.left(*(args[:self.left.n_inputs]), **kw)
                 rightval = self.right(*(args[self.left.n_inputs:]), **kw)
-            if op == '+':
-                return binary_operation(operator.add, leftval, rightval)
-            elif op == '-':
-                return binary_operation(operator.sub, leftval, rightval)
-            elif op == '*':
-                return binary_operation(operator.mul, leftval, rightval)
-            elif op == '/':
-                return binary_operation(operator.truediv, leftval, rightval)
-            elif op == '**':
-                return binary_operation(operator.pow, leftval, rightval)
-            elif op == '&':
-                if not isinstance(leftval, tuple):
-                    leftval = (leftval,)
-                if not isinstance(rightval, tuple):
-                    rightval = (rightval,)
-                return leftval + rightval
+
+            if op != "|":
+                return self._apply_operators_to_value_lists(leftval, rightval, **kw)
+
             elif op == '|':
                 if isinstance(leftval, tuple):
                     return self.right(*leftval, **kw)
                 else:
                     return self.right(leftval, **kw)
-            elif op in SPECIAL_OPERATORS:
-                return binary_operation(SPECIAL_OPERATORS[op], leftval, rightval)
-            else:
 
-                raise ModelDefinitionError('Unrecognized operator {op}')
         else:
             subs = self.right
             newargs = list(args)
@@ -2606,7 +2872,7 @@ class CompoundModel(Model):
             if subinds:
                 subargs = list(zip(subinds, subvals))
                 subargs.sort()
-                #subindsorted, subvalsorted = list(zip(*subargs))
+                # subindsorted, subvalsorted = list(zip(*subargs))
             # The substitutions must be inserted in order
             for ind, val in subargs:
                 newargs.insert(ind, val)
@@ -2624,11 +2890,6 @@ class CompoundModel(Model):
         self._leaflist = leaflist
         self._tdict = tdict
 
-    def _make_opset(self):
-        """ Determine the set of operations used in this tree."""
-        self._opset = set()
-        get_ops(self, self._opset)
-
     def __getattr__(self, name):
         """
         If someone accesses an attribute not already defined, map the
@@ -2642,7 +2903,7 @@ class CompoundModel(Model):
         if name in self._param_names:
             return self.__dict__[name]
         else:
-            raise AttributeError('Attribute "{}" not found'.format(name))
+            raise AttributeError(f'Attribute "{name}" not found')
 
     def __getitem__(self, index):
         if self._leaflist is None:
@@ -2690,13 +2951,13 @@ class CompoundModel(Model):
             raise TypeError('index must be integer, slice, or model name string')
 
     def _str_index_to_int(self, str_index):
-                # Search through leaflist for item with that name
+        # Search through leaflist for item with that name
         found = []
         for nleaf, leaf in enumerate(self._leaflist):
-            if leaf.name == str_index:
+            if getattr(leaf, 'name', None) == str_index:
                 found.append(nleaf)
         if len(found) == 0:
-            raise IndexError("No component with name '{}' found".format(str_index))
+            raise IndexError(f"No component with name '{str_index}' found")
         if len(found) > 1:
             raise IndexError("Multiple components found using '{}' as name\n"
                              "at indices {}".format(str_index, found))
@@ -2758,7 +3019,7 @@ class CompoundModel(Model):
         operands = deque()
 
         if format_leaf is None:
-            format_leaf = lambda i, l: '[{0}]'.format(i)
+            format_leaf = lambda i, l: f'[{i}]'
 
         for node in self.traverse_postorder():
             if not isinstance(node, CompoundModel):
@@ -2772,10 +3033,10 @@ class CompoundModel(Model):
             if isinstance(node, CompoundModel):
                 if (isinstance(node.left, CompoundModel) and
                         OPERATOR_PRECEDENCE[node.left.op] < oper_order):
-                    left = '({0})'.format(left)
+                    left = f'({left})'
                 if (isinstance(node.right, CompoundModel) and
                         OPERATOR_PRECEDENCE[node.right.op] < oper_order):
-                    right = '({0})'.format(right)
+                    right = f'({right})'
 
             operands.append(' '.join((left, node.op, right)))
 
@@ -2804,29 +3065,14 @@ class CompoundModel(Model):
     def isleaf(self):
         return False
 
-    def has_inverse(self):
-        return self._has_inverse
-
     @property
     def inverse(self):
-        if self.has_inverse():
-            if self._user_inverse is not None:
-                return self._user_inverse
-            return self._inverse
+        if self.op == '|':
+            return self.right.inverse | self.left.inverse
+        elif self.op == '&':
+            return self.left.inverse & self.right.inverse
         else:
-            raise NotImplementedError("Inverse function not provided")
-
-    @inverse.setter
-    def inverse(self, value):
-        if not isinstance(value, Model):
-            raise ValueError("Attempt to assign non model to inverse")
-        self._user_inverse = value
-        self._has_inverse = True
-
-    @inverse.deleter
-    def inverse(self):
-        self._has_inverse = False
-        self._user_inverse = None
+            return NotImplemented
 
     @property
     def fittable(self):
@@ -2836,7 +3082,6 @@ class CompoundModel(Model):
                 self._map_parameters()
             self._fittable = all(m.fittable for m in self._leaflist)
         return self._fittable
-
 
     __add__ = _model_oper('+')
     __sub__ = _model_oper('-')
@@ -2873,14 +3118,14 @@ class CompoundModel(Model):
             return
         if self._leaflist is None:
             self._make_leaflist()
-        self._parameters_ = OrderedDict()
+        self._parameters_ = {}
         param_map = {}
         self._param_names = []
         for lindex, leaf in enumerate(self._leaflist):
             if not isinstance(leaf, dict):
                 for param_name in leaf.param_names:
                     param = getattr(leaf, param_name)
-                    new_param_name = "{}_{}".format(param_name, lindex)
+                    new_param_name = f"{param_name}_{lindex}"
                     self.__dict__[new_param_name] = param
                     self._parameters_[new_param_name] = param
                     self._param_names.append(new_param_name)
@@ -2946,6 +3191,14 @@ class CompoundModel(Model):
                         inputs_map[inp] = r_inputs_map[self.right.inputs[i - len(self.left.inputs)]]
                     else:
                         inputs_map[inp] = self.right, self.right.inputs[i - len(self.left.inputs)]
+        elif self.op == 'fix_inputs':
+            fixed_ind = list(self.right.keys())
+            ind = [list(self.left.inputs).index(i) if isinstance(i, str) else i for i in fixed_ind]
+            inp_ind = list(range(self.left.n_inputs))
+            for i in ind:
+                inp_ind.remove(i)
+            for i in inp_ind:
+                inputs_map[self.left.inputs[i]] = self.left, self.left.inputs[i]
         else:
             if isinstance(self.left, CompoundModel):
                 l_inputs_map = self.left.inputs_map()
@@ -2998,10 +3251,10 @@ class CompoundModel(Model):
 
     @property
     def return_units(self):
-        inputs_map = self.inputs_map()
-        return {key: inputs_map[key][0].return_units[orig_key]
-                for key, (mod, orig_key) in inputs_map.items()
-                if inputs_map[key][0].return_units is not None}
+        outputs_map = self.outputs_map()
+        return {key: outputs_map[key][0].return_units[orig_key]
+                for key, (mod, orig_key) in outputs_map.items()
+                if outputs_map[key][0].return_units is not None}
 
     def outputs_map(self):
         """
@@ -3012,16 +3265,19 @@ class CompoundModel(Model):
             return {out: (self, out) for out in self.outputs}
 
         elif self.op == '|':
-            r_outputs_map = self.right.outputs_map()
+            if isinstance(self.right, CompoundModel):
+                r_outputs_map = self.right.outputs_map()
             for out in self.outputs:
                 if isinstance(self.right, CompoundModel):
                     outputs_map[out] = r_outputs_map[out]
                 else:
-                    outputs_map[out] = self, out
+                    outputs_map[out] = self.right, out
 
         elif self.op == '&':
-            l_outputs_map = self.left.outputs_map()
-            r_outputs_map = self.right.outputs_map()
+            if isinstance(self.left, CompoundModel):
+                l_outputs_map = self.left.outputs_map()
+            if isinstance(self.right, CompoundModel):
+                r_outputs_map = self.right.outputs_map()
             for i, out in enumerate(self.outputs):
                 if i < len(self.left.outputs):  # Get from left
                     if isinstance(self.left, CompoundModel):
@@ -3033,7 +3289,8 @@ class CompoundModel(Model):
                         outputs_map[out] = r_outputs_map[self.right.outputs[i - len(self.left.outputs)]]
                     else:
                         outputs_map[out] = self.right, self.right.outputs[i - len(self.left.outputs)]
-
+        elif self.op == 'fix_inputs':
+            return self.left.outputs_map()
         else:
             if isinstance(self.left, CompoundModel):
                 l_outputs_map = self.left.outputs_map()
@@ -3043,7 +3300,6 @@ class CompoundModel(Model):
                 else:
                     outputs_map[out] = self.left, out
         return outputs_map
-
 
     def _fix_input_bounding_box(self, input_ind):
         """
@@ -3141,7 +3397,7 @@ class CompoundModel(Model):
                 out = np.zeros(coords[0].shape)
 
         if out is not None:
-            out = np.asanyarray(out, dtype=float)
+            out = np.asanyarray(out)
             if out.ndim != ndim:
                 raise ValueError('the array and model must have the same '
                                  'number of dimensions.')
@@ -3184,6 +3440,69 @@ class CompoundModel(Model):
             out += self(*coords)
 
         return out
+
+    def replace_submodel(self, name, model):
+        """
+        Construct a new `~astropy.modeling.CompoundModel` instance from an
+        existing CompoundModel, replacing the named submodel with a new model.
+
+        In order to ensure that inverses and names are kept/reconstructed, it's
+        necessary to rebuild the CompoundModel from the replaced node all the
+        way back to the base. The original CompoundModel is left untouched.
+
+        Parameters
+        ----------
+        name : str
+            name of submodel to be replaced
+        model : `~astropy.modeling.Model`
+            replacement model
+        """
+        submodels = [m for m in self.traverse_postorder()
+                     if getattr(m, 'name', None) == name]
+        if submodels:
+            if len(submodels) > 1:
+                raise ValueError(f"More than one submodel named {name}")
+
+            old_model = submodels.pop()
+            if len(old_model) != len(model):
+                raise ValueError("New and old models must have equal values "
+                                 "for n_models")
+
+            # Do this check first in order to raise a more helpful Exception,
+            # although it would fail trying to construct the new CompoundModel
+            if (old_model.n_inputs != model.n_inputs or
+                        old_model.n_outputs != model.n_outputs):
+                raise ValueError("New model must match numbers of inputs and "
+                                 "outputs of existing model")
+
+            tree = _get_submodel_path(self, name)
+            while tree:
+                branch = self.copy()
+                for node in tree[:-1]:
+                    branch = getattr(branch, node)
+                setattr(branch, tree[-1], model)
+                model = CompoundModel(branch.op, branch.left, branch.right,
+                                      name=branch.name)
+                tree = tree[:-1]
+            return model
+
+        else:
+            raise ValueError(f"No submodels found named {name}")
+
+
+def _get_submodel_path(model, name):
+    """Find the route down a CompoundModel's tree to the model with the
+    specified name (whether it's a leaf or not)"""
+    if getattr(model, 'name', None) == name:
+        return []
+    try:
+        return ['left'] + _get_submodel_path(model.left, name)
+    except (AttributeError, TypeError):
+        pass
+    try:
+        return ['right'] + _get_submodel_path(model.right, name)
+    except (AttributeError, TypeError):
+        pass
 
 
 def binary_operation(binoperator, left, right):
@@ -3387,8 +3706,8 @@ def _custom_model_wrapper(func, fit_deriv=None):
     else:
         output_names = ('x',)
 
-    params = OrderedDict((param.name, Parameter(param.name,
-                                                default=param.default)) for param in params)
+    params = {param.name: Parameter(param.name, default=param.default)
+              for param in params}
 
     mod = find_current_module(2)
     if mod:
@@ -3396,13 +3715,14 @@ def _custom_model_wrapper(func, fit_deriv=None):
     else:
         modname = '__main__'
 
-    members = OrderedDict([
-        ('__module__', str(modname)),
-        ('__doc__', func.__doc__),
-        ('n_inputs', len(inputs)),
-        #tuple(x.name for x in inputs)),
-        ('n_outputs', len(output_names)),
-        ('evaluate', staticmethod(func))])
+    members = {
+        '__module__': str(modname),
+        '__doc__': func.__doc__,
+        'n_inputs': len(inputs),
+        # tuple(x.name for x in inputs)),
+        'n_outputs': len(output_names),
+        'evaluate': staticmethod(func)
+    }
 
     if fit_deriv is not None:
         members['fit_deriv'] = staticmethod(fit_deriv)

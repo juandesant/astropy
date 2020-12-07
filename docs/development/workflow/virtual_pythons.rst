@@ -127,9 +127,15 @@ environment.
     + More details, and examples that start with none of the packages from
       your normal python environment, are in the
       `documentation for the conda command`_ and the
-      `blog post announcing anaconda environments`_.
+      `guide on how to manage environments`_.
 
-    + If astropy is installed in your environment, you may need to uninstall it
+    + Next activate the environment ``ENV`` with:
+
+        conda activate ENV
+
+    + Your command-line prompt will contain ``ENV`` in parentheses by default.
+
+    + If astropy is installed in your ``ENV`` environment, you may need to uninstall it
       in order for the development version to install properly. You can do this
       with the following command::
 
@@ -191,5 +197,4 @@ which the ``ENV`` is located; both also provide commands to make that a bit easi
 .. _documentation for virtualenvwrapper: https://virtualenvwrapper.readthedocs.io/en/latest/install.html
 .. _virtualenvwrapper command documentation: https://virtualenvwrapper.readthedocs.io/en/latest/command_ref.html
 .. _documentation for the conda command: https://docs.conda.io/projects/conda/en/latest/commands.html
-.. _blog post announcing anaconda environments: https://www.anaconda.com/category/developer-blog/
-
+.. _guide on how to manage environments: https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html

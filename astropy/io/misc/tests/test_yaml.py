@@ -11,19 +11,18 @@ from io import StringIO
 import pytest
 import numpy as np
 
-from astropy.coordinates import SkyCoord, EarthLocation, Angle, Longitude, Latitude
+from astropy.coordinates import (SkyCoord, EarthLocation, Angle, Longitude, Latitude,
+                                 SphericalRepresentation, UnitSphericalRepresentation,
+                                 CartesianRepresentation, SphericalCosLatDifferential,
+                                 SphericalDifferential, CartesianDifferential)
 from astropy import units as u
 from astropy.time import Time
 from astropy.table import QTable, SerializedColumn
-from astropy.tests.helper import catch_warnings
+from astropy.coordinates.tests.test_representation import representation_equal
 
-try:
-    from astropy.io.misc.yaml import load, load_all, dump
-    HAS_YAML = True
-except ImportError:
-    HAS_YAML = False
+yaml = pytest.importorskip('yaml', minversion='3.12')
 
-pytestmark = pytest.mark.skipif('not HAS_YAML')
+from astropy.io.misc.yaml import load, load_all, dump  # noqa
 
 
 @pytest.mark.parametrize('c', [True, np.uint8(8), np.int16(4),
@@ -50,18 +49,14 @@ def test_unit(c):
                                u.def_unit('magic')])
 def test_custom_unit(c):
     s = dump(c)
-    with catch_warnings() as w:
+    with pytest.warns(u.UnitsWarning, match=f"'{c!s}' did not parse") as w:
         cy = load(s)
     assert len(w) == 1
-    assert f"'{c!s}' did not parse" in str(w[0].message)
     assert isinstance(cy, u.UnrecognizedUnit)
     assert str(cy) == str(c)
 
     with u.add_enabled_units(c):
-        with catch_warnings() as w2:
-            cy2 = load(s)
-        assert len(w2) == 0
-
+        cy2 = load(s)
         assert cy2 is c
 
 
@@ -116,6 +111,30 @@ def test_skycoord(frame):
                  location=EarthLocation(1000, 2000, 3000, unit=u.km))
     cy = load(dump(c))
     compare_coord(c, cy)
+
+
+@pytest.mark.parametrize('rep', [
+    CartesianRepresentation(1*u.m, 2.*u.m, 3.*u.m),
+    SphericalRepresentation([[1, 2], [3, 4]]*u.deg,
+                            [[5, 6], [7, 8]]*u.deg,
+                            10*u.pc),
+    UnitSphericalRepresentation(0*u.deg, 10*u.deg),
+    SphericalCosLatDifferential([[1.], [2.]]*u.mas/u.yr,
+                                [4., 5.]*u.mas/u.yr,
+                                [[[10]], [[20]]]*u.km/u.s),
+    CartesianDifferential([10, 20, 30]*u.km/u.s),
+    CartesianRepresentation(
+        [1, 2, 3]*u.m,
+        differentials=CartesianDifferential([10, 20, 30]*u.km/u.s)),
+    SphericalRepresentation(
+        [[1, 2], [3, 4]]*u.deg, [[5, 6], [7, 8]]*u.deg, 10*u.pc,
+        differentials={
+            's': SphericalDifferential([[0., 1.], [2., 3.]]*u.mas/u.yr,
+                                       [[4., 5.], [6., 7.]]*u.mas/u.yr,
+                                       10*u.km/u.s)})])
+def test_representations(rep):
+    rrep = load(dump(rep))
+    assert np.all(representation_equal(rrep, rep))
 
 
 def _get_time():
@@ -181,7 +200,6 @@ def test_load_all():
     assert unity == unit
 
 
-@pytest.mark.skipif('not HAS_YAML')
 def test_ecsv_astropy_objects_in_meta():
     """
     Test that astropy core objects in ``meta`` are serialized.

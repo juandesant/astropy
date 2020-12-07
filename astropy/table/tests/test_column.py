@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
+from astropy.utils.tests.test_metadata import MetaBaseTest
 import operator
 
 import pytest
 import numpy as np
 from numpy.testing import assert_array_equal
 
-from astropy.tests.helper import assert_follows_unicode_guidelines, catch_warnings
+from astropy.tests.helper import assert_follows_unicode_guidelines
 from astropy import table
+from astropy import time
 from astropy import units as u
 
 
@@ -210,7 +212,7 @@ class TestColumn():
         assert np.all(d_nounit.to(u.dimensionless_unscaled) == np.array([1, 2, 3]))
 
         # make sure the correct copy/no copy behavior is happening
-        q = [1, 3, 5]*u.km
+        q = [1, 3, 5] * u.km
 
         # to should always make a copy
         d.to(u.km)[:] = q
@@ -499,9 +501,6 @@ class TestAttrEqual():
 # and any minimal set of args to pass.
 
 
-from astropy.utils.tests.test_metadata import MetaBaseTest
-
-
 class TestMetaColumn(MetaBaseTest):
     test_class = table.Column
     args = ()
@@ -528,7 +527,8 @@ def test_getitem_metadata_regression():
     assert c[1:2].format == '%i'
     assert c[1:2].meta['c'] == 8
 
-    c = table.MaskedColumn(data=[1, 2], name='a', description='b', unit='m', format="%i", meta={'c': 8})
+    c = table.MaskedColumn(data=[1, 2], name='a', description='b',
+                           unit='m', format="%i", meta={'c': 8})
     assert c[1:2].name == 'a'
     assert c[1:2].description == 'b'
     assert c[1:2].unit == 'm'
@@ -537,7 +537,8 @@ def test_getitem_metadata_regression():
 
     # As above, but with take() - check the method and the function
 
-    c = table.Column(data=[1, 2, 3], name='a', description='b', unit='m', format="%i", meta={'c': 8})
+    c = table.Column(data=[1, 2, 3], name='a', description='b',
+                     unit='m', format="%i", meta={'c': 8})
     for subset in [c.take([0, 1]), np.take(c, [0, 1])]:
         assert subset.name == 'a'
         assert subset.description == 'b'
@@ -551,7 +552,8 @@ def test_getitem_metadata_regression():
         assert subset.shape == ()
         assert not isinstance(subset, table.Column)
 
-    c = table.MaskedColumn(data=[1, 2, 3], name='a', description='b', unit='m', format="%i", meta={'c': 8})
+    c = table.MaskedColumn(data=[1, 2, 3], name='a', description='b',
+                           unit='m', format="%i", meta={'c': 8})
     for subset in [c.take([0, 1]), np.take(c, [0, 1])]:
         assert subset.name == 'a'
         assert subset.description == 'b'
@@ -606,7 +608,7 @@ def test_qtable_column_conversion():
 
     # Regression test for #5342: if a function unit is assigned, the column
     # should become the appropriate FunctionQuantity subclass.
-    qtab['f'].unit = u.dex(u.cm/u.s**2)
+    qtab['f'].unit = u.dex(u.cm / u.s**2)
     assert isinstance(qtab['f'], u.Dex)
 
 
@@ -616,45 +618,36 @@ def test_string_truncation_warning(masked):
     Test warnings associated with in-place assignment to a string
     column that results in truncation of the right hand side.
     """
+    from inspect import currentframe, getframeinfo
+
     t = table.Table([['aa', 'bb']], names=['a'], masked=masked)
+    t['a'][1] = 'cc'
+    t['a'][:] = 'dd'
 
-    with catch_warnings() as w:
-        from inspect import currentframe, getframeinfo
-        t['a'][1] = 'cc'
-        assert len(w) == 0
-
-        t['a'][:] = 'dd'
-        assert len(w) == 0
-
-    with catch_warnings() as w:
+    with pytest.warns(table.StringTruncateWarning, match=r'truncated right side '
+                      r'string\(s\) longer than 2 character\(s\)') as w:
         frameinfo = getframeinfo(currentframe())
         t['a'][0] = 'eee'  # replace item with string that gets truncated
-        assert t['a'][0] == 'ee'
-        assert len(w) == 1
-        assert ('truncated right side string(s) longer than 2 character(s)'
-                in str(w[0].message))
+    assert t['a'][0] == 'ee'
+    assert len(w) == 1
 
-        # Make sure the warning points back to the user code line
-        assert w[0].lineno == frameinfo.lineno + 1
-        assert w[0].category is table.StringTruncateWarning
-        assert 'test_column' in w[0].filename
+    # Make sure the warning points back to the user code line
+    assert w[0].lineno == frameinfo.lineno + 1
+    assert 'test_column' in w[0].filename
 
-    with catch_warnings() as w:
+    with pytest.warns(table.StringTruncateWarning, match=r'truncated right side '
+                      r'string\(s\) longer than 2 character\(s\)') as w:
         t['a'][:] = ['ff', 'ggg']  # replace item with string that gets truncated
-        assert np.all(t['a'] == ['ff', 'gg'])
-        assert len(w) == 1
-        assert ('truncated right side string(s) longer than 2 character(s)'
-                in str(w[0].message))
+    assert np.all(t['a'] == ['ff', 'gg'])
+    assert len(w) == 1
 
-    with catch_warnings() as w:
-        # Test the obscure case of assigning from an array that was originally
-        # wider than any of the current elements (i.e. dtype is U4 but actual
-        # elements are U1 at the time of assignment).
-        val = np.array(['ffff', 'gggg'])
-        val[:] = ['f', 'g']
-        t['a'][:] = val
-        assert np.all(t['a'] == ['f', 'g'])
-        assert len(w) == 0
+    # Test the obscure case of assigning from an array that was originally
+    # wider than any of the current elements (i.e. dtype is U4 but actual
+    # elements are U1 at the time of assignment).
+    val = np.array(['ffff', 'gggg'])
+    val[:] = ['f', 'g']
+    t['a'][:] = val
+    assert np.all(t['a'] == ['f', 'g'])
 
 
 def test_string_truncation_warning_masked():
@@ -672,24 +665,20 @@ def test_string_truncation_warning_masked():
     for values in (['a', 'b'], [1, 2], [1.0, 2.0]):
         mc = table.MaskedColumn(values)
 
-        with catch_warnings() as w:
-            mc[1] = np.ma.masked
-            assert len(w) == 0
-            assert np.all(mc.mask == [False, True])
+        mc[1] = np.ma.masked
+        assert np.all(mc.mask == [False, True])
 
-            mc[:] = np.ma.masked
-            assert len(w) == 0
-            assert np.all(mc.mask == [True, True])
+        mc[:] = np.ma.masked
+        assert np.all(mc.mask == [True, True])
 
     mc = table.MaskedColumn(['aa', 'bb'])
 
-    with catch_warnings() as w:
+    with pytest.warns(table.StringTruncateWarning, match=r'truncated right side '
+                      r'string\(s\) longer than 2 character\(s\)') as w:
         mc[:] = [np.ma.masked, 'ggg']  # replace item with string that gets truncated
-        assert mc[1] == 'gg'
-        assert np.all(mc.mask == [True, False])
-        assert len(w) == 1
-        assert ('truncated right side string(s) longer than 2 character(s)'
-                in str(w[0].message))
+    assert mc[1] == 'gg'
+    assert np.all(mc.mask == [True, False])
+    assert len(w) == 1
 
 
 @pytest.mark.parametrize('Column', (table.Column, table.MaskedColumn))
@@ -749,7 +738,7 @@ def test_col_unicode_sandwich_bytes(Column):
     assert np.all(c == [uba, 'def'])
 
     ok = c == [uba8, b'def']
-    assert type(ok) is type(c.data)
+    assert type(ok) is type(c.data)  # noqa
     assert ok.dtype.char == '?'
     assert np.all(ok)
 
@@ -760,7 +749,7 @@ def test_col_unicode_sandwich_bytes(Column):
     cmps = (uba, uba8)
     for cmp in cmps:
         ok = c == cmp
-        assert type(ok) is type(c.data)
+        assert type(ok) is type(c.data)  # noqa
         assert np.all(ok == [True, False])
 
 
@@ -806,7 +795,7 @@ def test_masked_col_unicode_sandwich():
     assert c[:].dtype.char == 'S'
 
     ok = c == ['abc', 'def']
-    assert ok[0] == True
+    assert ok[0] == True  # noqa
     assert ok[1] is np.ma.masked
     assert np.all(c == [b'abc', b'def'])
     assert np.all(c == np.array(['abc', 'def']))
@@ -815,7 +804,7 @@ def test_masked_col_unicode_sandwich():
     for cmp in ('abc', b'abc'):
         ok = c == cmp
         assert type(ok) is np.ma.MaskedArray
-        assert ok[0] == True
+        assert ok[0] == True  # noqa
         assert ok[1] is np.ma.masked
 
 
@@ -908,3 +897,25 @@ def test_structured_masked_column_roundtrip():
     assert len(mc.dtype.fields) == 2
     mc2 = table.MaskedColumn(mc)
     assert_array_equal(mc2, mc)
+
+
+@pytest.mark.parametrize('dtype', ['i4,f4', 'f4,(2,)f8'])
+def test_structured_empty_column_init(dtype):
+    dtype = np.dtype(dtype)
+    c = table.Column(length=5, shape=(2,), dtype=dtype)
+    assert c.shape == (5, 2)
+    assert c.dtype == dtype
+
+
+def test_column_value_access():
+    """Can a column's underlying data consistently be accessed via `.value`,
+    whether it is a `Column`, `MaskedColumn`, `Quantity`, or `Time`?"""
+    data = np.array([1, 2, 3])
+    tbl = table.QTable({'a': table.Column(data),
+                        'b': table.MaskedColumn(data),
+                        'c': u.Quantity(data),
+                        'd': time.Time(data, format='mjd')})
+    assert type(tbl['a'].value) == np.ndarray
+    assert type(tbl['b'].value) == np.ma.MaskedArray
+    assert type(tbl['c'].value) == np.ndarray
+    assert type(tbl['d'].value) == np.ndarray

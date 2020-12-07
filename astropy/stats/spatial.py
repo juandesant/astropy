@@ -8,6 +8,9 @@ import numpy as np
 import math
 
 
+__all__ = ['RipleysKEstimator']
+
+
 class RipleysKEstimator:
     """
     Estimators for Ripley's K function for two-dimensional spatial data.
@@ -44,7 +47,7 @@ class RipleysKEstimator:
     References
     ----------
     .. [1] Peebles, P.J.E. *The large scale structure of the universe*.
-       <http://adsabs.harvard.edu/cgi-bin/nph-bib_query?bibcode=1980lssu.book.....P&db_key=AST>
+       <https://ui.adsabs.harvard.edu/abs/1980lssu.book.....P>
     .. [2] Spatial descriptive statistics.
        <https://en.wikipedia.org/wiki/Spatial_descriptive_statistics>
     .. [3] Package spatstat.
@@ -71,8 +74,7 @@ class RipleysKEstimator:
         if isinstance(value, (float, int)) and value > 0:
             self._area = value
         else:
-            raise ValueError('area is expected to be a positive number. '
-                             'Got {}.'.format(value))
+            raise ValueError(f'area is expected to be a positive number. Got {value}.')
 
     @property
     def y_max(self):
@@ -107,8 +109,7 @@ class RipleysKEstimator:
         if value is None or isinstance(value, (float, int)):
             self._y_min = value
         else:
-            raise ValueError('y_min is expected to be a real number. '
-                             'Got {}.'.format(value))
+            raise ValueError(f'y_min is expected to be a real number. Got {value}.')
 
     @property
     def x_min(self):
@@ -119,8 +120,7 @@ class RipleysKEstimator:
         if value is None or isinstance(value, (float, int)):
             self._x_min = value
         else:
-            raise ValueError('x_min is expected to be a real number. '
-                             'Got {}.'.format(value))
+            raise ValueError(f'x_min is expected to be a real number. Got {value}.')
 
     def __call__(self, data, radii, mode='none'):
         return self.evaluate(data=data, radii=radii, mode=mode)

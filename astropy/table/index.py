@@ -58,7 +58,7 @@ class Index:
         create an empty index for purposes of deep copying.
     engine : type, instance, or None
         Indexing engine class to use (from among SortedArray, BST,
-        FastBST, FastRBT, and SCEngine) or actual engine instance.
+        and SCEngine) or actual engine instance.
         If the supplied argument is None (by default), use SortedArray.
     unique : bool (defaults to False)
         Whether the values of the index must be unique
@@ -80,6 +80,9 @@ class Index:
         # Local imports to avoid import problems.
         from .table import Table, Column
         from astropy.time import Time
+
+        if columns is not None:
+            columns = list(columns)
 
         if engine is not None and not isinstance(engine, type):
             # create from data
@@ -182,7 +185,7 @@ class Index:
         key = [None] * len(self.columns)
         for i, col in enumerate(columns):
             try:
-                key[i] = vals[self.col_position(col.info.name)]
+                key[self.col_position(col.info.name)] = vals[i]
             except ValueError:  # not a member of index
                 continue
         num_rows = len(self.columns[0])
@@ -564,8 +567,7 @@ class SlicedIndex:
     def __repr__(self):
         if self.original:
             return repr(self.index)
-        return 'Index slice {} of\n{}'.format(
-            (self.start, self.stop, self.step), self.index)
+        return f'Index slice {self.start, self.stop, self.step} of\n{self.index}'
 
     def __str__(self):
         return repr(self)
@@ -904,7 +906,7 @@ class TableLoc:
                 for row, val in zip(rows, value):
                     self.table[row] = val
             else:
-                raise ValueError('Right side should contain {} values'.format(len(rows)))
+                raise ValueError(f'Right side should contain {len(rows)} values')
 
 
 class TableLocIndices(TableLoc):

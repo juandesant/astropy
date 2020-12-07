@@ -1,10 +1,9 @@
 # Licensed under a 3-clause BSD style license - see LICENSE.rst
 
-import warnings
-
 import pytest
 
 from io import StringIO
+from itertools import product
 
 import numpy as np
 from numpy.testing import assert_almost_equal, assert_equal, assert_allclose
@@ -13,7 +12,7 @@ from astropy.utils.data import get_pkg_data_contents, get_pkg_data_filename
 from astropy.utils.exceptions import AstropyUserWarning
 from astropy.time import Time
 from astropy import units as u
-from astropy.utils.misc import unbroadcast
+from astropy.utils import unbroadcast
 from astropy.coordinates import SkyCoord
 from astropy.units import Quantity
 from astropy.io import fits
@@ -37,7 +36,7 @@ from astropy.wcs.utils import (proj_plane_pixel_scales,
                                fit_wcs_from_points)
 
 try:
-    import scipy
+    import scipy  # noqa
 except ImportError:
     HAS_SCIPY = False
 else:
@@ -262,9 +261,9 @@ def test_wcs_to_celestial_frame():
 
     mywcs = WCS(naxis=2)
     mywcs.wcs.set()
-    with pytest.raises(ValueError) as exc:
+    with pytest.raises(ValueError, match="Could not determine celestial frame "
+                       "corresponding to the specified WCS object"):
         assert wcs_to_celestial_frame(mywcs) is None
-    assert exc.value.args[0] == "Could not determine celestial frame corresponding to the specified WCS object"
 
     mywcs = WCS(naxis=2)
     mywcs.wcs.ctype = ['XOFFSET', 'YOFFSET']
@@ -589,9 +588,11 @@ def test_noncelestial_scale(cdelt, pc, cd):
 
     # TODO: Some inputs emit RuntimeWarning from here onwards.
     #       Fix the test data. See @nden's comment in PR 9010.
-    with warnings.catch_warnings():
-        warnings.filterwarnings('ignore', 'cdelt will be ignored since cd is present', RuntimeWarning)
+    with pytest.warns(None) as warning_lines:
         mywcs.wcs.cdelt = cdelt
+    for w in warning_lines:
+        assert issubclass(w.category, RuntimeWarning)
+        assert 'cdelt will be ignored since cd is present' in str(w.message)
 
     mywcs.wcs.ctype = ['RA---TAN', 'FREQ']
 
@@ -716,20 +717,21 @@ def spatial_wcs_2d_small_angle():
 
 
 def test_local_pixel_derivatives(spatial_wcs_2d_small_angle):
-    not_diag = np.logical_not(np.diag([1,1]))
+    not_diag = np.logical_not(np.diag([1, 1]))
     # At (or close to) the reference pixel this should equal the cdelt
     derivs = local_partial_pixel_derivatives(spatial_wcs_2d_small_angle, 3, 3)
     np.testing.assert_allclose(np.diag(derivs), spatial_wcs_2d_small_angle.wcs.cdelt)
-    np.testing.assert_allclose(derivs[not_diag].flat, [0,0], atol=1e-10)
+    np.testing.assert_allclose(derivs[not_diag].flat, [0, 0], atol=1e-10)
 
     # Far away from the reference pixel this should not equal the cdelt
     derivs = local_partial_pixel_derivatives(spatial_wcs_2d_small_angle, 3e4, 3e4)
     assert not np.allclose(np.diag(derivs), spatial_wcs_2d_small_angle.wcs.cdelt)
 
     # At (or close to) the reference pixel this should equal the cdelt
-    derivs = local_partial_pixel_derivatives(spatial_wcs_2d_small_angle, 3, 3, normalize_by_world=True)
+    derivs = local_partial_pixel_derivatives(
+        spatial_wcs_2d_small_angle, 3, 3, normalize_by_world=True)
     np.testing.assert_allclose(np.diag(derivs), [1, 1])
-    np.testing.assert_allclose(derivs[not_diag].flat, [0,0], atol=1e-8)
+    np.testing.assert_allclose(derivs[not_diag].flat, [0, 0], atol=1e-8)
 
 
 def test_pixel_to_world_correlation_matrix_celestial():
@@ -846,9 +848,9 @@ def test_pixel_to_pixel_correlation_matrix_mismatch():
     wcs5.wcs.cunit = ['m/s', 'deg', 'deg', 'm/s']
     wcs5.wcs.set()
 
-    with pytest.raises(ValueError) as exc:
+    with pytest.raises(ValueError, match="World coordinate order doesn't match "
+                       "and automatic matching is ambiguous"):
         _pixel_to_pixel_correlation_matrix(wcs4, wcs5)
-    assert exc.value.args[0] == "World coordinate order doesn't match and automatic matching is ambiguous"
 
 
 def test_pixel_to_pixel_correlation_matrix_nonsquare():
@@ -934,7 +936,8 @@ def test_pixel_to_pixel():
     wcs_out.wcs.set()
 
     # First try with scalars
-    x, y, z = pixel_to_pixel(wcs_in, wcs_out, 1, 2, 3)
+    with pytest.warns(AstropyUserWarning, match='No observer defined on WCS'):
+        x, y, z = pixel_to_pixel(wcs_in, wcs_out, 1, 2, 3)
     assert x.shape == ()
     assert y.shape == ()
     assert z.shape == ()
@@ -944,7 +947,8 @@ def test_pixel_to_pixel():
     y = np.linspace(10, 20, 20)
     z = np.linspace(10, 20, 30)
     Z1, Y1, X1 = np.meshgrid(z, y, x, indexing='ij', copy=False)
-    X2, Y2, Z2 = pixel_to_pixel(wcs_in, wcs_out, X1, Y1, Z1)
+    with pytest.warns(AstropyUserWarning, match='No observer defined on WCS'):
+        X2, Y2, Z2 = pixel_to_pixel(wcs_in, wcs_out, X1, Y1, Z1)
 
     # The final arrays should have the correct shape
     assert X2.shape == (30, 20, 10)
@@ -957,7 +961,8 @@ def test_pixel_to_pixel():
     assert unbroadcast(Z2).shape == (20, 1)
 
     # We can put the values back through the function to ensure round-tripping
-    X3, Y3, Z3 = pixel_to_pixel(wcs_out, wcs_in, X2, Y2, Z2)
+    with pytest.warns(AstropyUserWarning, match='No observer defined on WCS'):
+        X3, Y3, Z3 = pixel_to_pixel(wcs_out, wcs_in, X2, Y2, Z2)
 
     # The final arrays should have the correct shape
     assert X2.shape == (30, 20, 10)
@@ -1107,11 +1112,29 @@ BP_1_1  =  -1.711876336719E-05
 A_DMAX  =    44.72893589844534
 B_DMAX  =    44.62692873032506
 """
+    # A known header that failed before
+    header_str_prob = """
+NAXIS   =                    2 / number of array dimensions
+WCSAXES =                    2 / Number of coordinate axes
+CRPIX1  =               1024.5 / Pixel coordinate of reference point
+CRPIX2  =               1024.5 / Pixel coordinate of reference point
+CD1_1   = -1.7445934400771E-05 / Coordinate transformation matrix element
+CD1_2   = -4.9826985362578E-08 / Coordinate transformation matrix element
+CD2_1   = -5.0068838822312E-08 / Coordinate transformation matrix element
+CD2_2   =  1.7530614610951E-05 / Coordinate transformation matrix element
+CTYPE1  = 'RA---TAN'           / Right ascension, gnomonic projection
+CTYPE2  = 'DEC--TAN'           / Declination, gnomonic projection
+CRVAL1  =      5.8689341666667 / [deg] Coordinate value at reference point
+CRVAL2  =     -71.995508583333 / [deg] Coordinate value at reference point
+"""
+
     header_linear = fits.Header.fromstring(header_str_linear, sep='\n')
     header_sip = fits.Header.fromstring(header_str_sip, sep='\n')
+    header_prob = fits.Header.fromstring(header_str_prob, sep='\n')
 
     true_wcs_linear = WCS(header_linear, relax=True)
     true_wcs_sip = WCS(header_sip, relax=True)
+    true_wcs_prob = WCS(header_prob, relax=True)
 
     # Getting the pixel coordinates
     x, y = np.meshgrid(list(range(10)), list(range(10)))
@@ -1121,6 +1144,7 @@ B_DMAX  =    44.62692873032506
     # Calculating the true sky positions
     world_pix_linear = true_wcs_linear.pixel_to_world(x, y)
     world_pix_sip = true_wcs_sip.pixel_to_world(x, y)
+    world_pix_prob = true_wcs_prob.pixel_to_world(x, y)
 
     # Fitting the wcs, no distortion.
     fit_wcs_linear = fit_wcs_from_points((x, y), world_pix_linear,
@@ -1129,6 +1153,10 @@ B_DMAX  =    44.62692873032506
     # Fitting the wcs, with distortion.
     fit_wcs_sip = fit_wcs_from_points((x, y), world_pix_sip,
                                       proj_point='center', sip_degree=2)
+
+    # Fitting the problematic WCS
+    fit_wcs_prob = fit_wcs_from_points((x, y), world_pix_prob,
+                                       proj_point='center', sip_degree=None)
 
     # Validate that the true sky coordinates calculated with `true_wcs_linear`
     # match sky coordinates calculated from the wcs fit with only linear terms
@@ -1149,6 +1177,116 @@ B_DMAX  =    44.62692873032506
 
     assert dists.max() < 7e-6*u.deg
     assert np.std(dists) < 2.5e-6*u.deg
+
+    # Validate that the true sky coordinates calculated from the problematic
+    # WCS match
+
+    world_pix_prob_new = fit_wcs_prob.pixel_to_world(x, y)
+    dists = world_pix_prob.separation(world_pix_prob_new)
+
+    assert dists.max() < 7e-6*u.deg
+    assert np.std(dists) < 2.5e-6*u.deg
+
+    # Test 360->0 degree crossover
+    header_linear["CRVAL1"] = 352.3497414839765
+    header_sip["CRVAL1"] = 352.3497414839765
+    header_prob["CRVAL1"] = 352.3497414839765
+
+    true_wcs_linear = WCS(header_linear, relax=True)
+    true_wcs_sip = WCS(header_sip, relax=True)
+    true_wcs_prob = WCS(header_prob)
+
+    # Calculating the true sky positions
+    world_pix_linear = true_wcs_linear.pixel_to_world(x, y)
+    world_pix_sip = true_wcs_sip.pixel_to_world(x, y)
+    world_pix_prob = true_wcs_prob.pixel_to_world(x, y)
+
+    # Fitting the wcs, no distortion.
+    fit_wcs_linear = fit_wcs_from_points((x, y), world_pix_linear,
+                                         proj_point='center', sip_degree=None)
+
+    # Fitting the wcs, with distortion.
+    fit_wcs_sip = fit_wcs_from_points((x, y), world_pix_sip,
+                                      proj_point='center', sip_degree=2)
+
+    # Fitting the problem WCS
+    fit_wcs_prob = fit_wcs_from_points((x, y), world_pix_prob,
+                                       proj_point='center', sip_degree=None)
+
+    # Validate that the true sky coordinates calculated with `true_wcs_linear`
+    # match sky coordinates calculated from the wcs fit with only linear terms
+
+    world_pix_linear_new = fit_wcs_linear.pixel_to_world(x, y)
+
+    dists = world_pix_linear.separation(world_pix_linear_new)
+
+    assert dists.max() < 7e-5*u.deg
+    assert np.std(dists) < 2.5e-5*u.deg
+
+    # Validate fit with SIP
+    world_pix_sip_new = fit_wcs_sip.pixel_to_world(x, y)
+    dists = world_pix_sip.separation(world_pix_sip_new)
+
+    assert dists.max() < 7e-6*u.deg
+    assert np.std(dists) < 2.5e-6*u.deg
+
+    # Validate the problematic WCS
+    world_pix_prob_new = fit_wcs_prob.pixel_to_world(x, y)
+    dists = world_pix_prob.separation(world_pix_prob_new)
+
+    assert dists.max() < 7e-6*u.deg
+    assert np.std(dists) < 2.5e-6*u.deg
+
+    # Test CRPIX bounds requirement
+    wcs_str = """
+WCSAXES =                    2 / Number of coordinate axes
+CRPIX1  =               1045.0 / Pixel coordinate of reference point
+CRPIX2  =               1001.0 / Pixel coordinate of reference point
+PC1_1   =  0.00056205870415378 / Coordinate transformation matrix element
+PC1_2   =    -0.00569181083243 / Coordinate transformation matrix element
+PC2_1   =   0.0056776810932466 / Coordinate transformation matrix element
+PC2_2   =   0.0004208048403273 / Coordinate transformation matrix element
+CDELT1  =                  1.0 / [deg] Coordinate increment at reference point
+CDELT2  =                  1.0 / [deg] Coordinate increment at reference point
+CUNIT1  = 'deg'                / Units of coordinate increment and value
+CUNIT2  = 'deg'                / Units of coordinate increment and value
+CTYPE1  = 'RA---TAN'           / Right ascension, gnomonic projection
+CTYPE2  = 'DEC--TAN'           / Declination, gnomonic projection
+CRVAL1  =      104.57797893504 / [deg] Coordinate value at reference point
+CRVAL2  =     -74.195502593322 / [deg] Coordinate value at reference point
+LONPOLE =                180.0 / [deg] Native longitude of celestial pole
+LATPOLE =     -74.195502593322 / [deg] Native latitude of celestial pole
+TIMESYS = 'TDB'                / Time scale
+TIMEUNIT= 'd'                  / Time units
+DATEREF = '1858-11-17'         / ISO-8601 fiducial time
+MJDREFI =                  0.0 / [d] MJD of fiducial time, integer part
+MJDREFF =                  0.0 / [d] MJD of fiducial time, fractional part
+DATE-OBS= '2019-03-27T03:30:13.832Z' / ISO-8601 time of observation
+MJD-OBS =      58569.145993426 / [d] MJD of observation
+MJD-OBS =      58569.145993426 / [d] MJD at start of observation
+TSTART  =      1569.6467941661 / [d] Time elapsed since fiducial time at start
+DATE-END= '2019-03-27T04:00:13.831Z' / ISO-8601 time at end of observation
+MJD-END =      58569.166826748 / [d] MJD at end of observation
+TSTOP   =      1569.6676274905 / [d] Time elapsed since fiducial time at end
+TELAPSE =        0.02083332443 / [d] Elapsed time (start to stop)
+TIMEDEL =    0.020833333333333 / [d] Time resolution
+TIMEPIXR=                  0.5 / Reference position of timestamp in binned data
+RADESYS = 'ICRS'               / Equatorial coordinate system
+"""
+    wcs_header = fits.Header.fromstring(wcs_str, sep='\n')
+    ffi_wcs = WCS(wcs_header)
+
+    yi, xi = (1000, 1000)
+    y, x = (10, 200)
+
+    center_coord = SkyCoord(ffi_wcs.all_pix2world([[xi+x//2, yi+y//2]], 0), unit='deg')[0]
+    ypix, xpix = [arr.flatten() for arr in np.mgrid[xi : xi + x, yi : yi + y]]
+    world_pix = SkyCoord(*ffi_wcs.all_pix2world(xpix, ypix, 0), unit='deg')
+
+    fit_wcs = fit_wcs_from_points((ypix, xpix), world_pix, proj_point='center')
+
+    assert (fit_wcs.wcs.crpix.astype(int) == [1100, 1005]).all()
+    assert fit_wcs.pixel_shape == (200, 10)
 
 
 @pytest.mark.remote_data

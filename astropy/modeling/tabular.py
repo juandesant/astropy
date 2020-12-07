@@ -22,17 +22,13 @@ import abc
 import numpy as np
 
 from astropy import units as u
-from astropy.utils import minversion
 from .core import Model
 
 try:
-    import scipy
     from scipy.interpolate import interpn
     has_scipy = True
 except ImportError:
     has_scipy = False
-
-has_scipy = has_scipy and minversion(scipy, "0.14")
 
 __all__ = ['tabular_model', 'Tabular1D', 'Tabular2D']
 
@@ -175,7 +171,7 @@ class _Tabular(Model):
     def return_units(self):
         if not isinstance(self.lookup_table, u.Quantity):
             return None
-        return {'y': self.lookup_table.unit}
+        return {self.outputs[0]: self.lookup_table.unit}
 
     @property
     def bounding_box(self):
@@ -216,7 +212,7 @@ class _Tabular(Model):
         inputs = [inp.flatten() for inp in inputs[: self.n_inputs]]
         inputs = np.array(inputs).T
         if not has_scipy:  # pragma: no cover
-            raise ImportError("This model requires scipy >= v0.14")
+            raise ImportError("Tabular model requires scipy.")
         result = interpn(self.points, self.lookup_table, inputs,
                          method=self.method, bounds_error=self.bounds_error,
                          fill_value=self.fill_value)
@@ -278,7 +274,7 @@ def tabular_model(dim, name=None):
 
     >>> tab = tabular_model(2, name='Tabular2D')
     >>> print(tab)
-    <class 'abc.Tabular2D'>
+    <class 'astropy.modeling.tabular.Tabular2D'>
     Name: Tabular2D
     N_inputs: 2
     N_outputs: 1
@@ -310,7 +306,9 @@ def tabular_model(dim, name=None):
         _Tabular._id += 1
         name = f'Tabular{model_id}'
 
-    return type(str(name), (_Tabular,), members)
+    model_class = type(str(name), (_Tabular,), members)
+    model_class.__module__ = 'astropy.modeling.tabular'
+    return model_class
 
 
 Tabular1D = tabular_model(1, name='Tabular1D')

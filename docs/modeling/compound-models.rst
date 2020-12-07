@@ -334,7 +334,7 @@ example, to create the following compound model:
     for z in (0.2, 0.4, 0.6):
         g = RedshiftScaleFactor(z) | Gaussian1D(1, 0.75, 0.1)
         plt.plot(x, g(x), color=plt.cm.OrRd(z),
-                 label='$z={0}$'.format(z))
+                 label=f'$z={z}$')
 
     plt.xlabel('Energy')
     plt.ylabel('Flux')
@@ -362,7 +362,7 @@ model *instances*:
         sc = Scale(1. / (1 + z))  # Rescale the flux to conserve energy
         g = rs | g0 | sc
         plt.plot(x, g(x), color=plt.cm.OrRd(z),
-                 label='$z={0}$'.format(z))
+                 label=f'$z={z}$')
 
     plt.xlabel('Wavelength')
     plt.ylabel('Flux')
@@ -409,7 +409,7 @@ example:
         plt.imshow(g(x, y), origin='lower')
         plt.xticks([])
         plt.yticks([])
-        plt.title('Rotated $ {0}^\circ $'.format(theta))
+        plt.title(f'Rotated $ {theta}^\circ $')
 
 .. note::
 
@@ -1387,7 +1387,7 @@ spectrographs when the slit locations may be moved (e.g., fiber fed or
 commandable slit masks), or different orders may be selected (e.g., Eschelle).
 In the case of order, one may have a function of pixel ``x``, ``y``, ``spectral_order``
 that map into ``RA``, ``Dec`` and ``lambda``. Without specifying ``spectral_order``, it is
-ambiguious what ``RA``, ``Dec`` and ``Lambda`` corresponds to a pixel location. It
+ambiguous what ``RA``, ``Dec`` and ``Lambda`` corresponds to a pixel location. It
 is usually possible to define a function of all three inputs. Presuming
 this model is ``general_transform`` then ``fix_inputs`` may be used to define
 the transform for a specific order as follows:
@@ -1402,3 +1402,26 @@ than one can be set in the dictionary supplied.
 
 If the input model has a bounding_box, the generated model will have the
 bounding for the input coordinate removed.
+
+
+.. test_replace_submodel
+
+Replace submodels
+-----------------
+
+
+:meth:`~astropy.modeling.core.CompoundModel.replace_submodel` creates a new model by
+replacing a submodel with a matching name with another submodel. The number of
+inputs and outputs of the old and new submodels should match.
+::
+
+    >>> from astropy.modeling import models
+    >>> shift = models.Shift(-1) & models.Shift(-1)
+    >>> scale = models.Scale(2) & models.Scale(3)
+    >>> scale.name = "Scale"
+    >>> model = shift | scale
+    >>> model(2, 1)  # doctest: +FLOAT_CMP
+    (2.0, 0.0)
+    >>> new_model = model.replace_submodel('Scale', models.Rotation2D(90, name='Rotation'))
+    >>> new_model(2, 1)  # doctest: +FLOAT_CMP
+    (6.12e-17, 1.0)
